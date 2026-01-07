@@ -106,9 +106,12 @@ class OrderLineOut(Schema):
 class OrderOut(Schema):
     id: int
     status: str
+    delivery_status: str
     currency: str
     country_code: str
     shipping_method: str
+    carrier_code: str = ""
+    tracking_number: str = ""
 
     items: list[OrderLineOut]
 

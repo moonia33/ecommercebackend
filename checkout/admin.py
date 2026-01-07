@@ -375,6 +375,14 @@ class OrderAdmin(admin.ModelAdmin):
             f"Sugeneruota DPD A6 lipdukų: {len(updated)}.",
             level=messages.SUCCESS,
         )
+
+        now = timezone.now()
+        for o in orders:
+            if o.delivery_status != Order.DeliveryStatus.LABEL_CREATED:
+                o.delivery_status = Order.DeliveryStatus.LABEL_CREATED
+            if o.shipping_label_generated_at is None:
+                o.shipping_label_generated_at = now
+            o.save(update_fields=["delivery_status", "shipping_label_generated_at", "updated_at"])
         return resp
 
     @admin.action(description="Generuoti Unisend 10x15 lipdukus (PDF) pasirinktiems")
@@ -397,6 +405,14 @@ class OrderAdmin(admin.ModelAdmin):
             pdf, _updated = generate_labels_pdf_for_orders(orders)
             resp = HttpResponse(pdf, content_type="application/pdf")
             resp["Content-Disposition"] = 'attachment; filename="unisend_labels_10x15.pdf"'
+
+            now = timezone.now()
+            for o in orders:
+                if o.delivery_status != Order.DeliveryStatus.LABEL_CREATED:
+                    o.delivery_status = Order.DeliveryStatus.LABEL_CREATED
+                if o.shipping_label_generated_at is None:
+                    o.shipping_label_generated_at = now
+                o.save(update_fields=["delivery_status", "shipping_label_generated_at", "updated_at"])
             return resp
         except (UnisendLabelConfigError, UnisendApiError, RuntimeError, ValueError) as e:
             self.message_user(
