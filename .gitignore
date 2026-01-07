@@ -16,3 +16,14 @@ media/
 # Editors/OS
 .vscode/
 .DS_Store
+
+# docs
+.copilot.md
+API_v2_Guidelines.postman_collection.json
+DPD_API_v2_Guidelines.postman_collection.json
+dpd_api_docs.txt
+DPD-API-documentation-v1-2-1.md
+DPD-API-documentation-v1-2-1.pdf
+stock_update_zb.txt
+unisen_lpexpress_docs.txt
+unisend_api.md
