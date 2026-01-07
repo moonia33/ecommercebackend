@@ -133,9 +133,6 @@ class OrderAdmin(admin.ModelAdmin):
         "total_net",
         "total_vat",
         "total_gross",
-        "pickup_point_id",
-        "pickup_point_name",
-        "pickup_point_raw",
     )
     fields = (
         "user",
@@ -147,6 +144,7 @@ class OrderAdmin(admin.ModelAdmin):
         "shipping_label_generated_at",
         "shipping_label_pdf",
         "pickup_locker",
+        "unisend_terminal",
         "pickup_point_id",
         "pickup_point_name",
         "pickup_point_raw",
@@ -177,6 +175,11 @@ class OrderAdmin(admin.ModelAdmin):
 
     class Form(forms.ModelForm):
         shipping_method = forms.ChoiceField(required=True)
+        unisend_terminal = forms.ModelChoiceField(
+            required=False,
+            queryset=None,
+            label="Unisend terminal",
+        )
 
         class Meta:
             model = Order
@@ -185,12 +188,28 @@ class OrderAdmin(admin.ModelAdmin):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             from shipping.models import ShippingMethod
+            from unisend.models import UnisendTerminal
 
             choices = [(m.code, f"{m.name} ({m.code})") for m in ShippingMethod.objects.filter(
                 is_active=True).order_by("sort_order", "code")]
             if not choices:
                 choices = [("lpexpress", "LPExpress (lpexpress)")]
             self.fields["shipping_method"].choices = choices
+
+            # Populate Unisend terminal selector (active only). If order has pickup_point_id,
+            # preselect that terminal for convenience.
+            self.fields["unisend_terminal"].queryset = UnisendTerminal.objects.filter(is_active=True).order_by(
+                "country_code", "locality", "name", "terminal_id"
+            )
+            current_pid = ""
+            try:
+                current_pid = str(getattr(self.instance, "pickup_point_id", "") or "").strip()
+            except Exception:
+                current_pid = ""
+            if current_pid and not self.initial.get("unisend_terminal"):
+                t = UnisendTerminal.objects.filter(terminal_id=current_pid).first()
+                if t:
+                    self.initial["unisend_terminal"] = t
 
         def clean(self):
             cleaned = super().clean()
@@ -206,6 +225,7 @@ class OrderAdmin(admin.ModelAdmin):
 
                 # Pickup point enforcement + autofill
                 locker = cleaned.get("pickup_locker")
+                unisend_terminal = cleaned.get("unisend_terminal")
                 carrier = (getattr(m, "carrier_code", "") or "").strip().lower() if m else ""
 
                 if m and m.requires_pickup_point and carrier == "dpd":
@@ -222,7 +242,14 @@ class OrderAdmin(admin.ModelAdmin):
                     cleaned["pickup_point_name"] = locker.name
                     cleaned["pickup_point_raw"] = locker.raw or {}
 
-                # If method is lpexpress, try to interpret pickup_point_id as Unisend terminal.
+                # If method is lpexpress with pickup required, allow selecting Unisend terminal.
+                if carrier == "lpexpress" and m and m.requires_pickup_point:
+                    if isinstance(unisend_terminal, UnisendTerminal):
+                        cleaned["pickup_point_id"] = unisend_terminal.terminal_id
+                        cleaned["pickup_point_name"] = unisend_terminal.name
+                        cleaned["pickup_point_raw"] = unisend_terminal.raw or {}
+
+                # If method is lpexpress, also accept manual pickup_point_id and enrich it.
                 if carrier == "lpexpress":
                     pid = str(cleaned.get("pickup_point_id") or "").strip()
                     if pid:
@@ -230,6 +257,13 @@ class OrderAdmin(admin.ModelAdmin):
                         if t:
                             cleaned["pickup_point_name"] = t.name
                             cleaned["pickup_point_raw"] = t.raw or {}
+
+                # Courier method: no pickup point.
+                if carrier == "lpexpress" and m and not m.requires_pickup_point:
+                    cleaned["unisend_terminal"] = None
+                    cleaned["pickup_point_id"] = ""
+                    cleaned["pickup_point_name"] = ""
+                    cleaned["pickup_point_raw"] = {}
             return cleaned
 
     form = Form
@@ -349,7 +383,7 @@ class OrderAdmin(admin.ModelAdmin):
         from unisend.labels import UnisendLabelConfigError, generate_labels_pdf_for_orders
 
         orders = list(
-            queryset.filter(shipping_method__in=["lpexpress"]).prefetch_related("lines")
+            queryset.filter(shipping_method__in=["lpexpress", "lpexpress_courier"]).prefetch_related("lines")
         )
         if not orders:
             self.message_user(

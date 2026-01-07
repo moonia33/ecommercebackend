@@ -104,6 +104,7 @@ class UnisendTerminalAdmin(admin.ModelAdmin):
 
         created = 0
         updated = 0
+        seen_ids: set[str] = set()
 
         if not isinstance(items_list, list):
             self.message_user(request, f"Unisend terminals sync ({country_code}): unexpected response")
@@ -115,6 +116,7 @@ class UnisendTerminalAdmin(admin.ModelAdmin):
             tid = str(it.get("terminalId") or it.get("id") or "").strip()
             if not tid:
                 continue
+            seen_ids.add(tid)
 
             obj, was_created = UnisendTerminal.objects.get_or_create(terminal_id=tid)
 
@@ -144,7 +146,15 @@ class UnisendTerminalAdmin(admin.ModelAdmin):
             else:
                 updated += 1
 
-        self.message_user(request, f"Unisend terminals sync ({country_code}): created={created}, updated={updated}")
+        # Deactivate terminals which disappeared from Unisend API (safe because we sync by full country).
+        UnisendTerminal.objects.filter(country_code=country_code).exclude(
+            terminal_id__in=seen_ids
+        ).update(is_active=False)
+
+        self.message_user(
+            request,
+            f"Unisend terminals sync ({country_code}): created={created}, updated={updated}, total_seen={len(seen_ids)}",
+        )
 
     @admin.action(description="Sync Unisend terminals: LT")
     def sync_lt(self, request, queryset):

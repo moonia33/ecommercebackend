@@ -85,21 +85,70 @@ def _receiver_terminal(order: Order, *, terminal: UnisendTerminal) -> dict[str, 
     }
 
 
+def _receiver_courier(order: Order) -> dict[str, Any]:
+    full_name = (order.shipping_full_name or "").strip() or "Customer"
+    phone = (order.shipping_phone or "").strip()
+    if not phone:
+        raise UnisendLabelConfigError("lpexpress: trūksta telefono (shipping_phone)")
+
+    country_code = (order.shipping_country_code or order.country_code or "LT").strip().upper() or "LT"
+    locality = (order.shipping_city or "").strip()
+    postal_code = (order.shipping_postal_code or "").strip()
+    street = (order.shipping_line1 or "").strip()
+
+    if not locality or not postal_code or not street:
+        raise UnisendLabelConfigError("lpexpress_courier: trūksta gavėjo adreso (city/postal_code/line1)")
+
+    return {
+        "name": full_name,
+        "companyName": (order.shipping_company or "").strip() or None,
+        "address": {
+            "countryCode": country_code,
+            "locality": locality,
+            "postalCode": postal_code,
+            "street": street,
+        },
+        "contacts": {
+            "phone": phone,
+            "email": (getattr(order.user, "email", "") or "").strip() or None,
+        },
+    }
+
+
 def ensure_unisend_parcel(order: Order, *, client: UnisendClient | None = None) -> int:
     existing = (order.carrier_shipment_id or "").strip()
     if (order.carrier_code or "").strip() == "lpexpress" and existing.isdigit():
         return int(existing)
 
-    if (order.shipping_method or "").strip() != "lpexpress":
+    shipping_method = (order.shipping_method or "").strip()
+    if shipping_method not in {"lpexpress", "lpexpress_courier"}:
         raise UnisendLabelConfigError("Šis užsakymas nėra Unisend (lpexpress).")
 
-    terminal_id = (order.pickup_point_id or "").strip()
-    if not terminal_id:
-        raise UnisendLabelConfigError("lpexpress: trūksta pickup_point_id")
+    receiver: dict[str, Any]
+    plan_code: str
+    parcel_type: str
+    parcel_size: str
 
-    terminal = UnisendTerminal.objects.filter(terminal_id=terminal_id, is_active=True).first()
-    if not terminal:
-        raise UnisendLabelConfigError("lpexpress: neteisingas pickup_point_id")
+    if shipping_method == "lpexpress_courier":
+        # Courier: from sender (home/office) to receiver address.
+        plan_code = "HANDS"
+        parcel_type = "H2H"
+        parcel_size = "S"
+        receiver = _receiver_courier(order)
+    else:
+        # Terminal: from terminal to terminal.
+        terminal_id = (order.pickup_point_id or "").strip()
+        if not terminal_id:
+            raise UnisendLabelConfigError("lpexpress: trūksta pickup_point_id")
+
+        terminal = UnisendTerminal.objects.filter(terminal_id=terminal_id, is_active=True).first()
+        if not terminal:
+            raise UnisendLabelConfigError("lpexpress: neteisingas pickup_point_id")
+
+        plan_code = "TERMINAL"
+        parcel_type = "T2T"
+        parcel_size = "XS"
+        receiver = _receiver_terminal(order, terminal=terminal)
 
     client = client or UnisendClient()
     cfg = _cfg()
@@ -107,14 +156,14 @@ def ensure_unisend_parcel(order: Order, *, client: UnisendClient | None = None) 
     weight_g = _estimate_order_weight_g(order)
 
     payload: dict[str, Any] = {
-        "plan": {"code": "TERMINAL"},
+        "plan": {"code": plan_code},
         "parcel": {
-            "type": "T2T",
-            "size": "XS",
+            "type": parcel_type,
+            "size": parcel_size,
             "weight": str(weight_g),
         },
         "services": [],
-        "receiver": _receiver_terminal(order, terminal=terminal),
+        "receiver": receiver,
         "sender": _sender(cfg),
     }
 

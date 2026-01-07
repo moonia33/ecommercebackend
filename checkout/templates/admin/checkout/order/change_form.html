@@ -13,5 +13,13 @@
         </a>
       </li>
     {% endif %}
+
+    {% if original.shipping_method == "lpexpress" or original.shipping_method == "lpexpress_courier" %}
+      <li>
+        <a href="{% url 'admin:checkout_order_generate_unisend_label' original.pk %}" class="historylink">
+          Generuoti Unisend 10x15 lipduką
+        </a>
+      </li>
+    {% endif %}
   {% endif %}
 {% endblock %}
