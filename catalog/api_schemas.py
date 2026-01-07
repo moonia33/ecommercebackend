@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from decimal import Decimal
+
+from ninja import Schema
+
+
+class MoneyOut(Schema):
+    currency: str
+    net: Decimal
+    vat_rate: Decimal
+    vat: Decimal
+    gross: Decimal
+
+
+class BrandOut(Schema):
+    id: int
+    slug: str
+    name: str
+
+
+class BrandRefOut(Schema):
+    id: int
+    slug: str
+    name: str
+
+
+class CategoryOut(Schema):
+    id: int
+    slug: str
+    name: str
+    parent_id: int | None = None
+
+    description: str = ""
+    hero_image_url: str | None = None
+    menu_icon_url: str | None = None
+
+    seo_title: str = ""
+    seo_description: str = ""
+    seo_keywords: str = ""
+
+
+class CategoryRefOut(Schema):
+    id: int
+    slug: str
+    name: str
+
+
+class ProductImageOut(Schema):
+    avif_url: str | None = None
+    webp_url: str | None = None
+    url: str
+    alt_text: str
+    sort_order: int
+
+
+class VariantOptionOut(Schema):
+    option_type_code: str
+    option_type_name: str
+    option_value_code: str
+    option_value_label: str
+
+
+class VariantOut(Schema):
+    id: int
+    sku: str
+    barcode: str
+    name: str
+    is_active: bool
+    stock_available: int
+    price: MoneyOut
+    options: list[VariantOptionOut]
+
+
+class ProductListOut(Schema):
+    id: int
+    sku: str
+    slug: str
+    name: str
+    is_active: bool
+
+    brand: BrandRefOut | None = None
+    category: CategoryRefOut | None = None
+
+    images: list[ProductImageOut]
+
+    # Representative price for lists: min active variant net + VAT breakdown
+    price: MoneyOut
+
+
+class ProductDetailOut(Schema):
+    id: int
+    sku: str
+    slug: str
+    name: str
+    description: str
+    is_active: bool
+
+    seo_title: str = ""
+    seo_description: str = ""
+    seo_keywords: str = ""
+
+    brand: BrandRefOut | None = None
+    category: CategoryRefOut | None = None
+
+    images: list[ProductImageOut]
+    variants: list[VariantOut]
+
+
+class CategoryDetailOut(CategoryOut):
+    pass

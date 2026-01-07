@@ -1,0 +1,2967 @@
+{
+	"info": {
+		"_postman_id": "12bf1c86-a48b-4d97-9809-d3caf8b690c4",
+		"name": "API v2 Guidelines",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "30730652"
+	},
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test(\"Auth is ok\", () => {\r",
+									"    pm.expect(pm.response.code).to.eql(200);\r",
+									"    const responseJson = pm.response.json();\r",
+									"    pm.environment.set(\"access_token\", responseJson.access_token);\r",
+									"});\r",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/oauth/token?scope=read%2Bwrite%2BAPI_CLIENT&grant_type=password&clientSystem=PUBLIC&username={{username}}&password={{password}}",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"oauth",
+								"token"
+							],
+							"query": [
+								{
+									"key": "scope",
+									"value": "read%2Bwrite%2BAPI_CLIENT"
+								},
+								{
+									"key": "grant_type",
+									"value": "password"
+								},
+								{
+									"key": "clientSystem",
+									"value": "PUBLIC"
+								},
+								{
+									"key": "username",
+									"value": "{{username}}"
+								},
+								{
+									"key": "password",
+									"value": "{{password}}"
+								},
+								{
+									"key": "",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Token",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/oauth/token?scope=read+write&grant_type=refresh_token&clientSystem=PUBLIC&refresh_token={{refresh_token}}",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"oauth",
+								"token"
+							],
+							"query": [
+								{
+									"key": "scope",
+									"value": "read+write"
+								},
+								{
+									"key": "grant_type",
+									"value": "refresh_token"
+								},
+								{
+									"key": "clientSystem",
+									"value": "PUBLIC"
+								},
+								{
+									"key": "refresh_token",
+									"value": "{{refresh_token}}"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "We offer a TEST environment of UNISEND (LP EXPRESS) which mimics the PRODUCTION environment, so developers who integrate the public UNISEND (LP EXPRESS) API to their application can experiment and test the product without any consequences.\n\n- [https://api-manosiuntostst.post.lt](https://api-manosiuntostst.post.lt/) (test environment)\n    \n- [https://api-manosiuntos.post.lt](https://api-manosiuntos.post.lt/) (production environment)",
+			"auth": {
+				"type": "noauth"
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Address operations",
+			"item": [
+				{
+					"name": "findLocalities",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/address/LT/reallocalities",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"address",
+								"LT",
+								"reallocalities"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "getLocality",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/address/lt/reallocalities?q=Vilnius&skip=0&take=5&OrderBy=Name2Length",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"address",
+								"lt",
+								"reallocalities"
+							],
+							"query": [
+								{
+									"key": "q",
+									"value": "Vilnius"
+								},
+								{
+									"key": "skip",
+									"value": "0"
+								},
+								{
+									"key": "take",
+									"value": "5"
+								},
+								{
+									"key": "OrderBy",
+									"value": "Name2Length"
+								}
+							]
+						},
+						"description": "The following authorization method does provide authorization with client-secret client-id logic. \nThis authentication method should not be used, it is just for example purposes. \nActual client-secret and client-id is added on server side."
+					},
+					"response": []
+				},
+				{
+					"name": "getStreets",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/address/lt/reallocalities/:localityId/streets?q=Balčikonio&take=20",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"address",
+								"lt",
+								"reallocalities",
+								":localityId",
+								"streets"
+							],
+							"query": [
+								{
+									"key": "q",
+									"value": "Balčikonio"
+								},
+								{
+									"key": "take",
+									"value": "20"
+								}
+							],
+							"variable": [
+								{
+									"key": "localityId",
+									"value": "44",
+									"description": "*required"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "findAddresses",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/address/LT/reallocalities/:localityId/streets/:streetId/addresses",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"address",
+								"LT",
+								"reallocalities",
+								":localityId",
+								"streets",
+								":streetId",
+								"addresses"
+							],
+							"variable": [
+								{
+									"key": "localityId",
+									"value": "44",
+									"description": "*required"
+								},
+								{
+									"key": "streetId",
+									"value": "1015000",
+									"description": "*required"
+								}
+							]
+						},
+						"description": "The following authorization method does provide authorization with client-secret client-id logic. \nThis authentication method should not be used, it is just for example purposes. \nActual client-secret and client-id is added on server side."
+					},
+					"response": []
+				},
+				{
+					"name": "getAddress",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/address/LT/reallocalities/:localityId/streets/:streetId/addresses?buildingNr=3&skip&take",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"address",
+								"LT",
+								"reallocalities",
+								":localityId",
+								"streets",
+								":streetId",
+								"addresses"
+							],
+							"query": [
+								{
+									"key": "buildingNr",
+									"value": "3"
+								},
+								{
+									"key": "skip",
+									"value": null,
+									"description": "Amount of addresses to skip"
+								},
+								{
+									"key": "take",
+									"value": null,
+									"description": "Default value : 20 - Amount of addresses to return"
+								}
+							],
+							"variable": [
+								{
+									"key": "localityId",
+									"value": "44",
+									"description": "*required"
+								},
+								{
+									"key": "streetId",
+									"value": "1015000",
+									"description": "*required"
+								}
+							]
+						},
+						"description": "The following authorization method does provide authorization with client-secret client-id logic. \nThis authentication method should not be used, it is just for example purposes. \nActual client-secret and client-id is added on server side."
+					},
+					"response": []
+				},
+				{
+					"name": "getPostcodes",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/address/LT/postcodes",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"address",
+								"LT",
+								"postcodes"
+							]
+						},
+						"description": "The following authorization method does provide authorization with client-secret client-id logic. \nThis authentication method should not be used, it is just for example purposes. \nActual client-secret and client-id is added on server side."
+					},
+					"response": []
+				},
+				{
+					"name": "get specified post code",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/address/LT/postcodes/:postcodeId?q=&skip&take",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"address",
+								"LT",
+								"postcodes",
+								":postcodeId"
+							],
+							"query": [
+								{
+									"key": "q",
+									"value": "",
+									"description": "Example : Juozo Balčikonio g. 3"
+								},
+								{
+									"key": "skip",
+									"value": null,
+									"description": "Amount of addresses to skip"
+								},
+								{
+									"key": "take",
+									"value": null,
+									"description": "Default value : 20 - Amount of addresses to skip"
+								}
+							],
+							"variable": [
+								{
+									"key": "postcodeId",
+									"value": "109303",
+									"description": "*required"
+								}
+							]
+						},
+						"description": "The following authorization method does provide authorization with client-secret client-id logic. \nThis authentication method should not be used, it is just for example purposes. \nActual client-secret and client-id is added on server side."
+					},
+					"response": []
+				}
+			],
+			"description": "Manipulations with addresses.",
+			"auth": {
+				"type": "bearer",
+				"bearer": [
+					{
+						"key": "token",
+						"value": "{{access_token}}",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Estimate shipping operations",
+			"item": [
+				{
+					"name": "estimate/plan?senderCountryCode=LT&receiverCountryCode=LT",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/estimate/plan?receiverCountryCode=LT&senderCountryCode=LT",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"estimate",
+								"plan"
+							],
+							"query": [
+								{
+									"key": "receiverCountryCode",
+									"value": "LT",
+									"description": "*required"
+								},
+								{
+									"key": "senderCountryCode",
+									"value": "LT"
+								},
+								{
+									"key": "includeCountries",
+									"value": "false",
+									"description": "Default value : false",
+									"disabled": true
+								},
+								{
+									"key": "includeTerminals",
+									"value": "false",
+									"description": "Default value : false",
+									"disabled": true
+								},
+								{
+									"key": "parcelTypes",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "planCodes",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "size",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "weight",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "estimate/plan?receiverCountryCode=LT&senderCountryCode=LT&includeCountries=true",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/estimate/plan?includeCountries=true&senderCountryCode=LT&receiverCountryCode=LT",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"estimate",
+								"plan"
+							],
+							"query": [
+								{
+									"key": "includeCountries",
+									"value": "true",
+									"description": "Default value : false"
+								},
+								{
+									"key": "senderCountryCode",
+									"value": "LT"
+								},
+								{
+									"key": "receiverCountryCode",
+									"value": "LT",
+									"description": "*required"
+								},
+								{
+									"key": "includeTerminals",
+									"value": "false",
+									"description": "Default value : false",
+									"disabled": true
+								},
+								{
+									"key": "parcelTypes",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "planCodes",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "size",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "weight",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "estimate planCode=UNTRACKED",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/estimate/plan?receiverCountryCode=LT&senderCountryCode=LT&parcelTypes=P2H&planCodes=UNTRACKED&weight=10&size=XS",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"estimate",
+								"plan"
+							],
+							"query": [
+								{
+									"key": "receiverCountryCode",
+									"value": "LT",
+									"description": "*required"
+								},
+								{
+									"key": "senderCountryCode",
+									"value": "LT"
+								},
+								{
+									"key": "parcelTypes",
+									"value": "P2H"
+								},
+								{
+									"key": "planCodes",
+									"value": "UNTRACKED"
+								},
+								{
+									"key": "weight",
+									"value": "10"
+								},
+								{
+									"key": "size",
+									"value": "XS"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "estimate planCode=SIGNED",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/estimate/plan?receiverCountryCode=LT&senderCountryCode=LT&parcelTypes=P2H&planCodes=SIGNED&weight=10&size=XS",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"estimate",
+								"plan"
+							],
+							"query": [
+								{
+									"key": "receiverCountryCode",
+									"value": "LT",
+									"description": "*required"
+								},
+								{
+									"key": "senderCountryCode",
+									"value": "LT"
+								},
+								{
+									"key": "parcelTypes",
+									"value": "P2H"
+								},
+								{
+									"key": "planCodes",
+									"value": "SIGNED"
+								},
+								{
+									"key": "weight",
+									"value": "10"
+								},
+								{
+									"key": "size",
+									"value": "XS"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "estimate planCode=HANDS",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/estimate/plan?receiverCountryCode=LT&senderCountryCode=LT&parcelTypes=H2H&planCodes=HANDS&weight=10",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"estimate",
+								"plan"
+							],
+							"query": [
+								{
+									"key": "receiverCountryCode",
+									"value": "LT",
+									"description": "*required"
+								},
+								{
+									"key": "senderCountryCode",
+									"value": "LT"
+								},
+								{
+									"key": "parcelTypes",
+									"value": "H2H"
+								},
+								{
+									"key": "planCodes",
+									"value": "HANDS"
+								},
+								{
+									"key": "weight",
+									"value": "10"
+								},
+								{
+									"key": "size",
+									"value": "XS",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "estimate planCode=TERMINAL",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/estimate/plan?receiverCountryCode=LT&senderCountryCode=LT&includeTerminals=true&parcelTypes=T2T&planCodes=TERMINAL&weight=10&size=XS",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"estimate",
+								"plan"
+							],
+							"query": [
+								{
+									"key": "receiverCountryCode",
+									"value": "LT",
+									"description": "*required"
+								},
+								{
+									"key": "senderCountryCode",
+									"value": "LT"
+								},
+								{
+									"key": "includeTerminals",
+									"value": "true",
+									"description": "Default value : false"
+								},
+								{
+									"key": "parcelTypes",
+									"value": "T2T"
+								},
+								{
+									"key": "planCodes",
+									"value": "TERMINAL"
+								},
+								{
+									"key": "weight",
+									"value": "10"
+								},
+								{
+									"key": "size",
+									"value": "XS"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "estimate price planCode=SIGNED",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/estimate/plan?receiverCountryCode=LT&senderCountryCode=LT&parcelType=P2H&planCode=SIGNED&senderPostalCode=&weight=10&size=XS&services=POD",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"estimate",
+								"plan"
+							],
+							"query": [
+								{
+									"key": "receiverCountryCode",
+									"value": "LT",
+									"description": "*required"
+								},
+								{
+									"key": "senderCountryCode",
+									"value": "LT",
+									"description": "*required"
+								},
+								{
+									"key": "parcelType",
+									"value": "P2H",
+									"description": "*required"
+								},
+								{
+									"key": "planCode",
+									"value": "SIGNED",
+									"description": "*required"
+								},
+								{
+									"key": "senderPostalCode",
+									"value": ""
+								},
+								{
+									"key": "weight",
+									"value": "10"
+								},
+								{
+									"key": "size",
+									"value": "XS"
+								},
+								{
+									"key": "services",
+									"value": "POD",
+									"description": "Example : COD:100 or SIGNED if service has no value argument"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "estimate price, customs duty and administration fees",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept-Language",
+								"value": "lt",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"items\": [\r\n        {\r\n            \"id\": \"123\",\r\n            \"receiverCountryCode\": \"US\",\r\n            \"receiverPostalCode\": \"14331\",\r\n            \"size\": \"S\",\r\n            \"weight\": 10,\r\n            \"partCount\": 1,\r\n            \"planCode\": \"TRACKED\",\r\n            \"parcelType\": \"P2H\",\r\n            \"documents\": {\r\n                \"cn\": {\r\n                    \"contentType\": \"GIFT\",\r\n                    \"parts\": [\r\n                        {\r\n                            \"summary\": \"Knyga\",\r\n                            \"weight\": 5,\r\n                            \"quantity\": 1,\r\n                            \"hsCode\": 123456,\r\n                            \"amount\": 999,\r\n                            \"currencyCode\": \"EUR\",\r\n                            \"countryCode\": \"LT\"\r\n                        }\r\n                    ]\r\n                }\r\n            },\r\n            \"services\": [\r\n                {\r\n                    \"code\": \"null\",\r\n                    \"value\": \"null\"\r\n                }\r\n            ]\r\n        }\r\n    ]\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/estimate/price/list",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"estimate",
+								"price",
+								"list"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "estimate duty price",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept-Language",
+								"value": "lt",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": " [\r\n    {\r\n        \"id\": \"UniqueId\",\r\n        \"country\": \"US\",\r\n        \"currencyCode\": \"USD\",\r\n        \"pieces\": [\r\n            {\r\n                \"title\": \"books\",\r\n                \"hsCode\": \"47073010\",\r\n                \"countryCode\": \"EE\",\r\n                \"quantity\": 1,\r\n                \"price\": {\r\n                \"amount\": 100,\r\n                \"currency\": \"EUR\"\r\n                },\r\n                \"contentType\": \"SELL\"\r\n            },\r\n            {\r\n                \"title\": \"candies\",\r\n                \"hsCode\": \"5870730101\",\r\n                \"countryCode\": \"EE\",\r\n                \"quantity\": 1,\r\n                \"price\": {\r\n                \"amount\": 15,\r\n                \"currency\": \"EUR\"\r\n                },\r\n                \"contentType\": \"SELL\"\r\n            }\r\n        ]\r\n    }\r\n]",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/duty/estimate/price",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"duty",
+								"estimate",
+								"price"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Controller responsible for estimating shipping operations.",
+			"auth": {
+				"type": "bearer",
+				"bearer": [
+					{
+						"key": "token",
+						"value": "{{access_token}}",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Terminal operations",
+			"item": [
+				{
+					"name": "terminals",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "fd3503b7-781a-3bd4-bbfb-88a7aafb6ebc",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/terminal?receiverCountryCode=LT",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"terminal"
+							],
+							"query": [
+								{
+									"key": "receiverCountryCode",
+									"value": "LT",
+									"description": "*required"
+								},
+								{
+									"key": "find",
+									"value": "Erfurto",
+									"disabled": true
+								},
+								{
+									"key": "size",
+									"value": "1000",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Controller responsible for estimating terminals operations.",
+			"auth": {
+				"type": "bearer",
+				"bearer": [
+					{
+						"key": "token",
+						"value": "{{access_token}}",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {},
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {},
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Shipping plan operations",
+			"item": [
+				{
+					"name": "shipping plans",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/plan",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"plan"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Controller responsible for shipping plan operations.",
+			"auth": {
+				"type": "bearer",
+				"bearer": [
+					{
+						"key": "token",
+						"value": "{{access_token}}",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {},
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {},
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Parcel operations",
+			"item": [
+				{
+					"name": "create HANDS parcel",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"plan\": {\r\n    \"code\": \"HANDS\"\r\n  },\r\n  \"parcel\": {\r\n    \"type\":\"H2H\",\r\n    \"weight\":\"10\"\r\n  },\r\n    \"services\": [\r\n    ],\r\n    \"receiver\": {\r\n        \"name\": \"test name\",\r\n        \"companyName\": \"test CompanyName\",\r\n        \"address\": {\r\n            \"countryCode\": \"LT\",\r\n            \"locality\": \"Rietavas\",\r\n            \"postalCode\": \"90317\",\r\n            \"street\": \"Stadiono g.\",\r\n            \"building\": \"4\",\r\n            \"flat\": \"5\"\r\n        },\r\n        \"contacts\": {\r\n            \"email\": \"test@test.lt\",\r\n            \"phone\": \"+37000000000\"\r\n        }\r\n    },\r\n    \"sender\": {\r\n        \"name\": \"Testinis siuntėjas\",\r\n        \"address\": {\r\n            \"countryCode\": \"LT\",\r\n            \"locality\": \"vilnius\",\r\n            \"postalCode\": \"03163\",\r\n            \"street\": \"J. Jasinskio g.\",\r\n            \"building\": \"16\"\r\n        },\r\n        \"contacts\": {\r\n            \"email\": \"test@post.lt\",\r\n            \"phone\": \"+37000000000\"\r\n        }\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/parcel",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"parcel"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "create HANDS parcel EU",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"plan\": {\r\n        \"code\": \"HANDS\"\r\n    },\r\n    \"parcel\": {\r\n        \"type\": \"H2H\",\r\n        \"weight\": \"400\",\r\n        \"content\": {\r\n            \"items\": [\r\n                {\r\n                    \"summary\": \"Book\",\r\n                    \"quantity\": 1,\r\n                    \"amount\": 50\r\n                }\r\n            ]\r\n        }\r\n    },\r\n    \"receiver\": {\r\n        \"name\": \"Receiver FI\",\r\n        \"address\": {\r\n            \"countryCode\": \"FI\",\r\n            \"locality\": \"Helsinki\",\r\n            \"postalCode\": \"530\",\r\n            \"street\": \"Kanavaranta\",\r\n            \"building\": \"7\"\r\n        },\r\n        \"contacts\": {\r\n            \"phone\": \"+440000000000\"\r\n        }\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/parcel",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"parcel"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "create TERMINAL parcel COD service",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"plan\": {\r\n    \"code\": \"TERMINAL\"\r\n  },\r\n  \"parcel\": {\r\n    \"type\":\"T2T\",\r\n    \"size\": \"XS\"\r\n  },\r\n  \"services\": [\r\n    {\r\n     \"code\": \"COD\",\r\n     \"value\": \"9.99\"\r\n    }\r\n    ],\r\n  \"receiver\": {\r\n    \"name\": \"test name\",\r\n    \"companyName\": \"test lastName\",\r\n    \"address\" : {\r\n        \"countryCode\": \"LT\",\r\n        \"terminalId\": \"0137\"\r\n    },\r\n    \"contacts\":{\r\n        \"phone\":\"+37060000000\"\r\n    }\r\n  }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/parcel",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"parcel"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "create UNTRACKED parcel",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"plan\": {\r\n    \"code\": \"UNTRACKED\"\r\n  },\r\n  \"parcel\": {\r\n    \"type\":\"P2H\",\r\n    \"size\":\"S\",\r\n    \"weight\":\"5\"\r\n  },\r\n    \"services\": [\r\n    ],\r\n    \"receiver\": {\r\n        \"name\": \"test name\",\r\n        \"companyName\": \"test CompanyName\",\r\n        \"address\": {\r\n            \"countryCode\": \"LT\",\r\n            \"locality\": \"Rietavas\",\r\n            \"postalCode\": \"90317\",\r\n            \"street\": \"Stadiono g.\",\r\n            \"building\": \"4\",\r\n            \"flat\": \"5\"\r\n        },\r\n        \"contacts\": {\r\n            \"email\": \"test@test.lt\",\r\n            \"phone\": \"+37000000000\"\r\n        }\r\n    },\r\n    \"sender\": {\r\n        \"name\": \"Testinis siuntėjas\",\r\n        \"address\": {\r\n            \"countryCode\": \"LT\",\r\n            \"locality\": \"vilnius\",\r\n            \"postalCode\": \"03163\",\r\n            \"street\": \"J. Jasinskio g.\",\r\n            \"building\": \"16\"\r\n        },\r\n        \"contacts\": {\r\n            \"email\": \"test@test.lt\",\r\n            \"phone\": \"+37000000000\"\r\n        }\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/parcel",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"parcel"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "create TRACKED parcel USA",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": " {\r\n    \"plan\": {\r\n        \"code\": \"TRACKED\"\r\n    },\r\n    \"parcel\": {\r\n        \"type\":\"P2H\",\r\n        \"size\":\"M\",\r\n        \"weight\":\"2000\"\r\n    },\r\n    \"services\": [\r\n    ],\r\n    \"receiver\": {\r\n        \"name\": \"test name\",\r\n        \"address\": {\r\n            \"countryCode\": \"US\",\r\n            \"locality\": \"Dallas, Texas\",\r\n            \"postalCode\": \"75231\",\r\n            \"street\": \"Maple Ridge Dr\",\r\n            \"building\": \"7428\",\r\n            \"flat\": \"5\"\r\n        },\r\n        \"contacts\": {\r\n            \"email\": \"test@post.lt\",\r\n            \"phone\": \"4695550172\"\r\n        }\r\n    },\r\n    \"documents\": {\r\n    \"cn\": {\r\n        \"contentType\": \"sell\",\r\n        \"parts\": [\r\n        {\r\n            \"summary\": \"Laptop Asus Vivobook\",\r\n            \"amount\": \"700.95\",\r\n            \"currencyCode\": \"EUR\",\r\n            \"weight\": 2000,\r\n            \"quantity\": 1,\r\n            \"hsCode\": 84713010,\r\n            \"countryCode\": \"CN\"\r\n        }\r\n        ]\r\n    }\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/parcel",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"parcel"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "create SIGNED parcel",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"plan\": {\r\n    \"code\": \"SIGNED\"\r\n  },\r\n  \"parcel\": {\r\n    \"type\":\"P2H\",\r\n    \"size\":\"S\",\r\n    \"weight\":\"5\"\r\n  },\r\n    \"services\": [\r\n    ],\r\n    \"receiver\": {\r\n        \"name\": \"test name\",\r\n        \"companyName\": \"test CompanyName\",\r\n        \"address\": {\r\n            \"countryCode\": \"LT\",\r\n            \"locality\": \"Rietavas\",\r\n            \"postalCode\": \"90317\",\r\n            \"street\": \"Stadiono g.\",\r\n            \"building\": \"4\",\r\n            \"flat\": \"5\"\r\n        },\r\n        \"contacts\": {\r\n            \"email\": \"test@test.lt\",\r\n            \"phone\": \"+37000000000\"\r\n        }\r\n    },\r\n    \"sender\": {\r\n        \"name\": \"Testinis siuntėjas\",\r\n        \"address\": {\r\n            \"countryCode\": \"LT\",\r\n            \"locality\": \"vilnius\",\r\n            \"postalCode\": \"03163\",\r\n            \"street\": \"J. Jasinskio g.\",\r\n            \"building\": \"16\"\r\n        },\r\n        \"contacts\": {\r\n            \"email\": \"test@test.lt\",\r\n            \"phone\": \"+37000000000\"\r\n        }\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/parcel",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"parcel"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "create HANDS_EXPRESS parcel",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"plan\": {\r\n        \"code\": \"HANDS_EXPRESS\"\r\n    },\r\n    \"parcel\": {\r\n        \"type\": \"H2F\",\r\n        \"weight\": \"400\",\r\n        \"dimensions\": {\r\n            \"length\": \"28\",\r\n            \"width\": \"29\",\r\n            \"height\": \"30\"\r\n        },\r\n        \"content\": {\r\n            \"items\": [\r\n                {\r\n                    \"summary\": \"Book\",\r\n                    \"quantity\": 1,\r\n                    \"amount\": 50\r\n                }\r\n            ]\r\n        }\r\n    },\r\n    \"receiver\": {\r\n        \"name\": \"Receiver FI\",\r\n        \"address\": {\r\n            \"countryCode\": \"FI\",\r\n            \"locality\": \"Helsinki\",\r\n            \"postalCode\": \"530\",\r\n            \"street\": \"Kanavaranta\",\r\n            \"building\": \"7\"\r\n        },\r\n        \"contacts\": {\r\n            \"phone\": \"+44 000 000 0000\"\r\n        }\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/parcel",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"parcel"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "validate parcel item",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"plan\": {\r\n    \"code\": \"TERMINAL\"\r\n  },\r\n  \"parcel\": {\r\n    \"type\":\"T2T\",\r\n    \"size\": \"XS\"\r\n  },\r\n  \"services\": [\r\n    ],\r\n  \"receiver\": {\r\n    \"name\": \"test name\",\r\n    \"companyName\": \"test lastName\",\r\n        \"address\" : {\r\n            \"countryCode\": \"LT\",\r\n            \"terminalId\": \"0137\"\r\n},\r\n    \"contacts\":{\r\n        \"phone\":\"+37000000000\"\r\n    }\r\n  }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/validate",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"validate"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "details of single parcel",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/parcel/:parcelId",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"parcel",
+								":parcelId"
+							],
+							"variable": [
+								{
+									"key": "parcelId",
+									"value": "{{parcelId}}",
+									"description": "*required - Example : 4100003"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "update and edit parcel details",
+					"request": {
+						"method": "PUT",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"plan\": {\r\n    \"code\": \"PROCESSES_DOCUMENTS\"\r\n  },\r\n  \"parcel\": {\r\n    \"type\":\"P2H\",\r\n    \"weight\":\"5\"\r\n  },\r\n    \"services\": [\r\n    ],\r\n    \"receiver\": {\r\n        \"name\": \"test name\",\r\n        \"companyName\": \"test CompanyName\",\r\n        \"address\": {\r\n            \"countryCode\": \"LT\",\r\n            \"locality\": \"Rietavas\",\r\n            \"postalCode\": \"90317\",\r\n            \"street\": \"Stadiono g.\",\r\n            \"building\": \"4\",\r\n            \"flat\": \"5\"\r\n        },\r\n        \"contacts\": {\r\n            \"email\": \"test@post.lt\",\r\n            \"phone\": \"+37000000000\"\r\n        }\r\n    },\r\n    \"sender\": {\r\n        \"name\": \"Testinis siuntėjas\",\r\n        \"address\": {\r\n            \"countryCode\": \"LT\",\r\n            \"locality\": \"vilnius\",\r\n            \"postalCode\": \"03163\",\r\n            \"street\": \"J. Jasinskio g.\",\r\n            \"building\": \"16\"\r\n        },\r\n        \"contacts\": {\r\n            \"email\": \"test@post.lt\",\r\n            \"phone\": \"+37000000000\"\r\n        }\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/parcel/:parcelId",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"parcel",
+								":parcelId"
+							],
+							"variable": [
+								{
+									"key": "parcelId",
+									"value": "{{parcelId}}",
+									"description": "*required - Example : 4100003"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "delete shipping parcel",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"plan\": {\r\n    \"code\": \"PROCESSES_DOCUMENTS\"\r\n  },\r\n  \"parcel\": {\r\n    \"type\":\"P2H\",\r\n    \"weight\":\"5\"\r\n  },\r\n    \"services\": [\r\n    ],\r\n    \"receiver\": {\r\n        \"name\": \"test name\",\r\n        \"companyName\": \"test CompanyName\",\r\n        \"address\": {\r\n            \"countryCode\": \"LT\",\r\n            \"locality\": \"Rietavas\",\r\n            \"postalCode\": \"90317\",\r\n            \"street\": \"Stadiono g.\",\r\n            \"building\": \"4\",\r\n            \"flat\": \"5\"\r\n        },\r\n        \"contacts\": {\r\n            \"email\": \"test@post.lt\",\r\n            \"phone\": \"+37000000000\"\r\n        }\r\n    },\r\n    \"sender\": {\r\n        \"name\": \"Testinis siuntėjas\",\r\n        \"address\": {\r\n            \"countryCode\": \"LT\",\r\n            \"locality\": \"vilnius\",\r\n            \"postalCode\": \"03163\",\r\n            \"street\": \"J. Jasinskio g.\",\r\n            \"building\": \"16\"\r\n        },\r\n        \"contacts\": {\r\n            \"email\": \"test@post.lt\",\r\n            \"phone\": \"+37000000000\"\r\n        }\r\n    }\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/parcel/:parcelId",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"parcel",
+								":parcelId"
+							],
+							"variable": [
+								{
+									"key": "parcelId",
+									"value": "{{parcelId}}",
+									"description": "*required - Example : 4100003"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Controller responsible for parcel operations.",
+			"auth": {
+				"type": "bearer",
+				"bearer": [
+					{
+						"key": "token",
+						"value": "{{access_token}}",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Shipping operations",
+			"item": [
+				{
+					"name": "initiate parcel",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"parcelIds\": [\r\n    {{parcelId}}\r\n  ] \r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/initiate?processAsync=false",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"initiate"
+							],
+							"query": [
+								{
+									"key": "processAsync",
+									"value": "false",
+									"description": "Default value : true"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "cancel shipping item",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"parcelIds\": [\r\n    {{parcelId}}\r\n  ] \r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/cancel",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"cancel"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "shipping status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/status/:requestId ",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"status",
+								":requestId "
+							],
+							"variable": [
+								{
+									"key": "requestId ",
+									"value": "{{requestId}}",
+									"description": "*required - IN_PROGRESS - shipping process is still in progress, SUCCESSFUL - shipping completed successfully, PARTIALLY_SUCCESSFUL - shipping failed for at least one parcel, ERROR - shipping failed."
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "shipping barcode list",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/barcode/list?parcelIds={{parcelId}}",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"barcode",
+								"list"
+							],
+							"query": [
+								{
+									"key": "parcelIds",
+									"value": "{{parcelId}}"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "shipping availability",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/shipping/available?receiverCountryCode=LT&planCode=HANDS&parcelType=H2H&size=&weight=&partCount=&services=&includeErrors=",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"shipping",
+								"available"
+							],
+							"query": [
+								{
+									"key": "receiverCountryCode",
+									"value": "LT",
+									"description": "*required"
+								},
+								{
+									"key": "planCode",
+									"value": "HANDS",
+									"description": "*required"
+								},
+								{
+									"key": "parcelType",
+									"value": "H2H",
+									"description": "*required"
+								},
+								{
+									"key": "size",
+									"value": ""
+								},
+								{
+									"key": "weight",
+									"value": ""
+								},
+								{
+									"key": "partCount",
+									"value": ""
+								},
+								{
+									"key": "services",
+									"value": "",
+									"description": "Example : COD:100 or SIGNED if service has no value argument"
+								},
+								{
+									"key": "includeErrors",
+									"value": "",
+									"description": "Default value : false"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Controller responsible for shipping operations.",
+			"auth": {
+				"type": "bearer",
+				"bearer": [
+					{
+						"key": "token",
+						"value": "{{access_token}}",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Sticker operations",
+			"item": [
+				{
+					"name": "LIST | LAYOUT_10x15 | LANDSCAPE",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								}
+							]
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/sticker/list?parcelIds={{parcelId}}&layout=LAYOUT_10x15&labelOrientation=LANDSCAPE",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"sticker",
+								"list"
+							],
+							"query": [
+								{
+									"key": "parcelIds",
+									"value": "{{parcelId}}",
+									"description": "*required"
+								},
+								{
+									"key": "layout",
+									"value": "LAYOUT_10x15",
+									"description": "LAYOUT_MAX, LAYOUT_A4, LAYOUT_10x15 *required"
+								},
+								{
+									"key": "labelOrientation",
+									"value": "LANDSCAPE",
+									"description": "PORTRAIT or LANDSCAPE"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "LIST | LAYOUT_10x15 | PORTRAIT",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								}
+							]
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/sticker/list?parcelIds={{parcelId}}&layout=LAYOUT_10x15&labelOrientation=PORTRAIT",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"sticker",
+								"list"
+							],
+							"query": [
+								{
+									"key": "parcelIds",
+									"value": "{{parcelId}}",
+									"description": "*required"
+								},
+								{
+									"key": "layout",
+									"value": "LAYOUT_10x15",
+									"description": "LAYOUT_MAX, LAYOUT_A4, LAYOUT_10x15 *required"
+								},
+								{
+									"key": "labelOrientation",
+									"value": "PORTRAIT",
+									"description": "PORTRAIT or LANDSCAPE"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "PDF | LAYOUT_10x15 | LANDSCAPE",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								}
+							]
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/sticker/pdf?parcelIds={{parcelId}}&layout=LAYOUT_10x15&labelOrientation=LANDSCAPE&includeCn23=false&includeManifest=false",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"sticker",
+								"pdf"
+							],
+							"query": [
+								{
+									"key": "parcelIds",
+									"value": "{{parcelId}}",
+									"description": "*required"
+								},
+								{
+									"key": "layout",
+									"value": "LAYOUT_10x15",
+									"description": "LAYOUT_MAX, LAYOUT_A4, LAYOUT_10x15 *required"
+								},
+								{
+									"key": "labelOrientation",
+									"value": "LANDSCAPE",
+									"description": "PORTRAIT or LANDSCAPE"
+								},
+								{
+									"key": "includeCn23",
+									"value": "false",
+									"description": "Default value : true"
+								},
+								{
+									"key": "includeManifest",
+									"value": "false",
+									"description": "Default value : false"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "PDF | LAYOUT_10x15 | PORTRAIT",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								}
+							]
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/sticker/pdf?parcelIds={{parcelId}}&layout=LAYOUT_10x15&labelOrientation=PORTRAIT&includeCn23=false&includeManifest=false",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"sticker",
+								"pdf"
+							],
+							"query": [
+								{
+									"key": "parcelIds",
+									"value": "{{parcelId}}",
+									"description": "*required"
+								},
+								{
+									"key": "layout",
+									"value": "LAYOUT_10x15",
+									"description": "LAYOUT_MAX, LAYOUT_A4, LAYOUT_10x15 *required"
+								},
+								{
+									"key": "labelOrientation",
+									"value": "PORTRAIT",
+									"description": "PORTRAIT or LANDSCAPE"
+								},
+								{
+									"key": "includeCn23",
+									"value": "false",
+									"description": "Default value : true"
+								},
+								{
+									"key": "includeManifest",
+									"value": "false",
+									"description": "Default value : false"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "PDF | LAYOUT_10x15 | PORTRAIT | includeCn23",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								}
+							]
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/sticker/pdf?parcelIds={{parcelId}}&layout=LAYOUT_10x15&labelOrientation=PORTRAIT&includeCn23=true&includeManifest=false",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"sticker",
+								"pdf"
+							],
+							"query": [
+								{
+									"key": "parcelIds",
+									"value": "{{parcelId}}",
+									"description": "*required"
+								},
+								{
+									"key": "layout",
+									"value": "LAYOUT_10x15",
+									"description": "LAYOUT_MAX, LAYOUT_A4, LAYOUT_10x15 *required"
+								},
+								{
+									"key": "labelOrientation",
+									"value": "PORTRAIT",
+									"description": "PORTRAIT or LANDSCAPE"
+								},
+								{
+									"key": "includeCn23",
+									"value": "true",
+									"description": "Default value : true"
+								},
+								{
+									"key": "includeManifest",
+									"value": "false",
+									"description": "Default value : false"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "PDF | LAYOUT_10x15 | PORTRAIT | includeManifest",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								},
+								{
+									"key": "",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								}
+							]
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/sticker/pdf?parcelIds={{parcelId}}&layout=LAYOUT_10x15&labelOrientation=PORTRAIT&includeCn23=false&includeManifest=true",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"sticker",
+								"pdf"
+							],
+							"query": [
+								{
+									"key": "parcelIds",
+									"value": "{{parcelId}}",
+									"description": "*required"
+								},
+								{
+									"key": "layout",
+									"value": "LAYOUT_10x15",
+									"description": "LAYOUT_MAX, LAYOUT_A4, LAYOUT_10x15 *required"
+								},
+								{
+									"key": "labelOrientation",
+									"value": "PORTRAIT",
+									"description": "PORTRAIT or LANDSCAPE"
+								},
+								{
+									"key": "includeCn23",
+									"value": "false",
+									"description": "Default value : true"
+								},
+								{
+									"key": "includeManifest",
+									"value": "true",
+									"description": "Default value : false"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Controller responsible for sticker related operations.",
+			"auth": {
+				"type": "bearer",
+				"bearer": [
+					{
+						"key": "token",
+						"value": "{{access_token}}",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Courier operations",
+			"item": [
+				{
+					"name": "call courier for all pending parcels",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/courier/pending/call?createdBeforeDate=2024-01-22T08:24:14.128Z&createdBefore&createdBeforeUnit",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"courier",
+								"pending",
+								"call"
+							],
+							"query": [
+								{
+									"key": "createdBeforeDate",
+									"value": "2024-01-22T08:24:14.128Z",
+									"description": "Date filter to filter data older then this date. Format yyyy-MM-ddTHH:mm:ss. Time zone GMT+2"
+								},
+								{
+									"key": "createdBefore",
+									"value": null
+								},
+								{
+									"key": "createdBeforeUnit",
+									"value": null,
+									"description": "Default value : HOUR, Available values : HOUR, MINUTE"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "call a courier for individual shipping items",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"parcelIds\": [\r\n    {{parcelId}}\r\n  ] \r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/courier/call",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"courier",
+								"call"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "pending courier list",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/courier/pending/list?createdBeforeDate=2024-01-22T08:24:14.128Z&createdBefore&createdBeforeUnit&page",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"courier",
+								"pending",
+								"list"
+							],
+							"query": [
+								{
+									"key": "createdBeforeDate",
+									"value": "2024-01-22T08:24:14.128Z",
+									"description": "Date filter to filter data older then this date. Format yyyy-MM-ddTHH:mm:ss. Time zone GMT+2"
+								},
+								{
+									"key": "createdBefore",
+									"value": null
+								},
+								{
+									"key": "createdBeforeUnit",
+									"value": null,
+									"description": "Default value : HOUR, Available values : HOUR, MINUTE"
+								},
+								{
+									"key": "page",
+									"value": null,
+									"description": "Default value : 0"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "manifests PDF",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"parcelIds\": [\r\n    {{parcelId}}\r\n  ] \r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/courier/manifest/pdf",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"courier",
+								"manifest",
+								"pdf"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "manifests list",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"parcelIds\": [\r\n    {{parcelId}}\r\n  ] \r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/courier/manifest/list",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"courier",
+								"manifest",
+								"list"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "call courier required",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n  \"parcelIds\": [\r\n    {{parcelId}}\r\n  ] \r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/courier/call/required",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"courier",
+								"call",
+								"required"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Controller responsible for courier operations."
+		},
+		{
+			"name": "POD report operations",
+			"item": [
+				{
+					"name": "POD PDF",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/pod/report?parcelId={{parcelId}}",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"pod",
+								"report"
+							],
+							"query": [
+								{
+									"key": "parcelId",
+									"value": "{{parcelId}}"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "POD PDF by date date range",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/pod/reports?dateFrom=2024-01-01&dateTo=2024-01-30",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"pod",
+								"reports"
+							],
+							"query": [
+								{
+									"key": "dateFrom",
+									"value": "2024-01-01",
+									"description": "*required"
+								},
+								{
+									"key": "dateTo",
+									"value": "2024-01-30",
+									"description": "*required"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Controller responsible for pod report operations.",
+			"auth": {
+				"type": "bearer",
+				"bearer": [
+					{
+						"key": "token",
+						"value": "{{access_token}}",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Documents operations",
+			"item": [
+				{
+					"name": "CN PDF",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/documents/cn/pdf?parcelIds={{parcelId}}",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"documents",
+								"cn",
+								"pdf"
+							],
+							"query": [
+								{
+									"key": "parcelIds",
+									"value": "{{parcelId}}"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "Controller responsible for documents related operations.",
+			"auth": {
+				"type": "bearer",
+				"bearer": [
+					{
+						"key": "token",
+						"value": "{{access_token}}",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "Tracking operations",
+			"item": [
+				{
+					"name": "events for the specified mail",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept-Language",
+								"value": "lt",
+								"description": "Example : lt, en-gb;q=0.8, en;q=0.7",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/tracking/:barcode/events",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"tracking",
+								":barcode",
+								"events"
+							],
+							"variable": [
+								{
+									"key": "barcode",
+									"value": "{{barcode}}",
+									"description": "*required"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "gathers events for the specified mail",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept-Language",
+								"value": "lt",
+								"description": "Example : lt, en-gb;q=0.8, en;q=0.7",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "https://api-manosiuntostst.post.lt/api/v2/tracking/events?dateFrom=2023-08-04T01:52:06",
+							"protocol": "https",
+							"host": [
+								"api-manosiuntostst",
+								"post",
+								"lt"
+							],
+							"path": [
+								"api",
+								"v2",
+								"tracking",
+								"events"
+							],
+							"query": [
+								{
+									"key": "dateFrom",
+									"value": "2023-08-04T01:52:06",
+									"description": "Example : 2023-08-04T01:52:06"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "**Public event types table**\n\n| PublicEventType | PublicStateType | PublicStateText |\n| --- | --- | --- |\n| LABEL_CREATED | LABEL_CREATED | Siunta sukurta |\n| CUSTOMS_AWAITING_PAYMENT | ON_THE_WAY | Siunta kelyje |\n| CUSTOMS_DECLARATION_REQUIRED | ON_THE_WAY | Siunta kelyje |\n| CUSTOMS_DECLARATION_REVIEW_PENDING | ON_THE_WAY | Siunta kelyje |\n| CUSTOMS_DECLARATION_SUBMITTED | ON_THE_WAY | Siunta kelyje |\n| CUSTOMS_EDB | ON_THE_WAY | Siunta kelyje |\n| CUSTOMS_EDC | ON_THE_WAY | Siunta kelyje |\n| CUSTOMS_EME | ON_THE_WAY | Siunta kelyje |\n| CUSTOMS_EXA | ON_THE_WAY | Siunta kelyje |\n| CUSTOMS_EXB | ON_THE_WAY | Siunta kelyje |\n| CUSTOMS_EXC | ON_THE_WAY | Siunta kelyje |\n| CUSTOMS_ON_HOLD | ON_THE_WAY | Siunta kelyje |\n| CUSTOMS_PREPAID | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_EDA | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_EDD | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_EDE | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_EDF | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_EDH | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_EXD | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_EXPORTED | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_EXX | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_HOLDING | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_PARCEL_LOST | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_REDIRECTING | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_STORING | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_TRANSFER | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_TRANSFER2 | ON_THE_WAY | Siunta kelyje |\n| DELIVERY_UNSUCCESSFUL_DELIVERY | ON_THE_WAY | Siunta kelyje |\n| DEPARTED_RECEIVER_LC | ON_THE_WAY | Siunta kelyje |\n| EXPORT_PENDING | ON_THE_WAY | Siunta kelyje |\n| HANDED_TO_GOVERNMENT | ON_THE_WAY | Siunta kelyje |\n| NOTIFICATIONS_PDA_UNABLE_TO_CONTACT | ON_THE_WAY | Siunta kelyje |\n| ORDERS_PARCEL_DEMAND | ON_THE_WAY | Siunta kelyje |\n| RECEIVED_DELIVERY_POST | ON_THE_WAY | Siunta kelyje |\n| RECEIVED_RECEIVER_LC | ON_THE_WAY | Siunta kelyje |\n| RECEIVED_SENDER_LC | ON_THE_WAY | Siunta kelyje |\n| RECEIVED_LC | ON_THE_WAY | Siunta kelyje |\n| RECEIVED_TERMINAL | ON_THE_WAY | Siunta kelyje |\n| RECEIVED_TERMINAL_OUT | ON_THE_WAY | Siunta kelyje |\n| TRANSFERRED_FOR_DELIVERY_COURIER | ON_THE_WAY | Siunta kelyje |\n| TRANSFERRED_FOR_DELIVERY_POSTMAN | ON_THE_WAY | Siunta kelyje |\n| TRANSIT_EMJ | ON_THE_WAY | Siunta kelyje |\n| TRANSIT_EMK | ON_THE_WAY | Siunta kelyje |\n| NOTIFICATIONS_INFORMED | ON_THE_WAY | Siunta kelyje |\n| LABEL_CANCELLED | PARCEL_CANCELED | Siunta atšaukta |\n| DELIVERY_DELIVERED | PARCEL_DELIVERED | Siunta pristatyta |\n| ACCEPTED | PARCEL_RECEIVED | Siunta priimta |\n| ACCEPTED_TERMINAL | PARCEL_RECEIVED | Siunta priimta |\n| DELIVERY_RETURNED | RETURNING | Siunta grąžinama |\n| DELIVERY_DESTROY | RETURNING | Siunta grąžinama |\n| DELIVERY_REFUNDING | RETURNING | Siunta grąžinama |",
+			"auth": {
+				"type": "bearer",
+				"bearer": [
+					{
+						"key": "token",
+						"value": "{{access_token}}",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"exec": [
+							""
+						]
+					}
+				}
+			]
+		}
+	]
+}

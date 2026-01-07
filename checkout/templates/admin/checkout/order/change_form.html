@@ -1,0 +1,17 @@
+{% extends "admin/change_form.html" %}
+
+{# NOTE: This template contains Django tags; avoid auto-formatters that may break tag syntax. #}
+
+{% block object-tools-items %}
+  {{ block.super }}
+
+  {% if original and original.pk %}
+    {% if original.shipping_method == "dpd_locker" or original.shipping_method == "dpd_courier" %}
+      <li>
+        <a href="{% url 'admin:checkout_order_generate_dpd_label' original.pk %}" class="historylink">
+          Generuoti DPD A6 lipduką
+        </a>
+      </li>
+    {% endif %}
+  {% endif %}
+{% endblock %}
