@@ -4,10 +4,7 @@ __pycache__/
 *.pyo
 *.pyd
 *.sqlite3
-*.md
 *.pdf
-*.txt
-*.json
 
 # Django
 *.log
@@ -31,3 +28,4 @@ DPD-API-documentation-v1-2-1.pdf
 stock_update_zb.txt
 unisen_lpexpress_docs.txt
 unisend_api.md
+importas_zb.txt
