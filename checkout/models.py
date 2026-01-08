@@ -243,10 +243,19 @@ class Order(models.Model):
         self.shipping_vat = shipping_money.vat
         self.shipping_gross = shipping_money.gross
 
+        # Fees (always +)
+        fees_net = Decimal("0.00")
+        fees_vat = Decimal("0.00")
+        fees_gross = Decimal("0.00")
+        for f in self.fees.all():
+            fees_net += Decimal(f.net)
+            fees_vat += Decimal(f.vat)
+            fees_gross += Decimal(f.gross)
+
         # Totals
-        self.total_net = self.items_net + self.shipping_net
-        self.total_vat = self.items_vat + self.shipping_vat
-        self.total_gross = self.items_gross + self.shipping_gross
+        self.total_net = self.items_net + self.shipping_net + fees_net
+        self.total_vat = self.items_vat + self.shipping_vat + fees_vat
+        self.total_gross = self.items_gross + self.shipping_gross + fees_gross
 
 
 class OrderLine(models.Model):
@@ -350,6 +359,75 @@ class PaymentIntent(models.Model):
 
     def __str__(self) -> str:
         return f"payment:{self.provider}:{self.status} order:{self.order_id}"
+
+
+class FeeRule(models.Model):
+    code = models.SlugField(max_length=50, unique=True)
+    name = models.CharField(max_length=200)
+    is_active = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+
+    country_code = models.CharField(max_length=2, blank=True, default="")
+
+    min_items_gross = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+    max_items_gross = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
+
+    payment_method_code = models.CharField(max_length=50, blank=True, default="")
+
+    amount_net = models.DecimalField(max_digits=12, decimal_places=2)
+    tax_class = models.ForeignKey(
+        "catalog.TaxClass",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="fee_rules",
+    )
+
+    class Meta:
+        ordering = ["sort_order", "code"]
+        indexes = [
+            models.Index(fields=["is_active", "country_code", "sort_order"]),
+            models.Index(fields=["payment_method_code"]),
+        ]
+
+    def __str__(self) -> str:
+        return self.code
+
+
+class OrderFee(models.Model):
+    order = models.ForeignKey(
+        Order, on_delete=models.CASCADE, related_name="fees"
+    )
+    rule = models.ForeignKey(
+        FeeRule,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="applied_fees",
+    )
+
+    code = models.SlugField(max_length=50)
+    name = models.CharField(max_length=200)
+
+    net = models.DecimalField(max_digits=12, decimal_places=2)
+    vat_rate = models.DecimalField(max_digits=6, decimal_places=5, default=Decimal("0"))
+    vat = models.DecimalField(max_digits=12, decimal_places=2)
+    gross = models.DecimalField(max_digits=12, decimal_places=2)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["order", "code"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"order:{self.order_id} fee:{self.code}"
 
 
 class OrderConsent(models.Model):

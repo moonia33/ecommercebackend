@@ -13,7 +13,7 @@ from accounts.models import UserAddress
 from catalog.models import Variant
 from pricing.services import get_vat_rate
 
-from .models import Cart, CartItem, Order, OrderConsent, OrderLine, PaymentIntent
+from .models import Cart, CartItem, Order, OrderConsent, OrderFee, OrderLine, PaymentIntent
 from .schemas import (
     CartItemAddIn,
     CartItemOut,
@@ -28,9 +28,10 @@ from .schemas import (
     OrderOut,
     OrderLineOut,
     PaymentMethodOut,
+    FeeOut,
     ShippingMethodOut,
 )
-from .services import get_shipping_net, money_from_net, get_shipping_tax_class
+from .services import calculate_fees, get_shipping_net, money_from_net, get_shipping_tax_class
 
 
 router = Router(tags=["checkout"])
@@ -495,6 +496,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         raise HttpError(404, "Shipping address not found")
 
     shipping_method = (payload.shipping_method or "").strip() or "lpexpress"
+    payment_method = (getattr(payload, "payment_method", "") or "").strip() or "klix"
 
     country_code = _country_code_from_address(addr)
 
@@ -540,9 +542,37 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
     shipping_money = money_from_net(
         currency="EUR", unit_net=shipping_net, vat_rate=shipping_vat_rate, qty=1)
 
-    order_net = items_total.net + shipping_money.net
-    order_vat = items_total.vat + shipping_money.vat
-    order_gross = items_total.gross + shipping_money.gross
+    fee_pairs = calculate_fees(
+        currency="EUR",
+        country_code=country_code,
+        items_gross=items_total.gross,
+        payment_method=payment_method,
+    )
+    fees_out: list[FeeOut] = []
+    fees_net = Decimal("0.00")
+    fees_vat = Decimal("0.00")
+    fees_gross = Decimal("0.00")
+    for rule, m in fee_pairs:
+        fees_net += m.net
+        fees_vat += m.vat
+        fees_gross += m.gross
+        fees_out.append(
+            FeeOut(
+                code=rule.code,
+                name=rule.name,
+                amount=MoneyOut(
+                    currency=m.currency,
+                    net=m.net,
+                    vat_rate=m.vat_rate,
+                    vat=m.vat,
+                    gross=m.gross,
+                ),
+            )
+        )
+
+    order_net = items_total.net + shipping_money.net + fees_net
+    order_vat = items_total.vat + shipping_money.vat + fees_vat
+    order_gross = items_total.gross + shipping_money.gross + fees_gross
 
     shipping_total = MoneyOut(
         currency="EUR",
@@ -551,6 +581,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         vat=shipping_money.vat,
         gross=shipping_money.gross,
     )
+    fees_total = MoneyOut(currency="EUR", net=fees_net, vat_rate=Decimal("0"), vat=fees_vat, gross=fees_gross)
     order_total = MoneyOut(currency="EUR", net=order_net, vat_rate=Decimal(
         "0"), vat=order_vat, gross=order_gross)
 
@@ -560,6 +591,8 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         items=out_items,
         items_total=items_total,
         shipping_total=shipping_total,
+        fees_total=fees_total,
+        fees=fees_out,
         order_total=order_total,
     )
 
@@ -637,6 +670,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             shipping_address_id=payload.shipping_address_id,
             shipping_method=shipping_method,
             pickup_point_id=pickup_point_id,
+            payment_method=payment_method,
         ),
     )
 
@@ -751,6 +785,23 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             ]
         )
 
+        if preview.fees:
+            fee_rows: list[OrderFee] = []
+            for f in preview.fees:
+                amt = f.amount
+                fee_rows.append(
+                    OrderFee(
+                        order=order,
+                        code=f.code,
+                        name=f.name,
+                        net=amt.net,
+                        vat_rate=amt.vat_rate,
+                        vat=amt.vat,
+                        gross=amt.gross,
+                    )
+                )
+            OrderFee.objects.bulk_create(fee_rows)
+
         provider = (
             PaymentIntent.Provider.BANK_TRANSFER
             if payment_method == "bank_transfer"
@@ -790,7 +841,7 @@ def list_orders(request, limit: int = 20):
     orders = (
         Order.objects.filter(user=user)
         .select_related("payment_intent")
-        .prefetch_related("lines")
+        .prefetch_related("lines", "fees")
         .order_by("-created_at")[:limit]
     )
 
@@ -802,6 +853,28 @@ def list_orders(request, limit: int = 20):
             if (pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER)
             else ""
         )
+
+        fees_out: list[FeeOut] = []
+        fees_net = Decimal("0.00")
+        fees_vat = Decimal("0.00")
+        fees_gross = Decimal("0.00")
+        for f in o.fees.all():
+            fees_net += Decimal(f.net)
+            fees_vat += Decimal(f.vat)
+            fees_gross += Decimal(f.gross)
+            fees_out.append(
+                FeeOut(
+                    code=f.code,
+                    name=f.name,
+                    amount=MoneyOut(
+                        currency=o.currency,
+                        net=f.net,
+                        vat_rate=f.vat_rate,
+                        vat=f.vat,
+                        gross=f.gross,
+                    ),
+                )
+            )
 
         lines_out: list[OrderLineOut] = []
         for ln in o.lines.all():
@@ -816,6 +889,8 @@ def list_orders(request, limit: int = 20):
             "0"), vat=o.items_vat, gross=o.items_gross)
         shipping_total = MoneyOut(currency=o.currency, net=o.shipping_net, vat_rate=Decimal(
             "0"), vat=o.shipping_vat, gross=o.shipping_gross)
+        fees_total = MoneyOut(currency=o.currency, net=fees_net, vat_rate=Decimal(
+            "0"), vat=fees_vat, gross=fees_gross)
         order_total = MoneyOut(currency=o.currency, net=o.total_net, vat_rate=Decimal(
             "0"), vat=o.total_vat, gross=o.total_gross)
 
@@ -836,6 +911,8 @@ def list_orders(request, limit: int = 20):
                 items=lines_out,
                 items_total=items_total,
                 shipping_total=shipping_total,
+                fees_total=fees_total,
+                fees=fees_out,
                 order_total=order_total,
                 created_at=o.created_at.isoformat(),
             )
@@ -851,7 +928,7 @@ def get_order(request, order_id: int):
     o = (
         Order.objects.filter(user=user, id=order_id)
         .select_related("payment_intent")
-        .prefetch_related("lines")
+        .prefetch_related("lines", "fees")
         .first()
     )
     if not o:
@@ -870,6 +947,31 @@ def get_order(request, order_id: int):
         "0"), vat=o.items_vat, gross=o.items_gross)
     shipping_total = MoneyOut(currency=o.currency, net=o.shipping_net, vat_rate=Decimal(
         "0"), vat=o.shipping_vat, gross=o.shipping_gross)
+
+    fees_out: list[FeeOut] = []
+    fees_net = Decimal("0.00")
+    fees_vat = Decimal("0.00")
+    fees_gross = Decimal("0.00")
+    for f in o.fees.all():
+        fees_net += Decimal(f.net)
+        fees_vat += Decimal(f.vat)
+        fees_gross += Decimal(f.gross)
+        fees_out.append(
+            FeeOut(
+                code=f.code,
+                name=f.name,
+                amount=MoneyOut(
+                    currency=o.currency,
+                    net=f.net,
+                    vat_rate=f.vat_rate,
+                    vat=f.vat,
+                    gross=f.gross,
+                ),
+            )
+        )
+
+    fees_total = MoneyOut(currency=o.currency, net=fees_net, vat_rate=Decimal(
+        "0"), vat=fees_vat, gross=fees_gross)
     order_total = MoneyOut(currency=o.currency, net=o.total_net, vat_rate=Decimal(
         "0"), vat=o.total_vat, gross=o.total_gross)
 
@@ -896,6 +998,8 @@ def get_order(request, order_id: int):
         items=lines_out,
         items_total=items_total,
         shipping_total=shipping_total,
+        fees_total=fees_total,
+        fees=fees_out,
         order_total=order_total,
         created_at=o.created_at.isoformat(),
     )

@@ -336,6 +336,14 @@ Paštomatams (kai `requires_pickup_point=true`), frontas turi pridėti ir `picku
 
 - `POST /api/v1/checkout/checkout/preview` body: `{ "shipping_address_id": 1, "shipping_method": "dpd_locker", "pickup_point_id": "LT90001" }`
 
+Mokesčiai (fees):
+
+- `checkout/preview` skaičiuoja papildomus mokesčius pagal taisykles (`checkout.FeeRule`) ir grąžina:
+  - `fees_total`
+  - `fees[]`
+- `checkout/confirm` užfiksuoja pritaikytus mokesčius DB (`checkout.OrderFee`) ir įtraukia juos į order totals.
+- `fees` visada yra **+** (nuolaidos bus atskira sistema).
+
 ### Order-level consent (pirkimo momentui)
 
 Pirkimo metu fiksuojamas **order-level sutikimas** (auditas): su kokia dokumentų versija useris patvirtino.
@@ -407,6 +415,11 @@ Mokėjimai frontui (per `orders` endpointus):
 - `payment_status` (pvz. `pending`, `succeeded`)
 - `payment_redirect_url` (kol kas dažniausiai tuščias; bus naudojamas integracijoms)
 - `payment_instructions` (pildoma tik kai `payment_provider=bank_transfer`)
+
+Mokesčiai (fees) frontui (per `orders` endpointus):
+
+- `fees_total`
+- `fees[]`
 
 Pavyzdys: `GET /api/v1/checkout/orders/{order_id}` (sutrumpintas):
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from django.conf import settings
+from django.db import models
 
 from catalog.models import TaxClass
 from pricing.services import compute_vat, get_vat_rate
@@ -71,3 +72,66 @@ def get_shipping_tax_class() -> TaxClass | None:
 
 def get_vat_rate_for(*, country_code: str, tax_class: TaxClass) -> Decimal:
     return get_vat_rate(country_code=country_code, tax_class=tax_class)
+
+
+def calculate_fee_money(
+    *,
+    currency: str,
+    country_code: str,
+    amount_net: Decimal,
+    tax_class: TaxClass | None,
+) -> Money:
+    if not tax_class or not amount_net:
+        return Money(
+            currency=currency,
+            net=Decimal(amount_net or 0),
+            vat_rate=Decimal("0"),
+            vat=Decimal("0"),
+            gross=Decimal(amount_net or 0),
+        )
+    vat_rate = get_vat_rate(country_code=country_code, tax_class=tax_class)
+    return money_from_net(currency=currency, unit_net=amount_net, vat_rate=vat_rate, qty=1)
+
+
+def select_fee_rules(*, country_code: str, payment_method: str) -> list["FeeRule"]:
+    from checkout.models import FeeRule
+
+    country_code = (country_code or "").strip().upper()
+    payment_method = (payment_method or "").strip()
+
+    qs = FeeRule.objects.filter(is_active=True).order_by("sort_order", "code")
+    if country_code:
+        qs = qs.filter(models.Q(country_code="") | models.Q(country_code=country_code))
+    if payment_method:
+        qs = qs.filter(
+            models.Q(payment_method_code="") | models.Q(payment_method_code=payment_method)
+        )
+    return list(qs)
+
+
+def calculate_fees(
+    *,
+    currency: str,
+    country_code: str,
+    items_gross: Decimal,
+    payment_method: str,
+) -> list[tuple["FeeRule", Money]]:
+    rules = select_fee_rules(country_code=country_code, payment_method=payment_method)
+    out: list[tuple["FeeRule", Money]] = []
+    items_gross_d = Decimal(items_gross or 0)
+
+    for r in rules:
+        if r.min_items_gross is not None and items_gross_d < Decimal(r.min_items_gross):
+            continue
+        if r.max_items_gross is not None and items_gross_d > Decimal(r.max_items_gross):
+            continue
+
+        m = calculate_fee_money(
+            currency=currency,
+            country_code=country_code,
+            amount_net=Decimal(r.amount_net),
+            tax_class=r.tax_class,
+        )
+        out.append((r, m))
+
+    return out

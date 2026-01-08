@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.urls import path, reverse
 from django.utils import timezone
 
-from .models import Cart, CartItem, Order, OrderConsent, OrderLine, PaymentIntent
+from .models import Cart, CartItem, FeeRule, Order, OrderConsent, OrderFee, OrderLine, PaymentIntent
 
 
 class CartItemInline(admin.TabularInline):
@@ -98,6 +98,15 @@ class OrderConsentInline(admin.TabularInline):
     def has_add_permission(self, request, obj=None):
         return False
 
+
+class OrderFeeInline(admin.TabularInline):
+    model = OrderFee
+    extra = 0
+    readonly_fields = ("code", "name", "net", "vat_rate", "vat", "gross", "created_at")
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
     def has_delete_permission(self, request, obj=None):
         return False
 
@@ -171,7 +180,7 @@ class OrderAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
-    inlines = (OrderConsentInline, OrderLineInline,)
+    inlines = (OrderConsentInline, OrderFeeInline, OrderLineInline,)
 
     class Form(forms.ModelForm):
         shipping_method = forms.ChoiceField(required=True)
@@ -321,7 +330,7 @@ class OrderAdmin(admin.ModelAdmin):
 
     @admin.action(description="Perskaičiuoti sumas (items/shipping/total)")
     def recalculate_selected(self, request, queryset):
-        for o in queryset.prefetch_related("lines"):
+        for o in queryset.prefetch_related("lines", "fees"):
             o.recalculate_totals()
             o.save(
                 update_fields=[
@@ -463,6 +472,26 @@ class OrderAdmin(admin.ModelAdmin):
             obj.pickup_locker = None
 
         super().save_model(request, obj, form, change)
+
+
+@admin.register(FeeRule)
+class FeeRuleAdmin(admin.ModelAdmin):
+    list_display = (
+        "code",
+        "name",
+        "is_active",
+        "country_code",
+        "payment_method_code",
+        "min_items_gross",
+        "max_items_gross",
+        "amount_net",
+        "tax_class",
+        "sort_order",
+    )
+    list_filter = ("is_active", "country_code", "payment_method_code")
+    search_fields = ("code", "name")
+    ordering = ("sort_order", "code")
+    autocomplete_fields = ("tax_class",)
 
 
 @admin.register(OrderConsent)

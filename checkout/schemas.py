@@ -52,6 +52,7 @@ class CheckoutPreviewIn(Schema):
     shipping_address_id: int
     shipping_method: str = "lpexpress"
     pickup_point_id: str | None = None
+    payment_method: str = "klix"
 
 
 class CheckoutPreviewOut(Schema):
@@ -63,7 +64,15 @@ class CheckoutPreviewOut(Schema):
 
     items_total: MoneyOut
     shipping_total: MoneyOut
+    fees_total: MoneyOut
+    fees: list["FeeOut"]
     order_total: MoneyOut
+
+
+class FeeOut(Schema):
+    code: str
+    name: str
+    amount: MoneyOut
 
 
 class OrderConsentIn(Schema):
@@ -131,6 +140,8 @@ class OrderOut(Schema):
 
     items_total: MoneyOut
     shipping_total: MoneyOut
+    fees_total: MoneyOut
+    fees: list[FeeOut]
     order_total: MoneyOut
 
     created_at: str
