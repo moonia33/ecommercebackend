@@ -345,7 +345,7 @@ class PaymentIntent(models.Model):
     amount_gross = models.DecimalField(max_digits=12, decimal_places=2)
 
     external_id = models.CharField(max_length=120, blank=True, default="")
-    redirect_url = models.URLField(blank=True, default="")
+    redirect_url = models.URLField(max_length=2048, blank=True, default="")
 
     neopay_bank_bic = models.CharField(max_length=32, blank=True, default="")
     neopay_bank_name = models.CharField(max_length=200, blank=True, default="")
