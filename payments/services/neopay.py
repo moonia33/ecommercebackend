@@ -71,7 +71,18 @@ def build_neopay_payment_link(
     payload["exp"] = int((now + timedelta(minutes=30)).timestamp())
 
     token = jwt.encode(payload, cfg.project_key, algorithm="HS256")
-    return f"{cfg.widget_host}{token}", payload
+
+    widget_host = (cfg.widget_host or "").strip()
+    if not widget_host:
+        widget_host = "https://psd2.neopay.lt/widget.html?"
+    if widget_host.endswith("?") or widget_host.endswith("&"):
+        base = widget_host
+    elif "?" in widget_host:
+        base = f"{widget_host}&"
+    else:
+        base = f"{widget_host}?"
+
+    return f"{base}{token}", payload
 
 
 def decode_neopay_token(token: str) -> dict:
