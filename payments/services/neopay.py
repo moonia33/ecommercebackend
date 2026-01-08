@@ -15,6 +15,8 @@ class NeopayConfigData:
     client_redirect_url: str
     enable_bank_preselect: bool
     banks_api_base_url: str
+    force_bank_bic: str
+    force_bank_name: str
 
 
 def get_neopay_config() -> NeopayConfigData | None:
@@ -33,6 +35,8 @@ def get_neopay_config() -> NeopayConfigData | None:
             client_redirect_url=(cfg.client_redirect_url or "").strip(),
             enable_bank_preselect=bool(getattr(cfg, "enable_bank_preselect", False)),
             banks_api_base_url=(getattr(cfg, "banks_api_base_url", "") or "https://psd2.neopay.lt/api").strip(),
+            force_bank_bic=(getattr(cfg, "force_bank_bic", "") or "").strip(),
+            force_bank_name=(getattr(cfg, "force_bank_name", "") or "").strip(),
         )
     except Exception:
         return None
@@ -59,9 +63,13 @@ def build_neopay_payment_link(
         "serviceType": "pisp",
     }
 
-    bank_bic = (bank_bic or "").strip()
-    if bank_bic and cfg.enable_bank_preselect:
-        payload["bank"] = bank_bic
+    forced_bic = (cfg.force_bank_bic or "").strip()
+    if forced_bic:
+        payload["bank"] = forced_bic
+    else:
+        bank_bic = (bank_bic or "").strip()
+        if bank_bic and cfg.enable_bank_preselect:
+            payload["bank"] = bank_bic
 
     if cfg.client_redirect_url:
         payload["clientRedirectUrl"] = cfg.client_redirect_url

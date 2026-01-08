@@ -80,6 +80,19 @@ def neopay_banks(request, country_code: str = "LT"):
     if not cfg.enable_bank_preselect:
         return []
 
+    forced_bic = (getattr(cfg, "force_bank_bic", "") or "").strip()
+    forced_name = (getattr(cfg, "force_bank_name", "") or "").strip()
+    if forced_bic:
+        cc = (country_code or "").strip().upper() or "LT"
+        return [
+            NeopayBankOut(
+                country_code=cc,
+                bic=forced_bic,
+                name=forced_name or forced_bic,
+                service_types=["pisp"],
+            )
+        ]
+
     cc = (country_code or "").strip().upper() or "LT"
 
     import requests

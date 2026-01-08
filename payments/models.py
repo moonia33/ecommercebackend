@@ -72,6 +72,9 @@ class NeopayConfig(models.Model):
 
     enable_bank_preselect = models.BooleanField(default=False)
 
+    force_bank_bic = models.CharField(max_length=32, blank=True, default="")
+    force_bank_name = models.CharField(max_length=200, blank=True, default="")
+
     banks_api_base_url = models.URLField(
         blank=True, default="https://psd2.neopay.lt/api"
     )
