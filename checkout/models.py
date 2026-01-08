@@ -71,6 +71,18 @@ class Order(models.Model):
         PAID = "paid", "Paid"
         CANCELLED = "cancelled", "Cancelled"
 
+    class FulfillmentMode(models.TextChoices):
+        STOCK = "stock", "Stock"
+        DROPSHIP = "dropship", "Dropship"
+        MIXED = "mixed", "Mixed"
+
+    class SupplierReservationStatus(models.TextChoices):
+        NOT_NEEDED = "not_needed", "Not needed"
+        PENDING = "pending", "Pending"
+        RESERVED = "reserved", "Reserved"
+        FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
+
     class DeliveryStatus(models.TextChoices):
         PENDING = "pending", "Pending"
         LABEL_CREATED = "label_created", "Label created"
@@ -87,6 +99,20 @@ class Order(models.Model):
 
     status = models.CharField(
         max_length=32, choices=Status.choices, default=Status.PENDING_PAYMENT)
+
+    fulfillment_mode = models.CharField(
+        max_length=20,
+        choices=FulfillmentMode.choices,
+        default=FulfillmentMode.STOCK,
+    )
+    supplier_reservation_status = models.CharField(
+        max_length=20,
+        choices=SupplierReservationStatus.choices,
+        default=SupplierReservationStatus.NOT_NEEDED,
+    )
+    supplier_reserved_at = models.DateTimeField(null=True, blank=True)
+    supplier_reference = models.CharField(max_length=120, blank=True, default="")
+    supplier_notes = models.TextField(blank=True, default="")
 
     # Idempotency: unique per user (so "confirm" can be safely retried)
     idempotency_key = models.CharField(max_length=80, blank=True, default="")
@@ -170,6 +196,7 @@ class Order(models.Model):
             models.Index(fields=["user", "-created_at"]),
             models.Index(fields=["status", "-created_at"]),
             models.Index(fields=["carrier_code", "tracking_number"]),
+            models.Index(fields=["fulfillment_mode", "supplier_reservation_status", "-created_at"]),
         ]
         constraints = [
             models.UniqueConstraint(
@@ -256,6 +283,40 @@ class Order(models.Model):
         self.total_net = self.items_net + self.shipping_net + fees_net
         self.total_vat = self.items_vat + self.shipping_vat + fees_vat
         self.total_gross = self.items_gross + self.shipping_gross + fees_gross
+
+
+class OrderEvent(models.Model):
+    class Kind(models.TextChoices):
+        FULFILLMENT = "fulfillment", "Fulfillment"
+        DELIVERY = "delivery", "Delivery"
+        PAYMENT = "payment", "Payment"
+        NOTE = "note", "Note"
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="events")
+    kind = models.CharField(max_length=32, choices=Kind.choices, default=Kind.NOTE)
+    name = models.CharField(max_length=80, blank=True, default="")
+
+    actor_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="order_events",
+    )
+    actor_label = models.CharField(max_length=200, blank=True, default="")
+
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["order", "-created_at"]),
+            models.Index(fields=["kind", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"order:{self.order_id} event:{self.kind}:{self.name}"
 
 
 class OrderLine(models.Model):

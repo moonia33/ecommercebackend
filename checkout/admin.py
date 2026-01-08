@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.urls import path, reverse
 from django.utils import timezone
 
-from .models import Cart, CartItem, FeeRule, Order, OrderConsent, OrderFee, OrderLine, PaymentIntent
+from .models import Cart, CartItem, FeeRule, Order, OrderConsent, OrderEvent, OrderFee, OrderLine, PaymentIntent
 
 
 class CartItemInline(admin.TabularInline):
@@ -118,13 +118,20 @@ class OrderAdmin(admin.ModelAdmin):
         "user",
         "status",
         "delivery_status",
+        "fulfillment_badge",
         "shipping_method",
         "carrier_code",
         "tracking_number",
         "total_gross",
         "created_at",
     )
-    list_filter = ("status", "delivery_status", "carrier_code")
+    list_filter = (
+        "status",
+        "delivery_status",
+        "carrier_code",
+        "fulfillment_mode",
+        "supplier_reservation_status",
+    )
     search_fields = ("id", "user__email", "tracking_number")
     autocomplete_fields = ("pickup_locker",)
     readonly_fields = (
@@ -147,6 +154,11 @@ class OrderAdmin(admin.ModelAdmin):
         "user",
         "status",
         "delivery_status",
+        "fulfillment_mode",
+        "supplier_reservation_status",
+        "supplier_reserved_at",
+        "supplier_reference",
+        "supplier_notes",
         "carrier_code",
         "carrier_shipment_id",
         "tracking_number",
@@ -277,7 +289,106 @@ class OrderAdmin(admin.ModelAdmin):
 
     form = Form
 
-    actions = ("recalculate_selected", "generate_dpd_labels_a6", "generate_unisend_labels_10x15")
+    actions = (
+        "recalculate_selected",
+        "mark_supplier_reservation_pending",
+        "mark_supplier_reservation_reserved",
+        "mark_supplier_reservation_failed",
+        "mark_supplier_reservation_cancelled",
+        "generate_dpd_labels_a6",
+        "generate_unisend_labels_10x15",
+    )
+
+    @admin.display(description="Fulfillment")
+    def fulfillment_badge(self, obj: Order) -> str:
+        mode = (getattr(obj, "fulfillment_mode", "") or "").strip()
+        st = (getattr(obj, "supplier_reservation_status", "") or "").strip()
+        if not mode and not st:
+            return ""
+        if mode == Order.FulfillmentMode.STOCK and st in {"", Order.SupplierReservationStatus.NOT_NEEDED}:
+            return "STOCK"
+        if mode == Order.FulfillmentMode.DROPSHIP:
+            return f"DROPSHIP / {st or '-'}"
+        if mode == Order.FulfillmentMode.MIXED:
+            return f"MIXED / {st or '-'}"
+        return f"{mode} / {st}"
+
+    def _log_event(self, request: HttpRequest, *, order: Order, name: str, payload: dict):
+        try:
+            OrderEvent.objects.create(
+                order=order,
+                kind=OrderEvent.Kind.FULFILLMENT,
+                name=name,
+                actor_user=(request.user if getattr(request, "user", None) and request.user.is_authenticated else None),
+                actor_label=str(getattr(request.user, "email", "") or getattr(request.user, "username", "") or ""),
+                payload=payload,
+            )
+        except Exception:
+            pass
+
+    def _bulk_set_supplier_reservation_status(self, request: HttpRequest, queryset, *, status: str):
+        now = timezone.now()
+        changed = 0
+        for o in queryset:
+            before = {
+                "fulfillment_mode": getattr(o, "fulfillment_mode", ""),
+                "supplier_reservation_status": getattr(o, "supplier_reservation_status", ""),
+                "supplier_reserved_at": (o.supplier_reserved_at.isoformat() if getattr(o, "supplier_reserved_at", None) else ""),
+            }
+
+            o.supplier_reservation_status = status
+            if status == Order.SupplierReservationStatus.RESERVED and o.supplier_reserved_at is None:
+                o.supplier_reserved_at = now
+            if status != Order.SupplierReservationStatus.RESERVED:
+                o.supplier_reserved_at = None
+
+            o.save(update_fields=["supplier_reservation_status", "supplier_reserved_at", "updated_at"])
+            changed += 1
+
+            after = {
+                "supplier_reservation_status": getattr(o, "supplier_reservation_status", ""),
+                "supplier_reserved_at": (o.supplier_reserved_at.isoformat() if getattr(o, "supplier_reserved_at", None) else ""),
+            }
+            self._log_event(
+                request,
+                order=o,
+                name="supplier_reservation_status_changed",
+                payload={"before": before, "after": after},
+            )
+
+        self.message_user(request, f"Atnaujinta užsakymų: {changed}")
+
+    @admin.action(description="Dropship: nustatyti statusą PENDING")
+    def mark_supplier_reservation_pending(self, request: HttpRequest, queryset):
+        return self._bulk_set_supplier_reservation_status(
+            request,
+            queryset,
+            status=Order.SupplierReservationStatus.PENDING,
+        )
+
+    @admin.action(description="Dropship: nustatyti statusą RESERVED")
+    def mark_supplier_reservation_reserved(self, request: HttpRequest, queryset):
+        return self._bulk_set_supplier_reservation_status(
+            request,
+            queryset,
+            status=Order.SupplierReservationStatus.RESERVED,
+        )
+
+    @admin.action(description="Dropship: nustatyti statusą FAILED")
+    def mark_supplier_reservation_failed(self, request: HttpRequest, queryset):
+        return self._bulk_set_supplier_reservation_status(
+            request,
+            queryset,
+            status=Order.SupplierReservationStatus.FAILED,
+        )
+
+    @admin.action(description="Dropship: nustatyti statusą CANCELLED")
+    def mark_supplier_reservation_cancelled(self, request: HttpRequest, queryset):
+        return self._bulk_set_supplier_reservation_status(
+            request,
+            queryset,
+            status=Order.SupplierReservationStatus.CANCELLED,
+        )
 
     def get_urls(self):
         urls = super().get_urls()
@@ -347,7 +458,6 @@ class OrderAdmin(admin.ModelAdmin):
                     "updated_at",
                 ]
             )
-
     @admin.action(description="Generuoti DPD A6 lipdukus (PDF) pasirinktiems")
     def generate_dpd_labels_a6(self, request: HttpRequest, queryset):
         from dpd.client import DpdApiError
@@ -568,6 +678,14 @@ class OrderLineAdmin(admin.ModelAdmin):
                     "updated_at",
                 ]
             )
+
+
+@admin.register(OrderEvent)
+class OrderEventAdmin(admin.ModelAdmin):
+    list_display = ("id", "order", "kind", "name", "actor_label", "created_at")
+    list_filter = ("kind",)
+    search_fields = ("order__id", "name", "actor_label")
+    readonly_fields = ("order", "kind", "name", "actor_user", "actor_label", "payload", "created_at")
 
 
 @admin.register(PaymentIntent)

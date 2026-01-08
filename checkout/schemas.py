@@ -126,6 +126,10 @@ class OrderOut(Schema):
     id: int
     status: str
     delivery_status: str
+    fulfillment_mode: str = ""
+    supplier_reservation_status: str = ""
+    supplier_reserved_at: str = ""
+    supplier_reference: str = ""
     currency: str
     country_code: str
     shipping_method: str
