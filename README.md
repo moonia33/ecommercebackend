@@ -388,11 +388,30 @@ Mokėjimai (MVP):
   - `redirect_url` visada tuščias
   - `checkout/confirm` atsakyme grįžta `payment_instructions`, kurias frontas turi parodyti po užsakymo patvirtinimo
 
+- `payment_method=neopay`:
+  - `PaymentIntent.provider=neopay`
+  - `redirect_url` grįžta su Neopay widget payment link (JWT HS256)
+  - galutinė mokėjimo patvirtinimo būsena ateina per server-side callback
+
 Konfigūracija (rekomenduojama per admin / DB):
 
 - `Payments -> Payment methods`:
   - `code=bank_transfer` – čia suvedami pavedimo rekvizitai / instrukcijos (gali būti šablonas su `{order_id}`)
   - `code=klix` (ar kitas gateway) – gali būti naudojamas kaip aktyvus pasirinkimas frontui
+
+Neopay:
+
+- `Payments -> Neopay config`:
+  - `project_id`, `project_key`
+  - `widget_host` (default: `https://psd2.neopay.lt/widget.html?`)
+  - `client_redirect_url` (kur Neopay nukreips userį po payment)
+
+Server-side callback endpoint (reikia suvesti Neopay self-service portale):
+
+- `POST /api/v1/payments/neopay/callback` su body `{ "token": "..." }`
+- atsakymas turi būti `{ "status": "success" }` (kitu atveju Neopay kartos callback)
+
+Testavimui `localhost` dažniausiai neveiks, nes Neopay serveris turi pasiekti callback URL. Rekomendacija: naudoti `ngrok`/`cloudflared` ir suvesti viešą HTTPS URL.
 
 Fallback setting'as (jei DB dar nesukonfigūruota):
 

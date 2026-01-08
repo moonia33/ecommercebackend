@@ -62,3 +62,27 @@ class PaymentMethod(models.Model):
             parts.append(f"Paskirtis: {purpose}")
 
         return "\n".join(parts).strip()
+
+
+class NeopayConfig(models.Model):
+    is_active = models.BooleanField(default=True)
+
+    project_id = models.BigIntegerField()
+    project_key = models.CharField(max_length=255)
+
+    widget_host = models.URLField(
+        blank=True, default="https://psd2.neopay.lt/widget.html?"
+    )
+    client_redirect_url = models.URLField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-id"]
+        indexes = [
+            models.Index(fields=["is_active", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"neopay:{self.project_id}"

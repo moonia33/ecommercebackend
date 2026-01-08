@@ -660,7 +660,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                        None) or "").strip() or None
 
     payment_method = (payload.payment_method or "").strip() or "klix"
-    if payment_method not in ["klix", "bank_transfer"]:
+    if payment_method not in ["klix", "bank_transfer", "neopay"]:
         raise HttpError(400, "Unsupported payment_method")
 
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
@@ -849,7 +849,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         provider = (
             PaymentIntent.Provider.BANK_TRANSFER
             if payment_method == "bank_transfer"
-            else PaymentIntent.Provider.KLIX
+            else (PaymentIntent.Provider.NEOPAY if payment_method == "neopay" else PaymentIntent.Provider.KLIX)
         )
         pi = PaymentIntent.objects.create(
             order=order,
@@ -863,7 +863,22 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             },
         )
 
-        # MVP: redirect_url is empty until we plug in Klix API.
+        if provider == PaymentIntent.Provider.NEOPAY:
+            from payments.services.neopay import build_neopay_payment_link
+
+            tx_id = f"order-{order.id}"
+            link, neopay_payload = build_neopay_payment_link(
+                amount=order.total_gross,
+                currency=order.currency,
+                transaction_id=tx_id,
+                payment_purpose=f"Order {order.id}",
+            )
+            pi.external_id = tx_id
+            pi.redirect_url = link
+            pi.raw_request = {**(pi.raw_request or {}), "neopay": neopay_payload}
+            pi.save(update_fields=["external_id", "redirect_url", "raw_request", "updated_at"])
+
+        # MVP: Klix redirect_url is empty until we plug in Klix API.
 
         # Clear cart after creating the order.
         CartItem.objects.filter(cart=cart).delete()

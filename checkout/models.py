@@ -325,6 +325,7 @@ class PaymentIntent(models.Model):
     class Provider(models.TextChoices):
         KLIX = "klix", "Klix (Citadele)"
         BANK_TRANSFER = "bank_transfer", "Bank transfer"
+        NEOPAY = "neopay", "Neopay"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

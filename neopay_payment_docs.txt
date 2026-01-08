@@ -1,0 +1,3092 @@
+Banks API
+In order to get the latest information about all available countries, languages and banks list with available service types, please use our Banks API In order to get list of banks that are available for your project specifically, you can use this link form: https://psd2.neopay.lt/api/countries/{your-project-id}
+
+Banks CR API
+In order to get the latest information about all bank Conversion Rates (CR), please contact Neopay support and provide a URL for receiving POST messages. Each 15 min. a JWT data token will be sent to the provided URL with bank conversion rate value percentages. Token example with a few countries (countries that are enabled for your project will be provided with the real token):
+
+  {
+    "rates": {
+      "LT": {
+        "UANFLT21": 91,
+        "CBVILT2X": 96,
+        "INDULT2X": 95,
+        "SANDLT22": 89,
+        "CBSBLT26": 74,
+        "MDBALT22": 66,
+        "LCKULT22": 78,
+        "JCKULT21": 85,
+        "AGBLLT2X": 77,
+        "EVIULT21": 88,
+        "PAUALT22": 78,
+        "VRKULT21": 69,
+        "REVOGB21": 100,
+        "PKISM21": 100,
+        "SMEFINANCE": 100,
+        "TRWIGB22": 100
+      },
+      "LV": {
+        "UNLALV2X": 100,
+        "SANDLV22": 100,
+        "RTMBLV2X": 100,
+        "RIKOLV2X": 100,
+        "LAPBLV2X": 100,
+        "RIBRLV22": 100
+      },
+      "EE": {
+        "LHVBEE22": 100,
+        "EEUHEE2X": 100,
+        "SANDEE2X": 100,
+        "RIKOEE22": 100,
+        "EKRDEE22": 100
+      }
+    },
+    "iat": 1640871923,
+    "exp": 1640873723
+  }
+Service types
+Below you can find the abbreviations of the services that we offer, please view them and familiarize yourself with our terminology:
+
+aisp - Account Information Service;
+bnpl - Neopay 3 Service;
+bulk - Bulk Payment Initiation Service;
+pcov - Payment Card Owner Verification Service;
+pcsp - Payer Code Identification Service;
+pisp - Payment Initiation Service;
+posl - Neopay PayForYou Service;
+rpas - Recurring Payment Agreement Service;
+verify - 12Play Person Verification
+
+While using pre-made Neopay plug-ins, only payment initiation, Neopay 3 and Neopay PayForYou services are available.
+
+Credentials
+In order to get started with Neopay integration you must have projectId and projectKey parameters, which are provided to you by the Neopay sales team.
+
+Test
+During the first stage you'll be provided with a set of credentials which are going to be used only for testing purposes and which will have test payment enabled. Using this type of project helps you quickly test use cases and validate your implementation of Neopay service widget, however real payments are still possible using test projects and we recommend making at least 1 real transactions before going live.
+
+Payment amount is limited to a maximum of 10.00€ in the test environment. If you require this limit to be increased - we can do so if you contact us and provide a legitimate reason.
+
+Live
+Once your integration is ready to go LIVE, you'll need to contact our team and after final checks you will be granted the access to Live environment. We can either use your existing test credentials or create entirely separate ones, just let us know which you prefer!
+
+Neopay service initiation
+It's easy to initiate Neopay services, all you need is to do is redirect payer to User redirect URL, which will open the Neopay widget with the parameters you provided in the JWT token. To do that you need to combine 2 parameters: widget host + JWT data token:
+
+  Widget host - https://psd2.neopay.lt/widget.html? 
+    JWT data token - eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsImFtb3VudCI6MC4wMSwiY3VycmVuY3kiOiJFVVIiLCJ0cmFuc2FjdGlvbklkIjoiVFM4MzciLCJwYXltZW50UHVycG9zZSI6IlBheW1lbnQgcHVycG9zZSIsImNsaWVudFJlZGlyZWN0VXJsIjoiaHR0cHM6Ly95b3VyLWNsaWVudC1yZWRpcmVjdC11cmwuY29tIn0.xnEnN6_rigGwcrbX5NM_8wtwtkgmMJzTeTj-Q8Bi6Rk
+    The final user redirect URL - https://psd2.neopay.lt/widget.html?eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsImFtb3VudCI6MC4wMSwiY3VycmVuY3kiOiJFVVIiLCJ0cmFuc2FjdGlvbklkIjoiVFM4MzciLCJwYXltZW50UHVycG9zZSI6IlBheW1lbnQgcHVycG9zZSIsImNsaWVudFJlZGlyZWN0VXJsIjoiaHR0cHM6Ly95b3VyLWNsaWVudC1yZWRpcmVjdC11cmwuY29tIn0.xnEnN6_rigGwcrbX5NM_8wtwtkgmMJzTeTj-Q8Bi6Rk
+NOTE: The final user redirect URL is what we call the "payment link". You can create this link in advance based on the process described below in our documentation and you can save these links for later use, while also using hyperlink to add them to your invoices, emails or other mediums.
+
+IMPORTANT NOTE: Unless explicitly stated otherwise, all of the Neopay services are initiated using the GET HTTP method. Java Script service initiation method is no longer supported.
+
+Widget host
+Widget host is a static endpoint and must be a value of https://psd2.neopay.lt/widget.html?
+
+JWT Data Token
+JWT data token is how you're providing all the service initiation parameters to us. In order to provide service details, it's necessary to provide a signed dataToken which must be generated as JWT (JSON Web Token) using HS256 algorithm.
+
+What is the JSON Web Token structure? In its compact form, JSON Web Tokens consist of three parts separated by dots (.) which are:
+
+Header.Payload.Signature
+
+Therefore, a JWT typically looks like xxxxx.yyyyy.zzzzz
+
+Visit jwt.io for more details and plugins.
+
+Header
+Algorithm & token type:
+
+JWT HEADER CLAIM	FORMAT	DESCRIPTION
+typ	string	type of token, use JWT
+alg	string	signing algorithm, currently only HS256 is supported
+Example JWT header
+
+{
+  "typ": "JWT",
+  "alg": "HS256"
+}
+Payload
+Token payload will vary depending on the service you wish to use, you will find examples in the selected services section.
+
+Note: when creating the JWT token payload, keep in mind that only the following symbols are accepted: a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E F G H I J K L M N O P Q R S T U V W X Y Z 0 1 2 3 4 5 6 7 8 9 / - ? : ( ) . , ‘ + Space ;
+
+Exception: when initiating services through Lithuanian banks, these symbols can be used as well : ą č ę ė į š ų ū ž Ą Č Ę Ė Į Š Ų Ū Ž
+
+Signature
+To create the signature part you have to take the encoded header, the encoded payload, a projectKey, the algorithm specified in the header, and sign it with the projectKey that you received from us.
+
+When using the HMAC SHA256 algorithm, the signature will be created as follows:
+
+HMACSHA256(
+  base64URLEncode(header) + "." +
+  base64URLEncode(payload),
+  projectKey)
+The signature is used to verify that the token is authentic, and, in the case of tokens signed with a projectKey, we can also verify that the sender of the JWT is authorized to make payments using your Neopay project.
+
+projectKey is issued to your company after the project is created in Neopay system. projectKey must NEVER be shared with any unauthorized 3rd parties.
+
+Example of signed JWT token
+
+eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsImFtb3VudCI6MC4wMSwiY3VycmVuY3kiOiJFVVIiLCJ0cmFuc2FjdGlvbklkIjoiVFM4MzciLCJwYXltZW50UHVycG9zZSI6IlBheW1lbnQgcHVycG9zZSIsInJlY2VpdmVyQWNjb3VudE51bWJlciI6IkxUNjMzNTIwMDM3MDYyMDU3NTgxIiwicmVjZWl2ZXJOYW1lIjoiUGV0cmFzIFBldHJhaXRpcyJ9.EWh2nDgMaljpC_YLr3eOuC1LYwBaHeWhQfttEqS09lY
+You may try to decode this encoded token using JWT debugger to see the token payload data using JWT debugger
+
+Payment initiation service
+You can check our payment initiation scheme for better understanding the payment flow
+
+Example of the redirect URL:
+
+https://psd2.neopay.lt/widget.html?eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsImFtb3VudCI6MC4wMSwiY3VycmVuY3kiOiJFVVIiLCJ0cmFuc2FjdGlvbklkIjoiVFM4MzciLCJwYXltZW50UHVycG9zZSI6IlBheW1lbnQgcHVycG9zZSIsImNsaWVudFJlZGlyZWN0VXJsIjoiaHR0cHM6Ly95b3VyLWNsaWVudC1yZWRpcmVjdC11cmwuY29tIn0.xnEnN6_rigGwcrbX5NM_8wtwtkgmMJzTeTj-Q8Bi6Rk
+Payload
+To execute a payment, payment details must be provided in the JWT token payload as follows:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	integer	a unique project ID given by NEO Finance	YES
+transactionId	string(35)	It must be unique for each payment initiation. Must not exceed 35 symbols. For BLIK payment it must not exceed 29 symbols.	YES
+orderId	string(35)	the parameter can be used to identify multiple payments that are meant for the same order, e.g. if the initial payment is not successful	NO
+amount	double	payment initiation amount	YES
+currency	string	payment currency	YES
+paymentPurpose	string (140)	provide details about the payment (max. 140 symbols. For BLIK and Wise bank payments max. 35 symbols. For BoursoBank max. 50 symbols). Payment purpose is visible to the payer in their bank after they complete the payment	YES
+serviceType	string	This parameter is used to identify which service type must be launched for the initiation. Please check service types for available service type codes	YES
+clientRedirectUrl	string	the redirect URL is used to redirect the payer once he returns from Neopay to your website after a successful or failed payment. If no URL is provided, the only way for the client to exit our payment environment will be by closing the web browser and they will not be redirected back to your website	NO
+paymentOptions	string	this is used to create a step in Neopay widget to choose the payment method. Values that can be used: blik, banks, applepay (to be discontinued), googlepay (to be discontinued), cards, bnpl (to be discontinued), posl (to be discontinued), leasing	NO
+userIdentity	string	This parameter used to identify user transaction in self service and for saving information for faster payment (Request for more details)	NO
+endToEndId	string	This parameter used to identify user transaction in bank statement if you have no option to see payment purpose (mainly for those who are using 3rd party providers for payment collection). Must not exceed 35 symbols.	NO
+iat	timestamp	states when the token has been issued. We recommend using this to limit how long the token can be used, so that user could not make the operation after long periods of time. If iat time is later than the time when payment window is opened, an error will be received, and payment will only become available once this time is reached.	NO
+exp	timestamp	states the expiration time of the token. We recommend using this to limit how long the token can be used, so that user could not make the operation after long periods of time. If exp time is before the payment window is opened, an error will be received.	NO
+Example JWT payload
+
+{
+  "projectId": 1,
+  "amount": 0.01,
+  "currency": "EUR",
+  "transactionId": "TS837",
+  "paymentPurpose": "Payment purpose",
+  "serviceType":"pisp",
+  "clientRedirectUrl": "https://your-client-redirect-url.com"
+}
+IMPORTANT NOTE: If you decide to collect payments in the account opened for you by AB NEO Finance, we will add additional identifiers at the beginning of the paymentPurpose: NIPSXXXXX-YYYYY, where XXXXX is your Neopay project ID and YYYYY is the transactionId parameter that you provided for that transaction. Example of such payment purpose: "NIPS1-TS837 Payment purpose". Please take this into account when calculating the maximum possible payment purpose length of your initiated payments.
+
+Features
+Multiple features are available for you to start using right away. The features are enabled by providing them with each payment initiation dataToken.
+
+Banks
+Once the payment is initiated, by default all Lithuanian available banks are going to be displayed for the payer to choose from at Neopay payment widget and no additional parameters needs to be provided. Bank list might be controlled when initiating a payment in order to meet your needs and make payers experience better.
+
+Explore our available Banks API for more details.
+
+Preselect Bank
+If a bank list is displayed on your website during checkout process, use our Banks API, to fetch available banks in certain countries.
+
+When payer selects a bank to pay from, provide a bank parameter when initiating a payment - the bank is going to already be selected in the payment widget.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+bank	string	selected bank's BIC.
+Available BIC values for your project are provided at https://psd2.neopay.lt/api/countries/{your_project_id}
+
+Example of provided bank in dataToken, in this case LT version of Swedbank will be chosen:
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"bank": "HABALT22",
+"clientRedirectUrl": "https://your-client-redirect-url-here.com"
+}
+Only one bank may be provided at a time, array is not supported.
+
+Disable Banks
+If you wish to disable certain banks in the payment widget it can be done by providing a disabledBanks parameter when initiating a payment.
+
+Array is supported to disable multiple banks.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+disabledBanks	string	BIC values of banks which should not be displayed in the payment widget.
+Available BIC's are provided at Banks API
+
+Example of disabled banks in dataToken, in this case user will not be able to choose LT version of SEB, Artea and URBO bankas:
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"disabledBanks": [
+ "CBVILT2X",
+ "CBSBLT26",
+ "MDBALT22"
+ ],
+ "clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Bank Search
+If the bank list is displayed in our widget, payers can use our bank search to type the bank name instead of looking for the icon. If you wish to enable this feature, you can do so by passing parameter bankSearch
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+bankSearch	bool	1 - to show
+Example of bank search option in dataToken:
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"bankSearch": "1",
+"clientRedirectUrl": "https://your-client-redirect-url-here.com"
+}
+Bank Country List
+You are in control whether you want to allow payer to select other countries in the Neopay payment widget. Just provide countryList parameter with a value of "1" in a payload if you wish to enable this selection. By default the list is not displayed.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+countryList	bool	1 - enables the feature
+Example of usage:
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"defaultCountry": "LV",
+"countryList": "1",
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Payer email notification
+This feature allows payers to receive email notifications after a successful payment. This feature helps in cases where banks takes longer than usual to confirm the payment, as soon as we receive the final confirmation about a successful payment status from the bank, we will send a notification to the payer. In order to do this you will have to pass encrypted payer email with the dataToken, but first you must contact us to enable this functionality for you.
+
+NOTE: encryption method is the same described in payerCode
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+payerEmail	Encrypted string	Optional. Enables sending of success payment notifications
+defaultLocale	string	uppercase language code in ISO 639-1 format. Required when using payerEmail parameter. Email will be sent in the selected language.
+Example of usage:
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"defaultLocale": "LV",
+"countryList": "1",
+"payerEmail":'5HAY2Nub/jT97UB3hf+8cw==',
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Neopay rules consent
+We all care about payer experience, and this is a feature to improve it. If you use this feature we can redirect the payer directly to the bank, completely skipping the first stop at Neopay payment widget, when initiating a payment.
+
+This feature is best to be used when the bank selection list is provided on your website.
+
+Things to be done before using this feature
+
+Every time payers are making payments through Neopay service, it's mandatory for them to consent to Neopay terms of service and privacy policy. For this reason, Neopay rules are always provided when payment widget is initialized.
+
+If you wish to use this feature it is mandatory that You provide the Neopay terms of service and privacy policy on your website next to the bank list during checkout, having a direct link to a full version of Neopay documents. This has to be done in compliance to the local laws, and if this requirement is not followed we have the right to immediately terminate the provision of Neopay services for you.
+
+Neopay rules example in different languages
+
+EN: The service is provided by NEO Finance, AB. By using the service, I confirm that I have read and agree to the Open Banking Service Provision Rules and Privacy Policy.
+
+LT: Paslaugą teikia NEO Finance, AB. Naudodamasis paslauga patvirtinu, kad perskaičiau ir sutinku su Atvirosios bankininkystės paslaugų teikimo taisyklėmis ir Privatumo politika.
+
+PL: Usługę świadczy NEO Finance, AB. Korzystając z usługi, potwierdzam, że zapoznałem się z treścią i akceptuję Zasady świadczenia usług otwartej bankowości oraz Politykę prywatności.
+
+All translations can be found in our Bank API.
+
+Example how this consent could look like in your website: 
+
+Once the consent is added to you websites bank selection part, you can start using this feature by providing payerConsentNeopayRules parameter when initiating a payment.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+payerConsentNeopayRules	Boolean	true - enables the feature, false - disables the feature
+Example of usage:
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"bank": "HABALT22",
+"payerConsentNeopayRules": true,
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Default country
+You are in control of the default bank list of a certain country in the Neopay payment widget. Just provide defaultCountry parameter with a value of country code in a ISO 3166-1 alpha-2 format, available from our Banks API when initiating a payment. The selected country banks will be the first visible banks for the payer in our widget.
+
+Default country for the Neopay bank list is Lithuania, so if defaultCountry is not provided, Lithuanian banks will be displayed in the Neopay payment widget.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+defaultCountry	string	uppercase country code in ISO 3166-1 alpha-2 format
+Example of usage:
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"defaultCountry": "LV",
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Default locale (language)
+Payment widget language may be changed by providing defaultLocale parameter with a value of available languages in certain countries which are provided in our Banks API. All the text in our widget will be displayed in the selected language.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+defaultLocale	string	uppercase language code in ISO 639-1 format
+Example of usage:
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"defaultCountry": "EE",
+"defaultLocale": "ET",
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Default language for Neopay payment widget differs depending on the provided defaultCountry , these values are provided in the Banks API defaultLanguage parameter. If defaultLocale is not provided Neopay payment widget language will be displayed as provided in the defaultLanguage parameter next to the country.
+
+Flow selection
+Payment widget flow may be changed by providing flow parameter with a value of available flows.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+flow	string	Available values: redirect, redirect+, decoupled
+redirect -> User is being redirected to the bank to login and make the payment, but account selection is made in the Neopay widget.
+redirect+ -> This flow is the same as with redirect, but the account selection is also done on the bank page.
+decoupled -> User is not being redirected to the bank at all All payment steps are made inside of the Neopay widget. This flow is very efficient when using Neopay widget in applications.
+Note: the flow selection only works with Swedbank and SEB, as these are the only banks that have created such solutions for the payments.
+
+Example of usage:
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"defaultCountry": "EE",
+"bank":"HABALT22,"
+"flow": "redirect",
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Default flow for Neopay payment widget differs depending of the bank supported flow or set flow from the Neopay side. Note that redirect+ flow does not work if user validation is required.
+
+Payer code identification
+To use this additional parameter "payerCode" must be provided in the dataToken payload. If the payer code matches with the code provided by the bank, the payer will be able to continue the operation, if not - operation will be canceled and payer will not be able to finish it. Use this feature if you wish to receive payment/account information only from the accounts that payer personally owns.
+
+This solution currently is available only with these banks that support pcsp service type, please check of supported banks here: Banks API NOTE: As a third party service provided we do not receive the full payer code, and we can only check if the payer code matches with the data in the bank. If you do not already have the payer code value, you can use Gather payer code feature.
+
+Use this feature with pcsp service type if you only want to validate payer code. If you also want the user to make a payment at the same time, use it with pisp service type.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+payerCode	encrypted string	OPTIONAL. Provided personal code will be used to check information against the payer's personal code registered in their bank. Only works with Swedbank, SEB, Luminor, Artea and Urbo bank only when used in combination with pisp service.
+{
+"projectId": 1,,
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"payerCode": "5HAY2Nub/jT97UB3hf+8cw==",
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Algorithm for payerCode encryption:
+Cipher method - aes-256-cbc
+Passphrase - first 64 symbols from projectKEY sha256 hash.
+IV (Initialization Vector) - first 32 symbols from projectKEY sha256 hash.
+Encrypted value aditionally encoded with base64
+
+Code example PHP:
+
+    $projectKey = 'NgvoDNOBGtCjIPaM#ruXnd';
+    $payerCode = '3123456789098';
+    $passphrase = substr(hash('sha256', $projectKey), 0, 64);
+    $IV = substr(hash('sha256', $projectKey), 0, 32);
+    $encrypted = openssl_encrypt($payerCode, 'aes-256-cbc', hex2bin($passphrase), 0, hex2bin($IV));        
+    Result: $encrypted - 5HAY2Nub/jT97UB3hf+8cw==
+OPTIONAL: Code example PHP (decryption):
+
+    $encryptedPayerCode = '5HAY2Nub/jT97UB3hf+8cw==';
+    $decrypted = openssl_decrypt($encryptedPayerCode, 'aes-256-cbc', hex2bin($passphrase), 0, hex2bin($IV));
+    Result: $decrypted - 3123456789098
+    
+Bash code example:
+
+    #!/usr/bin/env bash
+    PAYER_CODE="3123456789098"
+    PROJECT_KEY="NgvoDNOBGtCjIPaM#ruXnd"
+    KEY=`echo -n $PROJECT_KEY | openssl dgst -sha256 | sed 's/^.*= //' | head -c64`
+    IV=`echo -n $PROJECT_KEY | openssl dgst -sha256 | sed 's/^.*= //' | head -c32`
+    ENCODED=`echo -n "${PAYER_CODE}" | openssl enc -aes-256-cbc -nosalt -a -K "${KEY}" -iv "${IV}"`
+    Result: #$ENCODED - 5HAY2Nub/jT97UB3hf+8cw==
+Node.js code example:
+
+ import crypto from "crypto";
+ const projectKey = 'NgvoDNOBGtCjIPaM#ruXnd';
+ const payerCode = '3123456789098';
+ const encryptedKey = crypto.createHash("sha256").update(projectKey).digest();
+ const passphrase = encryptedKey.slice(0, 64);
+ const iv = encryptedKey.slice(0, 16);
+ const cipher = crypto.createCipheriv("aes-256-cbc", passphrase, iv);
+ let encrypted = cipher.update(payerCode, "utf8", "base64");
+ encrypted += cipher.final("base64");
+ Result: encrypted - 5HAY2Nub/jT97UB3hf+8cw==
+Java code example:
+
+public static String encrypt(String input, String projectKey) throws InvalidAlgorithmParameterException, InvalidKeyException, NoSuchAlgorithmException, NoSuchPaddingException, IllegalBlockSizeException, BadPaddingException {
+    String projectKeyHash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(projectKey.getBytes(StandardCharsets.UTF_8)));
+    Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
+    SecretKeySpec secretKeySpec = new SecretKeySpec(HexFormat.of().parseHex(projectKeyHash.substring(0, 64)), "AES");
+    IvParameterSpec ivParameterSpec = new IvParameterSpec(HexFormat.of().parseHex(projectKeyHash.substring(0, 32)));
+    cipher.init(Cipher.ENCRYPT_MODE, secretKeySpec, ivParameterSpec);
+    return Base64.getEncoder().encodeToString(cipher.doFinal(input.getBytes(StandardCharsets.UTF_8)));
+}'
+    
+After either successful or unsuccessful personal payer code verification, a server side callback will be provided with the corresponding data:
+
+{
+  "identifications": {
+   "1620623684-260": {
+     "status": "success",
+     "bank": {
+       "bic": "HABALT22",
+       "name": "Swedbank"
+         }
+       }
+  "iat": 1695215323,
+  "exp": 1695301723
+    }
+}
+or
+
+{
+  "identifications": {
+   "1620623684-260": {
+     "status": "failed",
+     "bank": {
+       "bic": "HABALT22",
+       "name": "Swedbank"
+         }
+       }
+  "iat": 1695215323,
+  "exp": 1695301723
+    }
+}
+Gather payer code
+To use this additional parameter "gatherPayerCode" must be provided in the dataToken payload. In this scenario payer code will be collected on our end. If the payer code matches with the code provided by the bank, we will send you payer code and the payer will be able to continue the operation, if not - operation will be canceled and payer will not be able to finish it. Use this feature if you wish to receive payer's code and initiate payment/account information only from the accounts that payer personally owns.
+
+This solution currently is available only with these banks that support pcsp service type, please check of supported banks here: Banks API
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+gatherPayerCode	Boolean	OPTIONAL. true - enables the feature, false - disables the feature
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"gatherPayerCode": true,
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Use this feature with pcsp service type if you want only to gather payer code. If additionally you want user to make a payment, use with pisp service type. With callback you will get encrypted payer code as described in Payer code identification.
+
+One-click payments
+The feature must be enabled for your project by Neopay Team (contact your sales manager regarding this), and it only works when additional parameter "userIdentity" is used in the payload. The first time the payer makes a payment in your project, the payer will be asked if the payer wants to save his IBAN information for faster payments in the future for the next 180 days. If the payer agrees to save the information, it will be tied to the "userIdentity" parameter that you provide and the next time the payer makes the payment in your project the payer will only have to sign the payment once, without additionally logging in to their bank account first, and in the case of SEB they can confirm the payment without signing it at all if the payment amount is up to 30 EUR. This feature is extremely useful for returning payers, and improves their experience even further. After 180 days, the first time payment process will repeat and new consent will be valid for another 180 days.
+
+This solution currently is available only with Swedbank, SEB, Luminor in all Baltic countries and Artea in Lithuania.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+userIdentity	string	OPTIONAL. This parameter used to identify user transactions in the self service portal and for saving information for faster payment. Only works with "flow": "redirect" or "flow": "decoupled".
+accountNumber	string	OPTIONAL. This parameter is used to pass payer's account number (IBAN) for one-click payment option.
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"userIdentity": "1234567",
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Note you can even skip another step by providing payer IBAN number with "accountNumber", (You get this information after first payment) - this will enable one-click payment, as the payer will no longer have to select the account from which he wants to make the payment. Just make sure that the payer sees their saved account on your website, and have the option to not select the account to make the payment from a different account, in such case just skip the "accountNumber" parameter.
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"userIdentity": "1234567",
+"accountNumber": "LT1234564689101112",
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+    
+Example how the UI could look like:
+
+
+
+Note after successful payment in a callback you will get userIdentity value.
+
+Receiver name and account ***
+*** These parameters can only be used if allowed by Neopay. If you did not agree on such conditions, your receiver account must be added via self service portal or added by Neopay team.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+receiverName	string	Receivers account holder name
+receiverAccountNumber	string	Receivers account number (IBAN)
+Example of usage:
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"receiverName": "Account Holder Name",
+"receiverAccountNumber": "LT1234654984635135",
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Custom widget styling
+Neopay payment widget may be stylized to your needs by providing css variable with a value of an external URL to your custom CSS file. According to your CSS file payment widget is going to be stylized.
+
+Example file can be found here.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+css	string	URL to your custom Neopay widget CSS file
+Example of usage:
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"defaultCountry": "EE",
+"defaultLocale": "ET",
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain",
+"css": "http://yourdomain.domain/css/custom.css"
+}
+Custom project information
+Neopay payment widget may display project information to your needs by providing variables regarding project information. By default it's a disabled feature, you need to contact Neopay support with reason why do you need this option to enable it for your project.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+projectLogo	string	URL to your company or project logo file
+projectUrl	string	Your project URL
+companyName	string	Your company name
+companyAddress	string	Your company address
+companyEmail	string	Your company email address
+companyPhone	string	Your company phone
+Example of usage:
+
+{
+"projectId": 1,
+"amount": "0.01",
+"currency": "EUR",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1620623684-260",
+"defaultCountry": "EE",
+"defaultLocale": "ET",
+"clientRedirectUrl": "https://your_client-redirect_url_here.domain",
+"projectLogo": "https://your-logo.org",
+"projectUrl": "https://www.your-company.org",
+"companyName": "Your Company name",
+"companyAddress": "Street, number, city, country, postal code",
+"companyEmail": "test@example.sgs",
+"companyPhone": ""
+}
+Note: If you wish to leave some fields blank - please pass that field as empty string "companyPhone": "", otherwise information will be taken from your project settings.
+
+Callback
+Callbacks are used to notify your system about pending, successful and canceled payments. Both client side and server side callbacks must be implemented and tested in order to Go LIVE with Neopay payment collection system.
+
+Client side
+Client side redirects are used to provide a payment status and redirect the payer to a corresponding page at your system, when payer returns from Neopay payment widget.
+
+Payment status
+Your provided clientRedirectUrl is used to notify your system about payment status, via client side only, a payment status and a token will be added at the end of it.
+
+Pending
+After the payment has been successfully signed by the payer, the payment status has to be updated from the bank. If the process takes longer than 60 sec, a pending screen is displayed for the payer at Neopay payment widget and the payer will be given the option to go back to your provided clientRedirectUrl URL:
+
+https://myproject.com/redirect?pending=1&data=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsImFtb3VudCI6MC4wMSwiY3VycmVuY3kiOiJFVVIiLCJ0cmFuc2FjdGlvbklkIjoiVFM4MzciLCJwYXltZW50UHVycG9zZSI6IlBheW1lbnQgcHVycG9zZSIsInJlY2VpdmVyQWNjb3VudE51bWJlciI6IkxUNjMzNTIwMDM3MDYyMDU3NTgxIiwicmVjZWl2ZXJOYW1lIjoiUGV0cmFzIFBldHJhaXRpcyIsImlhdCI6MTU3NTg5MzU0NSwiZXhwIjoxNTc1OTc5OTQ1fQ.NfapKuy6-h55SvZdTq3hi5OGP6k4GmwlqySBunr1J7c
+CLIENT REDIRECT URL CLAIM	FORMAT	DESCRIPTION
+pending	Boolean	pending=1 notifies, that user has successfully signed the payment and the payment status is going to be updated via server side callback URL
+data	string	payment initiation token to identify pending payment
+Once payer has returned to your website with pending=1 you have to update order status to "Waiting for payment confirmation" and wait for a payment status update via server side.
+
+Be informed, after receiving payment status pending=1, it must only be changed to "status": "success" via the server side callback.
+
+Data is a JWT token signed by your projectKey which has been provided when initiating a payment, so it needs to be validated to make sure it is a Neopay signed response. There will be additional parameters provided in the token
+
+DATA TOKEN CLAIM	FORMAT	DESCRIPTION
+projectId	integer	a unique project ID given by NEO Finance
+amount	double	payment initiation amount
+currency	string	payment currency
+transactionId	string	transaction Id provided by you
+paymentPurpose	string	original payment purpose is returned, which will be seen in payer's and receiver's bank account statement. transactionId is provided to identify the payments
+iat	timestamp	states when the token has been issued
+exp	timestamp	states expiration time of a token
+Example of decoded payload data:
+
+{
+  "projectId": 1,
+  "amount": 0.01,
+  "currency": "EUR",
+  "transactionId": "TS837",
+  "paymentPurpose": "Payment purpose",
+  "iat": 1575893545,
+  "exp": 1575979945
+}
+Canceled
+Canceled payment status will be sent only via clientRedirectUrl and refers to user closing the payment widget by pressing the X button, before payment has been successfully signed or after receiving an error. Order status in your system can be changed to "Payment canceled".
+
+Once payer closes the payment widget, confirmation message is going to be displayed asking to confirm the step. If the payer confirms the closure, he is going to be redirected to your provided clientRedirectUrl URL:
+
+https://myproject.com/redirect?canceled=1&data=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsImFtb3VudCI6MC4wMSwiY3VycmVuY3kiOiJFVVIiLCJ0cmFuc2FjdGlvbklkIjoiVFM4MzciLCJwYXltZW50UHVycG9zZSI6IlBheW1lbnQgcHVycG9zZSIsInJlY2VpdmVyQWNjb3VudE51bWJlciI6IkxUNjMzNTIwMDM3MDYyMDU3NTgxIiwicmVjZWl2ZXJOYW1lIjoiUGV0cmFzIFBldHJhaXRpcyIsImlhdCI6MTU3NTg5MzU0NSwiZXhwIjoxNTc1OTc5OTQ1fQ.NfapKuy6-h55SvZdTq3hi5OGP6k4GmwlqySBunr1J7c
+CLIENT REDIRECT URL CLAIM	FORMAT	DESCRIPTION
+canceled	Boolean	canceled=1 notifies, that user has canceled the payment
+data	string	payment initiation token to identify canceled payment
+Be informed, that after receiving payment status canceled=1, it could still be changed to "status": "success" via the server side callback.
+
+Data is a JWT token signed by your projectKey which has been provided when initiating a payment, so it needs to be validate to make sure it is a Neopay signed response. There will be additional parameters provided in the token
+
+DATA TOKEN CLAIM	FORMAT	DESCRIPTION
+projectId	integer	a unique project ID given by NEO Finance
+amount	double	payment initiation amount
+currency	string	payment currency
+transactionId	string	transaction Id provided by you
+paymentPurpose	string	original payment purpose is returned, which will be seen in payer's and receiver's bank account statement. transactionId is provided to identify the payments
+iat	timestamp	states when the token has been issued
+exp	timestamp	states expiration time of a token
+Example of decoded payload data:
+
+{
+  "projectId": 1,
+  "amount": 0.01,
+  "currency": "EUR",
+  "transactionId": "TS837",
+  "paymentPurpose": "Payment purpose",
+  "iat": 1575893545,
+  "exp": 1575979945
+}
+Success
+When the payment has been successfully signed by the payer and the bank accepted the payment, payer is going to be redirected to your provided clientRedirectUrl URL:
+
+https://myproject.com/redirect?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0cmFuc2FjdGlvbklkIjoiVFM4MzciLCJwYXllckFjY291bnROdW1iZXIiOiJMVDEyMzQ1Njc4OTEyMzQ1NjgiLCJjdXJyZW5jeSI6IkVVUiIsImFtb3VudCI6MC4wMSwiaWF0IjoxNjIwNjMzMzA0LCJleHAiOjE2MjA3MTk3MDQsInN0YXR1cyI6InNpZ25lZCIsImJhbmsiOnsiYmljIjoiVEVTVExUMTIzIiwibmFtZSI6IlRlc3RpbmlzIG1va8SXamltYXMifX0.qlu8mDYGgihcydlolw7uU9JaOic75oLi1ndCzj9Sj7U
+CLIENT REDIRECT URL CLAIM	FORMAT	DESCRIPTION
+token	string	payment initiation token to identify successful payment
+Be informed, if token parameter has been provided it states the payment was successfully signed and confirmed by the bank. Be sure that status variable is checked inside the token in order to update the order status at your system accordingly.
+
+Token is a JWT token signed by your projectKey which has been provided when initiating a payment, so it needs to be validate to make sure it is a Neopay signed response. There will be additional parameters provided in the token:
+
+DATA TOKEN CLAIM	FORMAT	DESCRIPTION
+projectId	integer	a unique project ID given by NEO Finance
+amount	double	payment initiation amount
+currency	string	payment currency
+transactionId	string	transaction Id provided by you
+paymentPurpose	string	original payment purpose is returned, which will be seen in payer's and receiver's bank account statement. transactionId is provided to identify the payments
+status	string	in most cases signed value is going to be provided, which states that the payment has been successfully signed by the payer, however status partially_signed is also possible if payment requires more than 1 signature
+payerName*	string	payer name and surname (*available only if payer bank is SEB, Luminor, Revolut. And further bank only with redirect flow: Citadele, Wise, Coop, LPB)
+payerAccountNumber	string	payer account number
+bank	array	Payers bank BIC and Name (from our system)
+iat	timestamp	states when the token has been issued
+exp	timestamp	states expiration time of a token
+Example of decoded payload data:
+
+{
+  "projectId": 1,
+  "amount": 0.01,
+  "currency": "EUR",
+  "transactionId": "TS837",
+  "paymentPurpose": "Payment purpose",
+  "status": "signed",
+  "payerName": "Vardenis Pavardenis",
+  "bank": {
+  "bic": "HABALT22",
+  "name": "Swedbank"},
+  "iat": 1575893545,
+  "exp": 1575979945
+}
+Server side
+Server side callback URL is used to notify your system about successfully signed and completed operations only. Please note that the successful server side callback must override any client side callback status that is present for the operation, and must be taken as the final confirmation of the operation's success. The server side callback URL must be filled at the project information page in the Self Service portal.
+
+POST request
+Once we receive confirmation from the bank that operation has been successfully signed and is going to be executed - we are going instantly POST a request to your provided callback URL with a body of JSON:
+
+{
+  "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0cmFuc2FjdGlvbnMiOnsiVFM4MzciOnsic3RhdHVzIjoic3VjY2VzcyIsImFjdGlvbiI6InNpZ25lZCIsImN1cnJlbmN5IjoiRVVSIiwiYW1vdW50IjowLjEsInBheW1lbnRQdXJwb3NlIjoiTklQUzEtVFM4MzcgUGF5bWVudCBwdXJwb3NlIiwicGF5ZXJBY2NvdW50TnVtYmVyIjoiTFQxMjM0NTY3ODkxMjM0NTY4IiwicmVjZWl2ZXJOYW1lIjoiUGV0cmFzIFBldHJhaXRpcyIsInJlY2VpdmVyQWNjb3VudE51bWJlciI6IkxUNjMzNTIwMDM3MDYyMDU3NTgxIn19LCJpYXQiOjE1OTg5NDQyMDQsImV4cCI6MTU5OTAzMDYwNH0.zwhEsQImqyA13otRxfrFDFt0LYfSVxKf-j_zGlv39O8"
+}
+Token payload data:
+
+DATA TOKEN CLAIM	FORMAT	DESCRIPTION
+status	string	only success value is going to be provided, which states about successful payment
+action	string	only signed value is going to be provided, which states that the payment has been successfully signed by the payer
+currency	string	payment currency
+amount	double	payment initiation amount
+paymentPurpose	string	original payment purpose is returned, which will be seen in payer's and receiver's bank account statement. transactionId is provided to identify the payments.
+payerName*	string	payer name and surname (*available only if payer bank is SEB, Luminor, Citadele (Citadele only with redirect flow) and Revolut)
+payerAccountNumber	string	payer account number
+bank	array	Payers bank BIC and Name (from our system)
+iat	timestamp	states when the token has been issued
+exp	timestamp	states expiration time of a token
+Example of decoded token payload data showing two transactions:
+
+{
+  "transactions": {
+    "TS837": {
+      "status": "success",
+      "action": "signed",
+      "currency": "EUR",
+      "amount": 0.1,
+      "paymentPurpose": "NIPS1-TS837 Payment purpose",
+      "payerAccountNumber": "LT1234567891234568",
+      "bank": {
+        "bic": "CBVILT2X",
+        "name": "SEB bankas"
+      }
+      }
+      "TS838": {
+      "status": "success",
+      "action": "signed",
+      "currency": "EUR",
+      "amount": 0.1,
+      "paymentPurpose": "NIPS1-TS838 Payment purpose",
+      "payerAccountNumber": "LT1234567891234568",
+      "bank": {
+        "bic": "CBVILT2X",
+        "name": "SEB bankas"
+      }
+      }
+  },
+  "iat": 1598944204,
+  "exp": 1599030604
+}
+Be informed that array is supported in the server side tokens, and a single token may contain up to 500 transaction information. Please also take note that in the case of transaction array, operations from different services can be present, for example it is possible that you will receive the transfer confirmations of both incoming PIS payments as well as outgoing refund payments in the single transaction array. Please make sure that your URL endpoint is capable of handling multiple transactions and transaction types within a single token.
+
+Secondary callback*
+This callback is ONLY received if you have opened an account in AB NEO Finance and payments are collected in this account. The secondary callback will be sent after the payment is physically received in your account. System sends these callbacks instantly to your provided server-side callback URL.
+
+IMPORTANT NOTE It is possible that sometimes you will receive the secondary callback confirmation sooner than the regular callback confirmation. Please make sure that your system is capable to handle such scenarios, once the secondary callback is received there must be no further changes to the payment status.
+
+Token payload data:
+
+DATA TOKEN CLAIM	FORMAT	DESCRIPTION
+status	string	only success value is going to be provided, which states about successful payment
+action	string	only confirmed value is going to be provided, which states that money are already received in the account
+currency	string	payment currency
+amount	double	payment initiation amount
+paymentPurpose	string	original payment purpose is returned, which will be seen in payer's and receiver's bank account statement. transactionId is provided to identify the payments.
+payerName	string	payer name and surname (or company name)
+payerAccountNumber	string	payer account number
+confirmedAt	date	Date and time when the payment was received
+confirmationId	string	Confirmation identifier
+bank	array	Payers bank BIC and Name (from our system)
+transactions": {
+    "TS837": {
+      "status": "success",
+      "action": "confirmed",
+      "payerName": "Vardenis Pavardenis",
+      "payerAccountNumber": "LT123456879456213",
+      "paymentPurpose": "Payment purpose 12345789",
+      "confirmedAt": "2021-07-19T15:15:04+03:00",
+      "confirmationId": "9786a7a514cfbc7a9465a972f357d34b",
+      "amount": 17,
+      "currency": "EUR",
+      "bank": {
+        "bic": "CBVILT2X",
+        "name": "SEB bankas"
+      }
+    }
+   }
+Signed callback
+This callback is ONLY received if enabled for your Project by Neopay Team (contact your sales manager regarding this). The signed callback will be sent after the payment is successfully signed by the payer. Note: Systems sends these callbacks instantly to your provided server-side callback URL.
+
+Token payload data:
+
+DATA TOKEN CLAIM	FORMAT	DESCRIPTION
+status	string	only signed value is going to be provided, which states about successful payment
+action	string	only signed value is going to be provided, which states that the payment has been successfully signed by the payer
+currency	string	payment currency
+amount	double	payment initiation amount
+paymentPurpose	string	original payment purpose is returned, which will be seen in payer's and receiver's bank account statement. transactionId is provided to identify the payments.
+payerName*	string	payer name and surname (*available only if payer bank is SEB, Luminor (in Baltic countries))
+payerAccountNumber*	string	payer account number (*not available only when payers bank is Revolut)
+bank	array	Payers bank BIC and Name (from our system)
+iat	timestamp	states when the token has been issued
+exp	timestamp	states expiration time of a token
+{
+  "transactions": {
+    "TS837": {
+      "status": "signed",
+      "action": "signed",
+      "currency": "EUR",
+      "amount": 0.1,
+      "paymentPurpose": "NIPS1-TS837 Payment purpose",
+      "payerAccountNumber": "LT1234567891234568",
+      "bank": {
+        "bic": "CBVILT2X",
+        "name": "SEB bankas"
+      }
+      }
+      "TS838": {
+      "status": "signed",
+      "action": "signed",
+      "currency": "EUR",
+      "amount": 0.1,
+      "paymentPurpose": "NIPS1-TS838 Payment purpose",
+      "payerAccountNumber": "LT1234567891234568",
+      "bank": {
+        "bic": "CBVILT2X",
+        "name": "SEB bankas"
+      }
+      }
+  },
+  "iat": 1598944204,
+  "exp": 1599030604
+}
+Response to callbacks
+We are expecting the response to the server side callback to be received within 10 seconds of delivery, otherwise we are going keep repeating POST request to your provided server side callback URL until the response is received, along with the emails informing you about potential malfunctions. Once you receive the callback token - it's very important to:
+
+save the token in your system for later processing;
+respond with HTTP 200 and the JSON body { "status": "success" } - no other response is accepted, otherwise we are going to keep repeating POST requests, and the array of transactions will grow.
+Refunds
+Refund payment allows to make up to 100 payments refunds with one API request. This service is available only for payments collected into NEO Finance bank account. If you wish to use this service and need more help, please contact Neopay manager.
+
+To initiate payment refund you need to call our API endpoint: https://mano.neopay.lt/openapi/self-service/refunds with a JSON body:
+
+ {"token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsInBheW1lbnRzIjpbeyJ0cmFuc2FjdGlvbklkIjoiMTY0MTM2MjIxOC0yNTMiLCJhbW91bnQiOiIwLjAxIn0seyJ0cmFuc2FjdGlvbklkIjoiY2ZlNDMzMjM2NSIsImFtb3VudCI6IjAuMDEiLCJwYXllckFjY291bnROdW1iZXIiOiJMVDk4MzUyMDA3ODE1NjI0NjkyMiJ9LHsidHJhbnNhY3Rpb25JZCI6ImFiYyIsImFtb3VudCI6IjAuMDEifV19._ZKPuEuLiubBLYToi5NeQTumOy3qJ2RWIBjEibBVLxE"}
+Payload
+Token payload data:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	string	Project ID from which you wish to initiate the refund	YES
+payments	array	The list of payments (up to 100) that you wish to refund. Each of the entries must include transactionId parameter	YES
+transactionId	string(35)	Transaction ID of an already completed PIS transaction that you wish to refund	YES
+amount	double	Refund amount. Full or partial refund amounts are available. Also, full refund will be initiated in case of this parameter being not provided	NO
+payerAccountNumber	string	In case you have more than one bank account with us, you can specify which bank account should be used for the refund. If not specified, the refund will be made from the main NEO Finance account added to the project	NO
+Example JWT payload
+
+{
+  "projectId": 1,
+  "payments": [
+     {
+        "transactionId": "1651836886-124",
+        "amount": "0.01",
+        "payerAccountNumber": "LT1234567890"
+     },
+     {
+        "transactionId": "1651836886-456",
+        "amount": "100"
+     }
+  ]  
+}
+curl example:
+
+curl --location --request POST 'https://mano.neopay.lt/openapi/self-service/refunds' \
+--header 'Content-Type: application/json' \
+--data '{"token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsInBheW1lbnRzIjpbeyJ0cmFuc2FjdGlvbklkIjoiMTY0MTM2MjIxOC0yNTMiLCJhbW91bnQiOiIwLjAxIn0seyJ0cmFuc2FjdGlvbklkIjoiY2ZlNDMzMjM2NSIsImFtb3VudCI6IjAuMDEiLCJwYXllckFjY291bnROdW1iZXIiOiJMVDk4MzUyMDA3ODE1NjI0NjkyMiJ9LHsidHJhbnNhY3Rpb25JZCI6ImFiYyIsImFtb3VudCI6IjAuMDEifV19._ZKPuEuLiubBLYToi5NeQTumOy3qJ2RWIBjEibBVLxE"}'
+Success response example:
+
+[
+    {
+        "transactionId": "1651836886-124",
+        "status": "pending"
+    },
+    {
+        "transactionId": "1651836886-456",
+        "status": "failed"
+    }
+]
+Error response example:
+
+{
+    "status": "failed",
+    "error": "Max. 100 payments are allowed per request"
+}
+Callback
+Server-side callback will be used to inform about refund payments. Refund payment might have statuses: success or rejected.
+
+Example of decoded token payload data:
+
+{
+  "payments": {
+    "1651836886-124": {
+      "status": "success",
+      "amount": 0.01,
+      "payerAccountNumber": "LT1234567890"
+    },
+    "1651836886-456": {
+      "status": "rejected",
+      "amount": 0.01,
+      "payerAccountNumber": "LT1234567890"
+    }
+  },
+  "iat": 1652253940,
+  "exp": 1652340340
+}
+IMPORTANT NOTE: callbacks for refunds will be received in 5 minutes.
+
+Bulk refund payments
+Bulk refund payments allows to make up to 50 outgoing payments with one API request. This service is available only for outgoing payments from NEO Finance bank account. If you wish to use this service and need more help, please contact Neopay manager.
+
+To initiate bulk refund payment you need to call our API endpoint: https://mano.neopay.lt/openapi/self-service/payouts with a JSON body:
+
+ {"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwcm9qZWN0SWQiOiIxIiwidHJhbnNhY3Rpb25JZCI6IjEyMzQ1NjctMjIiLCJwYXltZW50UHVycG9zZSI6IlBheW1lbnQgcHVycG9zZSIsInBheWVyRW1haWwiOiJSUlRwLzRZVEk0NDZVRStUWVVhQUVnPT0iLCJwYXllckFjY291bnROdW1iZXIiOiJMVDQ0MzUyMDA2NzczMDI5NjIwOCIsInBheW1lbnRzIjpbeyJ0cmFuc2FjdGlvbklkIjoiMTIzNDU3LTIyLTEiLCJhbW91bnQiOiIwLjAxIiwicGF5bWVudFB1cnBvc2UiOiJQYXltZW50IHB1cnBvc2UiLCJyZWNlaXZlck5hbWUiOiJBY2NvdW50IEhvbGRlciBOYW1lIiwicmVjZWl2ZXJBY2NvdW50TnVtYmVyIjoiTFQxMDM1MjAwNDI3OTg5ODQ2MzEifSx7InRyYW5zYWN0aW9uSWQiOiIxMjM0NTctMjItMiIsImFtb3VudCI6IjAuMDIiLCJwYXltZW50UHVycG9zZSI6IlBheW1lbnQgcHVycG9zZSAyIiwicmVjZWl2ZXJOYW1lIjoiQWNjb3VudCBIb2xkZXIgTmFtZSAyIiwicmVjZWl2ZXJBY2NvdW50TnVtYmVyIjoiTFQxMDM1MjAwNDI3OTg5ODQ2MzEifV19.W7xva7imS9TKofBtNgFgw05Cz5LnjKEXz-6sLKSDbpU"}
+Payload
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	integer	a unique project ID given by NEO Finance.	YES
+transactionId	string(35)	It must be unique for each payment initiation. Must not exceed 35 symbols.	YES
+paymentPurpose	string (140)	provide details about the payment	YES
+defaultLocale	string	Notification email will be sent in this language.	NO
+payerEmail	encrypted string	success payment notification will be sent to this email	NO
+payerAccountNumber	string	In case you have more than one bank account with us, you can specify which bank account should be used for the bulk refund payment. If not specified, the bulk refund payment will be made from the main NEO Finance account connected to the project	NO
+clientRedirectUrl	string	this redirect URL is used to redirect the payer once he returns from Neopay after successful or failed operation. If no URL is provided, the only way for the client to exit our payment environment will be by closing the web browser and they will not be redirected back to your website	NO
+payments	array	array with payments details for each payment: transactionId, amount, paymentPurpose, receiverName, receiverAccountNumber. Up to 50 payments are supported with a single bulk refund payment transaction.	YES
+Example JWT payload
+
+{
+"projectId": "1",
+"transactionId": "1234567-22",
+"paymentPurpose": "Payment purpose",
+"defaultLocale":"LT",
+"payerEmail": "RRTp/4YTI446UE+TYUaAEg==",
+"payerAccountNumber": "LT4435200XXXXXXXXXXX",
+"payments": [
+{
+  "transactionId": "123457-22-1",
+  "amount": "0.01",
+  "paymentPurpose": "Payment purpose",
+  "receiverName": "Account Holder Name",
+  "receiverAccountNumber": "LT1035200XXXXXXXXXXX"
+},
+{
+  "transactionId": "123457-22-2",
+  "amount": "0.02",
+  "paymentPurpose": "Payment purpose 2",
+  "receiverName": "Account Holder Name 2",
+  "receiverAccountNumber": "LT1035200XXXXXXXXXXX"
+}
+]
+}
+curl example:
+
+curl --location 'https://mano.neopay.lt/openapi/self-service/payouts'\
+--header 'Content-Type: application/json'\
+--data '{"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwcm9qZWN0SWQiOiIxIiwidHJhbnNhY3Rpb25JZCI6IjEyMzQ1NjctMjIiLCJwYXltZW50UHVycG9zZSI6IlBheW1lbnQgcHVycG9zZSIsInBheWVyRW1haWwiOiJSUlRwLzRZVEk0NDZVRStUWVVhQUVnPT0iLCJwYXltZW50cyI6W3sidHJhbnNhY3Rpb25JZCI6IjEyMzQ1Ny0yMi0xIiwiYW1vdW50IjoiMC4wMSIsInBheW1lbnRQdXJwb3NlIjoiUGF5bWVudCBwdXJwb3NlIiwicmVjZWl2ZXJOYW1lIjoiQWNjb3VudCBIb2xkZXIgTmFtZSIsInJlY2VpdmVyQWNjb3VudE51bWJlciI6IkxUMTAzNTIwMDQyNzk4OTg0NjMxIiwicGF5ZXJBY2NvdW50TnVtYmVyIjoiTFQ0NDM1MjAwNjc3MzAyOTYyMDgifSx7InRyYW5zYWN0aW9uSWQiOiIxMjM0NTctMjItMiIsImFtb3VudCI6IjAuMDIiLCJwYXltZW50UHVycG9zZSI6IlBheW1lbnQgcHVycG9zZSAyIiwicmVjZWl2ZXJOYW1lIjoiQWNjb3VudCBIb2xkZXIgTmFtZSAyIiwicmVjZWl2ZXJBY2NvdW50TnVtYmVyIjoiTFQxMDM1MjAwNDI3OTg5ODQ2MzEiLCJwYXllckFjY291bnROdW1iZXIiOiJMVDQ0MzUyMDA2NzczMDI5NjIwOCJ9XX0.NB6XvdHp918P-_grGX__wyugVFmBk2CuidxX88B3lEU"}'
+Success response example:
+
+[
+    {
+        "transactionId": "51235",
+        "status": "pending"
+    },
+    {
+        "transactionId": "412316",
+        "status": "failed"
+    }
+]
+Error response example:
+
+{
+    "status": "failed",
+    "error": "Max. 50 payments are allowed per request"
+}
+Callback
+Server-side callback will be used to inform about bulk refund payments.
+
+Individual outgoing payment might have statuses: success or rejected.
+
+Example of decoded token payload data:
+
+{
+    "transactions": {
+        "1234567": {
+            "status": "success",
+            "action": "signed",
+            "currency": "EUR",
+            "amount": 0.01,
+            "paymentPurpose": "bulk refund payment test",
+            "payerAccountNumber": "LT4435200XXXXXXXXXXX",
+            "payments": [
+                {
+                    "transactionId": "1234567-1",
+                    "status": "success",
+                    "amount": 0.01,
+                    "currency": "EUR",
+                    "paymentPurpose": "bulk refund payment test"
+                }
+            ],
+            "bank": {
+                "bic": "UANFLT21",
+                "name": "NEO Finance AB"
+            }
+        }
+    },
+    "iat": 1695193404,
+    "exp": 1695284904
+}
+Partially Accepted
+It is also possible to received the status partially_accepted, it means that some of the payment in the bulk were successful and some were not. For the exact status of individual transfers please check their individual status in the payment array.
+
+Example of decoded token payload data:
+
+{
+    "transactions": {
+        "bulkrefundtransactionId": {
+            "status": "partially_accepted",
+            "action": "signed",
+            "currency": "EUR",
+            "amount": 0.02,
+            "paymentPurpose": "NIPS1-testing Payment purpose",
+            "payerAccountNumber": "LT123520000000123123",
+            "payments": [
+                {
+                    "transactionId": "test1",
+                    "status": "success",
+                    "amount": 0.01,
+                    "currency": "EUR",
+                    "paymentPurpose": "NIPS1-test1 Testas"
+                },
+                {
+                    "transactionId": "test2",
+                    "status": "rejected",
+                    "amount": 0.01,
+                    "currency": "EUR",
+                    "paymentPurpose": "NIPS1-test2 Testas"
+                }
+            ],
+            "bank": {
+                "bic": "UANFLT21",
+                "name": "NEO Finance, AB"
+            }
+        }
+    },
+    "iat": 1738833261,
+    "exp": 1738919661
+}
+Recurring (periodic) payments
+By default this service is disabled, if you wish to use it please contact Neopay manager to sign the agreement. After signing the agreement service will be enabled. Recurring payment agreement signing initiation is called by passing additional parameter "serviceType":"rpas".
+
+In order to get the latest information about available banks that are compatible with Recurring agreement service, please use our Banks API
+
+Payload
+To execute a recurring payment, payment details must be provided in a payload as follows:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	integer	a unique project ID given by NEO Finance	YES
+transactionId	string(35)	It must be unique for each payment initiation. Must not exceed 35 symbols.	YES
+amount	double	payment initiation amount	YES
+currency	string	payment currency	YES
+frequency	string	available payment frequencies depends on a specific bank. All of the banks supports Monthly. Majority of the banks support Weekly and Daily. Many banks support Quarterly, Semi Annually and Annually.	
+startDate	string	Day of the first payment (must be in the future)	YES
+endDate	string	Agreement end date, mandatory only with Artea periodic payments	NO
+requiresPayment	double	If amount is passed, then payer first need to make a payment for this amount, and after will be requested to sing the recurring payment agreement.	NO
+paymentPurpose	string (140)	provide details about the payment; in the case of Revolut bank recurring payments the paymentPurpose is limited to 35 characters only	YES
+clientRedirectUrl	string	this redirect URL is used to redirect the payer once he returns from Neopay after successful or failed operation. If no URL is provided, the only way for the client to exit our payment environment will be by closing the web browser and they will not be redirected back to your website	NO
+serviceType	string (140)	rpas must be provided in order to use this service	YES
+Example JWT payload
+
+{
+  "projectId": 1,
+  "transactionId": "TS837",
+  "amount": 0.01,
+  "currency": "EUR",
+  "frequency": "Weekly",
+  "startDate": "2020-12-16",
+  "endDate": "2020-12-27",
+  "paymentPurpose": "My Payment purpose",
+  "serviceType": "rpas",
+  "clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+In the scenario above, the bank will attempt to initiate payments weekly between start and end dates: the first one on 2020-12-16 (Wednesday) and the second one on 2020-12-23 (Wednesday).
+
+Callbacks
+Client side
+Callbacks will be same as in the payment initiation pending, successful and canceled. Both client side and server side callbacks must be implemented and tested in order to Go LIVE with Neopay payment collection system.
+
+When the recurring payment agreement has been successfully signed by the payer and final status from the bank has been received, payer is going to be redirected to your provided clientRedirectUrl URL:
+
+https://myproject.com/redirect?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsImFtb3VudCI6MC4wMSwiY3VycmVuY3kiOiJFVVIiLCJ0cmFuc2FjdGlvbklkIjoiVFM4MzciLCJmcmVxdWVuY3kiOiJXZWVrbHkiLCJzdGFydERhdGUiOiIyMDIwLTEyLTE2IiwiZW5kRGF0ZSI6IjIwMjAtMTItMjciLCJzdGF0dXMiOiJzaWduZWQiLCJwYXltZW50UHVycG9zZSI6IlBheW1lbnQgcHVycG9zZSIsInJlY2VpdmVyQWNjb3VudE51bWJlciI6IkxUNjMzNTIwMDM3MDYyMDU3NTgxIiwicmVjZWl2ZXJOYW1lIjoiUGV0cmFzIFBldHJhaXRpcyIsImlhdCI6MTU3NTg5MzU0NSwiZXhwIjoxNTc1OTc5OTQ1fQ.bUys43b16VCdtrumsT8stoiBFa7-4KWwl3zToZQ6DoI
+CLIENT REDIRECT URL CLAIM	FORMAT	DESCRIPTION
+token	string	Recurring payment initiation token to identify successful agreement was signed
+Be informed, if token parameter has been provided it states the final agreement status and confirms that it was signed.
+
+Be sure that status variable is checked inside the token in order to update the order status at your system to "Signed".
+
+Server side
+Once we receive information from the bank that agreement has been successfully signed - we are going instantly POST a request to your provided callback URL with a body of JSON:
+
+{
+  "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhZ3JlZW1lbnRzIjp7IlRTODM3Ijp7InN0YXR1cyI6InN1Y2Nlc3MiLCJhY3Rpb24iOiJzaWduZWQiLCJjdXJyZW5jeSI6IkVVUiIsImFtb3VudCI6MC4xLCJmcmVxdWVuY3kiOiJXZWVrbHkiLCJzdGFydERhdGUiOiIyMDIwLTEyLTE2IiwiZW5kRGF0ZSI6IjIwMjAtMTItMjciLCJwYXltZW50UHVycG9zZSI6Ik15IFBheW1lbnQgcHVycG9zZSIsInBheWVyQWNjb3VudE51bWJlciI6IkxUMTIzNDU2Nzg5MTIzNDU2OCIsInJlY2VpdmVyTmFtZSI6IlBldHJhcyBQZXRyYWl0aXMiLCJyZWNlaXZlckFjY291bnROdW1iZXIiOiJMVDYzMzUyMDAzNzA2MjA1NzU4MSJ9fSwiaWF0IjoxNTk4OTQ0MjA0LCJleHAiOjE1OTkwMzA2MDR9.Qr-GKrDgGHBTvCtiiiH-Sn6Co1x1ZERYjXQ8Peh9tJM"
+}
+Success
+Token payload data:
+
+DATA TOKEN CLAIM	FORMAT	DESCRIPTION
+status	string	success value is going to be provided, which states about successful process
+action	string	only signed value is going to be provided, which states that the agreement has been successfully signed by the payer
+currency	string	payment currency
+amount	double	payment initiation amount
+frequency	string	payment frequency [Available values: Daily, Weekly, Monthly, Quarterly, Annually, Semi Annually]
+startDate	string	Day of the first payment
+endDate	string	Agreement end date (will return NULL if not stated)
+paymentPurpose	string	original payment purpose is returned, which will be seen in payer's and receiver's bank account statement. transactionId is provided to identify the payments.
+payerAccountNumber	string	payer account number
+iat	timestamp	states when the token has been issued
+exp	timestamp	states expiration time of a token
+Example of decoded token payload data:
+
+{
+"agreements": {
+"TS837": {
+  "status": "success",
+  "action": "signed",
+  "currency": "EUR",
+  "amount": 0.1,
+  "frequency": "Weekly",
+  "startDate": "2020-12-16",
+  "endDate": "2020-12-27",
+  "paymentPurpose": "My Payment purpose",
+  "payerAccountNumber": "LT1234567891234568",
+  "bank": {
+    "bic": "HABALT22",
+    "name": "„Swedbank” AB LT"
+  }
+}
+},
+ "iat": 1598944204,
+ "exp": 1599030604
+}
+Be informed array is supported in server side token. It may consist up to 500 agreements.
+
+Note: You will be informed only about the agreement status and you won't be informed about the payment statuses, payments must be checked from the bank account.
+
+Canceled
+Payer is able to cancel the agreement by logging in to the Internet bank. We will check on the payment date if the agreement is still valid and if we receive status from the bank that the agreement is canceled, we will send a server side callback with status canceled.
+
+Example of decoded token payload data:
+
+{
+"agreements": {
+"TS837": {
+  "status": "success",
+        "action": "cancelled",
+  "currency": "EUR",
+  "amount": 0.1,
+  "frequency": "Weekly",
+  "startDate": "2020-12-16",
+  "endDate": "2020-12-27",
+  "paymentPurpose": "My Payment purpose",
+  "payerAccountNumber": "LT1234567891234568",
+  "bank": {
+    "bic": "HABALT22",
+    "name": "„Swedbank” AB LT"
+  }
+}
+},
+ "iat": 1598944204,
+ "exp": 1599030604
+}
+Get agreement status
+We are checking on the payment date if the recurring agreement is still valid and is not cancelled by the user. To check the status of the recurring agreement earlier, you need to call our API endpoint: GET http://mano.neopay.lt/openapi/self-service/recurring-payment-status/ and add signed JWT token. We will update the status of the recurring agreement accordingly as well.
+
+Example JWT payload:
+
+{
+"projectId": 1,
+"transactionId": "1747996797-388"
+}
+Curl example:
+
+    curl --location 'http://mano.neopay.lt/openapi/self-service/recurring-payment-status/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwcm9qZWN0SWQiOjEsInRyYW5zYWN0aW9uSWQiOiIxNzQ3OTk2Nzk3LTM4OCJ9.2nylwlrS0WuOyDfQ8lwCatd79r1hbZARFWgkpSoicCs' \
+    --header 'Accept: application/json'
+Success response example:
+
+{
+"transactionId": "1747996797-388",
+"status": "active"
+}
+Note: status parameter can have the following values: active, cancelled or inactive.
+
+Error response example:
+
+{
+"type": "https://tools.ietf.org/html/rfc2616#section-10",
+"title": "An error occurred",
+"status": 400,
+"detail": "Bad Request"
+}
+Bulk payments
+Bulk payments allows to make a up to 100 payments with one payment signing by the payer. By default this service is disabled, if you wish to use it please contact Neopay manager. To initiate bulk payment you need to call our widget host API endpoint: POST https://psd2.neopay.lt/widget.html? and add signed JWT token.
+
+Use Content-Type: application/x-www-form-urlencoded
+
+In order to get the latest information about available banks that are compatible with Bulk payment service, please use our Banks API
+
+Payload
+To execute a bulk payment, details must be provided in a payload:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	integer	a unique project ID given by NEO Finance	YES
+serviceType	string (140)	bulk must be provided in order to use this service	YES
+transactionId	string(35)	It must be unique for each payment initiation. Must not exceed 35 symbols.	YES
+paymentPurpose	string (140)	provide details about the payment	YES
+defaultLocale	string	Predefined widget language, as well notification email will be sent in this language.	NO
+payerEmail	encrypted string	success payment notification will be sent to this email	NO
+clientRedirectUrl	string	this redirect URL is used to redirect the payer once he returns from Neopay after successful or failed operation. If no URL is provided, the only way for the client to exit our payment environment will be by closing the web browser and they will not be redirected back to your website	NO
+payments	array	array with payments details for each payment: transactionId, amount, currency, paymentPurpose, receiverName, receiverAccountNumber. Up to 100 payments.	YES
+Example JWT payload
+
+{
+"clientRedirectUrl": "https://yourwebsite.com/callback/",
+"projectId": 1,
+"serviceType:"bulk",
+"paymentPurpose": "PISP Demonstration",
+"transactionId": "1634740567-40852",
+"defaultLocale":"LT",
+"payerEmail": "uWWhqKg4uvvHCQVVQko8Q1n+Rgb3TlsibOGinUKF9M+jK/EXyAqAQR/Bz+e9cHGL",
+"payments": [
+{
+  "transactionId": "1634740567-64963",
+  "amount": 0.01,
+  "currency": "EUR",
+  "paymentPurpose": "Demonstration",
+  "receiverName": "UAB Receiver",
+  "receiverAccountNumber": "LT12345678945613654"
+},
+{
+  "transactionId": "1634740567-84945",
+  "amount": 0.02,
+  "currency": "EUR",
+  "paymentPurpose": "Demonstration 2",
+  "receiverName": "UAB Receiver",
+  "receiverAccountNumber": "LT12345678911234578"
+  }
+ ]
+}
+Callbacks
+Client side
+You will get client side callbacks through POST as well. Callbacks will be same as in the payment initiation pending, successful and canceled. Both client side and server side callbacks must be implemented and tested in order to Go LIVE with Neopay payment collection system.
+
+When the payments have been successfully signed signed by the payer and final status from the bank has been received, payer is going to be redirected to your provided clientRedirectUrl URL, example:
+
+https://myproject.com/client_redirect
+Server side
+Once we receive information from the bank that payments have been successfully signed - we are going instantly POST a request to your provided callback URL with a body of JSON:
+
+{
+  "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0cmFuc2FjdGlvbnMiOnsiMTYzNDc0MDU2Ny00MDg1MiI6eyJzdGF0dXMiOiJzdWNjZXNzIiwiYWN0aW9uIjoic2lnbmVkIiwiY3VycmVuY3kiOiJFVVIiLCJhbW91bnQiOjAuMDMsInBheW1lbnRQdXJwb3NlIjoiTklQUzEtMTYzNDc0MDU2Ny00MDg1MiBQSVNQIERlbW9uc3RyYXRpb24iLCJwYXllckFjY291bnROdW1iZXIiOiJMVDEzNzMwMDAxMjM0NTY3ODkxMiIsInBheW1lbnRzIjpbeyJ0cmFuc2FjdGlvbklkIjoiMTYzNDc0MDU2Ny02NDk2MyIsInN0YXR1cyI6InN1Y2Nlc3MiLCJhbW91bnQiOjAuMDEsImN1cnJlbmN5IjoiRVVSIiwicGF5bWVudFB1cnBvc2UiOiJOSVBTMS0xNjM0NzQwNTY3LTY0OTYzIERlbW9uc3RyYXRpb24ifSx7InRyYW5zYWN0aW9uSWQiOiIxNjM0NzQwNTY3LTg0OTQ1Iiwic3RhdHVzIjoic3VjY2VzcyIsImFtb3VudCI6MC4wMiwiY3VycmVuY3kiOiJFVVIiLCJwYXltZW50UHVycG9zZSI6Ik5JUFMxLTE2MzQ3NDA1NjctODQ5NDUgRGVtb25zdHJhdGlvbiAyIn1dLCJiYW5rIjp7ImJpYyI6IkhBQkFMVDIyIiwibmFtZSI6IlN3ZWRiYW5rIn19fSwiaWF0IjoxNjQyNTEyODUyLCJleHAiOjE2NDI1OTkyNTJ9.MKy9SQEPmwyOz4QB3n93J2CrJ6q2ScXNqEAHamPsj0g"
+}
+Success
+Token payload data:
+
+DATA TOKEN CLAIM	FORMAT	DESCRIPTION
+status	string	success or Partially Accepted value is going to be provided, which states about successful process
+action	string	signed value is going to be provided, which states that the agreement has been successfully signed by the payer
+currency	string	payment currency
+amount	double	payment initiation amount
+paymentPurpose	string	original payment purpose is returned, which will be seen in payer's and receiver's bank account statement. transactionId is provided to identify the payments.
+payerAccountNumber	string	payer account number
+payments	array	array with payments details for each payment: transactionId, amount, currency, paymentPurpose, receiverName, receiverAccountNumber.
+iat	timestamp	states when the token has been issued
+exp	timestamp	states expiration time of a token
+Example of decoded token payload data:
+
+    {
+      "transactions": {
+        "1634740567-40852": {
+          "status": "success",
+          "action": "signed",
+          "currency": "EUR",
+          "amount": 0.03,
+          "paymentPurpose": "NIPS1-1634740567-40852 PISP Demonstration",
+          "payerAccountNumber": "LT137300012345678912",
+          "payments": [
+            {
+              "transactionId": "1634740567-64963",
+              "status": "success",
+              "amount": 0.01,
+              "currency": "EUR",
+              "paymentPurpose": "NIPS1-1634740567-64963 Demonstration"
+            },
+            {
+              "transactionId": "1634740567-84945",
+              "status": "success",
+              "amount": 0.02,
+              "currency": "EUR",
+              "paymentPurpose": "NIPS1-1634740567-84945 Demonstration 2"
+            }
+          ],
+          "bank": {
+            "bic": "HABALT22",
+            "name": "Swedbank"
+          }
+        }
+      },
+      "iat": 1642512852,
+      "exp": 1642599252
+    }
+Be informed array is supported in server side token. It may consist up to 500 agreements.
+
+Note: You will be informed only about the agreement status and you won't be informed about the payment statuses, payments must be checked from the bank account.
+
+Partially Accepted
+Status Partially Accepted will mean some of the initiated payment did not go through.
+
+Example of decoded token payload data:
+
+{
+      "transactions": {
+        "1634740567-40852": {
+          "status": "Partially Accepted",
+          "action": "signed",
+          "currency": "EUR",
+          "amount": 0.03,
+          "paymentPurpose": "NIPS1-1634740567-40852 PISP Demonstration",
+          "payerAccountNumber": "LT137300012345678912",
+          "payments": [
+            {
+              "transactionId": "1634740567-64963",
+              "status": "success",
+              "amount": 0.01,
+              "currency": "EUR",
+              "paymentPurpose": "NIPS1-1634740567-64963 Demonstration"
+            },
+            {
+              "transactionId": "1634740567-84945",
+              "status": "rejected",
+              "amount": 0.02,
+              "currency": "EUR",
+              "paymentPurpose": "NIPS1-1634740567-84945 Demonstration 2"
+            }
+          ],
+          "bank": {
+            "bic": "HABALT22",
+            "name": "Swedbank"
+          }
+        }
+      },
+      "iat": 1642512852,
+      "exp": 1642599252
+    }
+Account Information Service
+By default this service is disabled, if you wish to use it please contact Neopay manager to sign the agreement. After signing the agreement service will be enabled. Account information service initiation is called by passing additional parameter "serviceType":"aisp".
+
+In order to get the latest information about available banks that are compatible with Account information service, please use our Banks API
+
+Payload
+To execute a account information service, operation details must be provided in a payload as follows:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	integer	a unique project ID given by NEO Finance	YES
+transactionId	string(35)	It must be unique for each payment initiation. Must not exceed 35 symbols.	YES
+startDate	string	Transaction report start date	NO
+endDate	string	Transaction report end date	NO
+clientRedirectUrl	string	this redirect URL is used to redirect the payer once he returns from Neopay after successful or failed operation	YES
+serviceType	string	aisp must be provided in order to use this service	YES
+access	string	values accounts or balances can be provided, if only the customer account list or account balance is required. This excludes the detailed transaction list which is normally provided with the Account Information service	NO
+allAccounts	bool	true / false, if yes all users accounts will be requested. Note: in Swedbank it will require additional signing for each account.	NO
+payerCode	encrypted string	OPTIONAL. Provided personal code will be checked against the information that the bank has, and account information will be provided only the if provided payerCode matches with the one in the payer's bank account. Only works with "flow": "redirect".	NO
+Example JWT payload:
+
+  {
+  "projectId": 1,
+  "transactionId": "TS837",
+  "startDate": "2020-12-16",
+  "endDate": "2020-12-27",
+  "serviceType": "aisp",
+  "allAccounts": "true",
+  "payerCode": "5HAY2Nub/jT97UB3hf+8cw==",
+  "clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+   }
+Partial account information service
+It is also possible to use the account information service partially, meaning you will not be getting the full transaction list of the selected accounts, but still receive information that could be useful for your internal processes such as the customer IBAN list or their account balance. To execute the partial account information service, operation details must be provided in a payload as follows:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	integer	a unique project ID given by NEO Finance	YES
+transactionId	string(35)	It must be unique for each payment initiation. Must not exceed 35 symbols.	YES
+clientRedirectUrl	string	this redirect URL is used to redirect the payer once he returns from Neopay after successful or failed operation	YES
+serviceType	string	aisp must be provided in order to use this service	YES
+access	string	values accounts or balances can be provided, if only the customer account list or account balance is required. This excludes the detailed transaction list which is normally provided with the Account Information service	YES
+allAccounts	bool	true / false, if "true" the list of all user accounts will be requested. Note: in Swedbank it will require additional signing for each account. If "false" or if the parameter is not used, the customer will be able to select the accounts that they wish to share	NO
+payerCode	encrypted string	OPTIONAL. Provided personal code will be checked against the information that the bank has, and account information will be provided only the if provided payerCode matches with the one in the payer's bank account. Only works with "flow": "redirect".	NO
+Example JWT payload:
+
+  {
+    "projectId": 1,
+    "transactionId": "TS837",
+    "startDate": "2020-12-16",
+    "endDate": "2020-12-27",
+    "serviceType": "aisp",
+    "access": "accounts",
+    "allAccounts": "true",
+    "payerCode": "5HAY2Nub/jT97UB3hf+8cw==",
+    "clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+   }
+Callbacks
+Client side
+Callbacks will be successful and canceled.
+
+When the access to account data has been successfully signed by the Account holder and final status from the bank has been received, payer is going to be redirected to your provided clientRedirectUrl URL:
+
+https://myproject.com/redirect?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0cmFuc2FjdGlvbklkIjoiVFM4MzciLCJzdGF0dXMiOiJzdWNjZXNzIn0.-X0LFH09zFpeCPTR9Izfe8OvWrX38D6kouHNZ-3E4os
+CLIENT REDIRECT URL CLAIM	FORMAT	DESCRIPTION
+token	string	Account information token to identify successful signing
+Be informed, if token parameter has been provided it states the final agreement status and confirms that it was signed.
+
+Be sure to check status inside the token in order to update the account information service initiation status in your system to "success".
+
+Server side
+Once we receive information from the bank that agreement has been successfully signed - we are going instantly POST a request to your provided callback URL with a body of JSON:
+
+{
+  "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJBSVMiOnsiMTYxNzk1NTk5MC0yNjkiOnsidXJsIjoiaHR0cHM6XC9cL3BzZDIubmVvcGF5Lmx0XC9hcGlcL2Rvd25sb2FkXC9NVFl4TnprMU5UazVNQzB5TmprdE1EVTVaVGxtT1RZMFkyRTJNekJsWWpaaFptVTVaVEU1WmpBM1pEVXhNR1V1ZW1sdyIsImJhbmsiOnsiYmljIjoiSEFCQUxUMjIiLCJuYW1lIjoiXHUyMDFlU3dlZGJhbmtcdTIwMWQgQUIgTFQifX19LCJpYXQiOjE2MTc5NTYxMDUsImV4cCI6MTYxODA0MjUwNX0.ggC2yqHjXTZGlODvOeVJeLTzqn96UzcuW_qMk8kbz1c"
+}
+Success
+Token payload data:
+
+DATA TOKEN CLAIM	FORMAT	DESCRIPTION
+url	string	success value is going to be provided as URL from witch you can download the data
+bank	string	Users bank bic and name
+transactionsUpdateToken	string	Token to be used for Information update
+iat	timestamp	states when the token has been issued
+exp	timestamp	states expiration time of a token
+Example of decoded token payload data:
+
+{
+"AIS": {
+"TS837": {
+"url": "https://psd2.neopay.lt/api/download/MTYxNzk1NTk5MC0yNjktMDU5ZTlmOTY0Y2E2MzBlYjZhZmU5ZTE5ZjA3ZDUxMGUueasdasdmlw",
+"transactionsUpdateToken": "70be666c-b8b2-11eb-8a98-0242ac160006",
+"bank": {
+    "bic": "HABALT22",
+    "name": "„Swedbank” AB LT"
+  }
+}
+},
+"iat": 1617956105,
+"exp": 1618042505
+}
+Be informed array is supported in server side token. It may consist up to 500 agreements. Download URL is available only for 15 min. after sending the token.
+
+URL will contain a .zip file with 2 (or more) .json files. One file will have transaction details - other account balance. Also, it's available to get categorized transactions file.
+
+Categorized Transaction JSON file example:
+
+{
+"client": "[ClientName]",
+"categorization_id": "03864d68-e1cf-4f3a-a68e-f5f623777f97",
+"timestamp": "2023-09-01T12:34:32",
+"categorized_data": [
+{
+    "iban": "LV67BANK0009123456789",
+    "account_holder": "JURIS OZOLS",
+    "transactions": [
+        {
+            "date": "2023-09-01",
+            "amount": "-1.94",
+            "ccy": "EUR",
+            "partner": "",
+            "info": "PURCHASE: 5420********4098 LARGEST GROCERY STORE IN LATVIA",
+            "category_id": 22,
+            "category_name": "GROCERIES"
+        },
+        {
+            "date": "2023-09-01",
+            "amount": "-25.00",
+            "ccy": "EUR",
+            "partner": "JĀNIS BĒRZIŅŠ",
+            "info": "Maksājums",
+            "category_id": 50,
+            "category_name": "PERSONAL_TRANSFERS_OUT"
+        }
+    ]
+}
+]
+}
+
+Swedbank Transaction JSON file example:
+
+{
+"account":{
+"number":"LT1373000XXXXXXXXXXX",
+"currency":"XXX",
+"name":null,
+"ownerName": "Name Surname",
+"id":"123456789456123465987"
+},
+"transactions":[
+{
+"transactionId":"2022081568513637-1",
+"endToEndId":"NIPS1-3c59dfcfd60a1d5e0db1acafa6f16",
+"creditorName":"Name",
+"creditorAccount":{
+"iban":"LT1235200XXXXXXXXXXX"
+},
+"transactionAmount":{
+"currency":"EUR",
+"amount":"6.99"
+},
+"bankTransactionCode":"PMNT",
+"bookingDate":"2022-08-11",
+"valueDate":"2021-09-21",
+"remittanceInformationUnstructured":"PIRKINYS 516793******1234 21.09.21 13:30 6.99 EUR (851167) LOGISMART,SAVANORIU PEVILNIUS LTULT",
+"status":"booked"
+},
+{
+"transactionId":"2021082300547705-1",
+"endToEndId":"NIPS1-3842235cfcc4d8a9972ba0a7b2b75",
+"creditorName":"Name",
+"creditorAccount":{
+"iban":"LT1235200XXXXXXXXXXX"
+},
+"transactionAmount":{
+"currency":"EUR",
+"amount":"-5.80"
+},
+"valueDate":"2021-08-23",
+"remittanceInformationUnstructured":"PIRKINYS 516793******1234 2021.08.19 5.80 EUR (366293) BOLT.EU \/O\/2108191933 10134 Tallinn",
+"status":"pending"
+}
+]}
+Swedbank balance JSON example:
+
+{
+"account":{
+"number":"LT1373000XXXXXXXXXXX",
+"currency":"XXX",
+"name":null,
+"ownerName": "Name Surname",
+"id":"123456789456123465987"
+},
+"balances":[
+{
+"balanceType":"authorised",
+"balanceAmount":{
+"currency":"EUR",
+"amount":"1234.56"
+},
+"referenceDate":"2021-09-21"
+},
+{
+"balanceType":"authorised",
+"balanceAmount":{
+"currency":"SEK",
+"amount":"1234.65"
+},
+"referenceDate":"2021-09-21"
+},
+{
+"balanceType":"interimAvailable",
+"balanceAmount":{
+"currency":"EUR",
+"amount":"1234.56"
+},
+"referenceDate":"2021-09-21"
+},
+{
+"balanceType":"interimAvailable",
+"balanceAmount":{
+"currency":"SEK",
+"amount":"1234.65"
+},
+"referenceDate":"2021-09-21"
+}
+]
+}
+SEB Transaction JSON example:
+
+{
+"account":{
+"number":"LT2270440XXXXXXXXXXX",
+"currency":"EUR",
+"name":"Account Name",
+"ownerName": "Name Surname",
+"id":"asdasd132as1d3a2s1da3s21d"
+},
+"transactions":[
+{
+"transactionId":"2304452043",
+"transactionAmount":{
+"currency":"EUR",
+"amount":5
+},
+"type":"credit",
+"bookingDate":"2020-11-11",
+"valueDate":"2020-11-11",
+"entryReference":"16050849694818968396",
+"instructedIdentification":null,
+"endToEndIdentification":"NOTPROVIDED",
+"transactionReferenceNumber":"RO287381640L02",
+"debtorName":"VARDENIS PAVARDENIS,
+"debtorAccount":{
+"iban":"LT1373000XXXXXXXXXXX"
+},
+"remittanceInformationUnstructured":"S\u0105skaitos papildymas",
+"status":"booked"
+},
+{
+"transactionId":"2305443646",
+"transactionAmount":{
+"currency":"EUR",
+"amount":0.01
+},
+"type":"debit",
+"bookingDate":"2020-11-11",
+"valueDate":"2020-11-11",
+"entryReference":"16051039055938659999",
+"instructedIdentification":null,
+"endToEndIdentification":"5df7f74dce",
+"transactionReferenceNumber":"RD112893302",
+"creditorName":"VARDENIS PAVARDENIS",
+"creditorAccount":{
+"iban":"LT1373000XXXXXXXXXXX"
+},
+"remittanceInformationUnstructured":"NIPS1-1605103878-492 PISP Demonstration",
+"status":"booked"
+},
+{
+"transactionId":"2305443650",
+"transactionAmount":{
+"currency":"EUR",
+"amount":0.41
+},
+"type":"debit",
+"bookingDate":"2020-11-11",
+"valueDate":"2020-11-11",
+"entryReference":"16051039055938660003",
+"instructedIdentification":null,
+"endToEndIdentification":null,
+"transactionReferenceNumber":"RO287619963L03",
+"creditorName":"SEB bankas",
+"creditorAccount":{
+},
+"remittanceInformationUnstructured":"Mokestis RD112893302",
+"status":"booked"
+}
+]}
+SEB Balance JSON example:
+
+{
+"account":{
+"number":"LT2270440XXXXXXXXXXX",
+"currency":"EUR",
+"name":"Account Name",
+"ownerName": "Name Surname",
+"id":"asdasd132as1d3a2s1da3s21d"
+},
+"balances":[
+{
+"balanceType":"interimBooked",
+"balanceAmount":{
+"currency":"EUR",
+"amount":"12.34"
+}
+},
+{
+"balanceType":"interimAvailable",
+"balanceAmount":{
+"currency":"EUR",
+"amount":"12.34"
+}
+}
+]}
+Luminor Transaction JSON example:
+
+{  "account": {
+"number": "LT5940100XXXXXXXXXXX",
+"currency": "EUR",
+"name": "My main account",
+"ownerName": "Name Surname",
+"id": "73ud2gcao85lrco8bl6bhfvmfb5ini4ppdvs0jt0cwm2ul6mmawwb8z9l1y0q5fx"
+    }, 
+    "transactions": [
+{
+  "transactionId": "40367613",
+  "endToEndId": "B4275784",
+  "creditorAccount": {
+    "iban": "IBAN"
+  },
+  "debtorName": "Vardenis Pavardenis",
+  "debtorAccount": {
+    "iban": "LV29NDEA0XXXXXXXXXXX"
+  },
+  "transactionAmount": {
+    "currency": "EUR",
+    "amount": 14490.35
+  },
+  "bookingDate": "2023-11-10",
+  "valueDate": "2023-11-10",
+  "remittanceInformationUnstructured": "Mērķdotācija par bērna uzturnaudas palielināšanu, 12.02.2018. vēstule Nr.DFB-18-9-dv",
+  "remittanceInformationStructured": {},
+  "bankTransactionCode": "PMNT",
+  "status": "booked"
+},
+{
+  "transactionId": "40367614",
+  "endToEndId": "B4279380",
+  "creditorName": "Vardenis Pavardenis",
+  "creditorAccount": {
+    "iban": "LV29NDEA0XXXXXXXXXXX"
+  },
+  "debtorAccount": {
+    "iban": "MyIban"
+  },
+  "transactionAmount": {
+    "currency": "EUR",
+    "amount": -14.23
+  },
+  "bookingDate": "2023-11-10",
+  "valueDate": "2023-11-10",
+  "remittanceInformationUnstructured": "Sar.nr.: 181-269. EKK: 642302. Rīgas Sociālā dienesta sociālais pabalsts",
+  "remittanceInformationStructured": {},
+  "bankTransactionCode": "PMNT",
+  "status": "booked"
+} 
+    ]
+    }
+Luminor Balance JSON example:
+
+{   "account": {
+"number": "LT5940100XXXXXXXXXXX",
+"currency": "EUR",
+"name": "My main account",
+"ownerName": "Name Surname",
+"id": "73ud2gcao85lrco8bl6bhfvmfb5ini4ppdvs0jt0cwm2ul6mmawwb8z9l1y0q5fx"
+    },
+    "balances": [
+{
+  "balanceAmount": {
+    "currency": "EUR",
+    "amount": 900
+  },
+  "balanceType": "interimAvailable",
+  "creditLimitIncluded": false
+},
+{
+  "balanceAmount": {
+    "currency": "EUR",
+    "amount": 1000
+  },
+  "balanceType": "interimBooked"
+}
+    ]
+    }
+Citadele Transaction JSON example:
+
+{
+"account":{
+"number":"LT3972900XXXXXXXXXXX",
+"currency":"EUR",
+"name":Account Name,
+"ownerName": "Name Surname",
+"id":"123456789456512123"
+},
+"transactions":[
+{
+"transactionId":"196244628538134.000001",
+"entryReference":"FT212652K8X8",
+"endToEndId":"d918cb3ac9",
+"mandateId":null,
+"checkId":null,
+"creditorId":null,
+"bookingDate":"2021-09-22",
+"valueDate":null,
+"transactionAmount":{
+"currency":"EUR",
+"amount":"-0.01"
+},
+"currencyExchange":null,
+"creditorName":"AB NEO Finance",
+"creditorAccount":{
+"iban":"LT1235200XXXXXXXXXXX",
+"currency":null
+},
+"ultimateCreditor":null,
+"debtorName":null,
+"debtorAccount":null,
+"ultimateDebtor":null,
+"remittanceInformationUnstructured":null,
+"remittanceInformationStructured":"NIPS1-1632296077-214 PISP Demonstration",
+"additionalInformation":null,
+"purposeCode":null,
+"bankTransactionCode":null,
+"proprietaryBankTransactionCode":null,
+"_links":null,
+"status":"booked"
+},
+{
+"transactionId":"196244628538134.000002",
+"entryReference":"FT212652K8X8",
+"endToEndId":"d918cb3ac9",
+"mandateId":null,
+"checkId":null,
+"creditorId":null,
+"bookingDate":"2021-09-22",
+"valueDate":null,
+"transactionAmount":{
+"currency":"EUR",
+"amount":"-0.40"
+},
+"currencyExchange":null,
+"creditorName":null,
+"creditorAccount":null,
+"ultimateCreditor":null,
+"debtorName":null,
+"debtorAccount":null,
+"ultimateDebtor":null,
+"remittanceInformationUnstructured":null,
+"remittanceInformationStructured":"INSTANT PAYMENT CHARGES",
+"additionalInformation":null,
+"purposeCode":null,
+"bankTransactionCode":null,
+"proprietaryBankTransactionCode":null,
+"_links":null,
+"status":"booked"
+}]}
+Citadele Balance JSON example:
+
+{
+"account":{
+"number":"LT3972900XXXXXXXXXXX",
+"currency":"EUR",
+"name":Account Name,
+"ownerName": "Name Surname",
+"id":"123456789456512123"
+},
+"balances":[
+{
+"balanceAmount":{
+"currency":"EUR",
+"amount":"12.34"
+},
+"balanceType":"interimAvailable",
+"creditLimitIncluded":true,
+"lastChangeDateTime":null,
+"referenceDate":null,
+"lastCommittedTransaction":null
+},
+{
+"balanceAmount":{
+"currency":"EUR",
+"amount":"12.34"
+},
+"balanceType":"closingBooked",
+"creditLimitIncluded":false,
+"lastChangeDateTime":null,
+"referenceDate":null,
+"lastCommittedTransaction":null
+}
+]
+}
+Revolut Transaction JSON example:
+
+{
+"account":{
+"number":"LT9532500XXXXXXXXXXX",
+"currency":"EUR",
+"name":"Main Account",
+"ownerName":"Name Surname",
+"id":"1c64c9m2-d0cb-420e-a8a4-c4f084822177"},
+"transactions":[
+{
+"AccountId":"1c64c9m2-d0cb-420e-a8a4-c4f084822177",
+"Amount":{
+"Amount":"1.70",
+"Currency":"EUR"
+},
+"Balance":{
+"Amount":{
+"Amount":"98.04",
+"Currency":"EUR"
+},
+"CreditDebitIndicator":"Credit",
+"Type":"InterimBooked"
+},
+"BookingDateTime":"2024-03-16T21:52:47.010250Z",
+"ValueDateTime":"2024-03-17T14:39:45.937263Z",
+"ChargeAmount":{
+"Amount":"0.02",
+"Currency":"EUR"
+},
+"CreditDebitIndicator":"Debit",
+"CurrencyExchange":{
+"InstructedAmount":{
+"Amount":"1.68",
+"Currency":"EUR"
+},
+"SourceCurrency":"EUR",
+"TargetCurrency":"CZK",
+"UnitCurrency":"EUR",
+"ExchangeRate":"25.0815845664319430646"
+},
+"MerchantDetails":{
+"MerchantName":"Mcdonalds"
+},
+"ProprietaryBankTransactionCode":{
+"Code":"CARD_PAYMENT",
+"Issuer":"Revolut"
+},
+"Status":"Booked",
+"TransactionId":"65f714af-d632-ad3b-b1bb-3cae95a8dcf0",
+"TransactionInformation":"Mcdonalds"
+}
+]
+}
+Revolut Balance JSON example:
+
+{
+"account": {
+"number":"LT9532500XXXXXXXXXXX",
+"currency":"EUR",
+"name":"Main account",
+"ownerName":"Name Surname",
+"id":"1c64c9m2-d0cb-420e-c8a4-e4f084822177"},
+"balances":[
+{
+"AccountId":"1c64c9m2-d0cb-420e-a8a4-c4f084822177",
+"Amount":{
+"Amount":"3.60",
+"Currency":"EUR"
+},
+"CreditDebitIndicator":"Credit",
+"Type":"InterimAvailable",
+"DateTime":"2024-04-06T10:24:35.361799Z"}
+]
+}
+NEO Finance transaction JSON example:
+
+{
+"account": {
+"number":"LT1035200XXXXXXXXXXX",
+"currency":"EUR",
+"name":"",
+"id":"PK123456789075"
+},
+"transactions":[
+{
+"transactionAmount":{
+"amount":"51.14",
+"currency":"EUR"
+},
+"_links":{
+"transactionDetails":"https://psd2.ob-api.neofinance.com/api/v1/accounts/PK233145569075/transactions/7764876682"
+},
+"transactionId":"7764876682",
+"transactionNumber":"78NA72TB",
+"endToEndId":"NOTPROVIDED",
+"valueDate":"2022-12-01T13:14:28+02:00",
+"creditorName":"NEOFinanceAB",
+"creditorAccount":{
+"iban":"LT1035200XXXXXXXXXXX",
+"currency":"EUR"
+},
+"debtorName":"UABCompany",
+"debtorAccount":{
+"iban":"LT4271809XXXXXXXXXXX",
+"currency":"EUR"
+},
+"remittanceInformationUnstructured":"MIPNr.:5292",
+"status":"booked"
+},
+{
+"transactionAmount":{
+"amount":"5.30",
+"currency":"EUR"
+},
+"_links":{
+"transactionDetails":"https://psd2.ob-api.neofinance.com/api/v1/accounts/PK233145569075/transactions/LTUP690223354916"
+},
+"transactionId":"LTUP690223354916",
+"transactionNumber":"MECMN2DC",
+"endToEndId":"NOTPROVIDED",
+"valueDate":"2022-12-01T13:17:52+02:00",
+"creditorName":"NEOFinance,AB",
+"creditorAccount":{
+"iban":"LT1035200XXXXXXXXXXX",
+"currency":"EUR"
+},
+"debtorName":"MB\"Company\"",
+"debtorAccount":{
+"iban":"LT5540100XXXXXXXXXXX",
+"currency":"EUR"
+},
+"remittanceInformationUnstructured":"Sąskaitos\"PK233145569075\"papildymas",
+"status":"booked"
+}
+]
+}
+NEO Finance balance JSON example:
+
+{
+"account": {
+"number": "LT1035200XXXXXXXXXXX",
+"currency": "EUR",
+"name": "",
+"id": "PK123456789075"
+},
+"balances": [
+{
+"balanceAmount": {
+"amount": "26.86",
+"currency": "EUR"
+},
+"balanceType": "authorised"
+}
+]
+}
+Information update
+After successful initiation of the Account Information service - you will receive a parameter transactionsUpdateToken which is required if you wish to receive updated report for the last 30 days.
+
+To iniciate this update you will need to call our API endpoint: https://psd2.neopay.lt/openapi/ais/update-transactions with a JSON body:
+
+ {"token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOiIxIiwidHJhbnNhY3Rpb25zVXBkYXRlVG9rZW4iOiI4ZDljZjI1NC1iMTZkLTExZWItYjZkYS0wMjQyYWMxNjAwMDYiLCJ0cmFuc2FjdGlvbklkIjoiZDIwMTcyNGUtYjE2ZC0xMWViLTg2ZDMtMDI0MmFjMTYwMDA2In0.3jn4GqWZdvIr6hu5YM4Yt6rVJILRJ9LsSCwjioAEMH4"}
+Token payload data:
+
+DATA TOKEN CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	string	Your project ID	YES
+transactionsUpdateToken	string	received token from the first initiation	YES
+transactionId	string	unique transaction ID for initiation	YES
+startDate	string	updated report start date of 30 days period	NO
+endDate	srting	updated report end date of 30 days period	NO
+Example:
+
+{
+  "projectId": 1,
+  "transactionsUpdateToken": "8d9cf254-b16d-11eb-b6da-0242ac160006",
+  "transactionId": "d201724e-b16d-11eb-86d3-0242ac160006"
+}
+curl example:
+
+ curl -X POST https://psd2.neopay.lt/openapi/ais/update-transactions \
+ -H "Content-Type: application/json"  \
+ -d "{\"token\":\"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOiIxIiwidHJhbnNhY3Rpb25zVXBkYXRlVG9rZW4iOiI4ZDljZjI1NC1iMTZkLTExZWItYjZkYS0wMjQyYWMxNjAwMDYiLCJ0cmFuc2FjdGlvbklkIjoiZDIwMTcyNGUtYjE2ZC0xMWViLTg2ZDMtMDI0MmFjMTYwMDA2In0.3jn4GqWZdvIr6hu5YM4Yt6rVJILRJ9LsSCwjioAEMH4\"}"
+In case of success you will receive a server-side callback same like doing first initiation, otherwise you will receive errorMessage.
+
+NOTE: You can request this update up to 4 times during 24 hours for 180 days after the consent was given. Additional request requires full SCA signing, like doing first time. User may cancel this consent anytime in the bank portal.
+
+Neopay 3 & Neopay PayForYou
+Neopay 3
+Everything for this service remains the same as for Neopay PayForYou service integration written below. The only one difference as this service is called by changing value of the parameter to "serviceType":"bnpl" and amount minimum value is 30€.
+
+Neopay PayForYou
+By default this service is disabled, if you wish to use it please contact Neopay manager to sign the agreement. After signing the agreement the service will be enabled. Neopay PayForYou service initiation is called by passing additional parameter "serviceType":"posl".
+
+Payload
+To execute a account information service, payment details must be provided in a payload as follows:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	integer	a unique project ID given by NEO Finance	YES
+transactionId	string	transaction Id provided by you. It must be unique for each payment initiation	YES
+currency	string	payment currency	YES
+amount	double	payment initiation amount Minimum value of 100€ is required for this service	YES
+paymentPurpose	string	original payment purpose is returned, which will be seen in payer's and receiver's bank account statement. transactionId is provided to identify the payments.	YES
+bank	string	currently the service is only available through available PKISM21	YES
+clientRedirectUrl	string	this redirect URL is used to redirect the payer once he returns from Neopay after successful or failed operation	YES
+serviceType	string	posl must be provided in order to use this service	YES
+payerConsentNeopayRules	Boolean	Provide true - to enable this feature, to skip additional confirmation, as it will be showed in the next steps	
+orderDetails	array	Order details must be provided (Order number and cart products) for this service, so the cart information will be visible when applying for credit (Example bellow)	YES
+reserved	numeric	You can limit the time how long the order will be reserved. Success response might take from 20 minutes up to 2 days, so if that time is not acceptable you can limit this time by passing reservation time in hours and minutes. For example if you pass 1.6 it will be 1 hours and 36 minutes.	NO
+Example JWT payload
+
+{
+  "projectId": 1,
+  "currency": "EUR",
+  "amount": 305.82,
+  "bank": "PKISM21",
+  "clientRedirectUrl": "https://your-website.com",
+  "paymentPurpose": "POSL Demonstration",
+  "serviceType": "posl",
+  "transactionId": "1618910701-478123",
+  "payerConsentNeopayRules": true,
+  "reserved": "24.5",
+  "orderDetails": {
+    "number": "ORD0001",
+    "products": [
+      {
+        "name": "Product 1",
+        "quantity": 1,
+        "price": 10.2
+      },
+      {
+        "name": "Product 2",
+        "quantity": 3,
+        "price": 98.54
+      }
+]}
+}
+Callbacks
+Client side
+Client side callback will not be provided as the payer will stay at Paskolų klubas website till the end of the process and response will be sent only with server-side callbacks.
+
+Server side
+Once we receive information from Paskolų klubas that the process is moving - we are going to POST a request to your provided callback URL with a JSON containing one of the actions in the exact order:
+
+"action":"started" means that customer gave consent to Sodra agreement and that customer needs to fill in and submit the application.
+"action":"evaluating" means that customer submitted the application and that Paskolų klubas is evaluating it or preparing the BNPL agreement.
+"action":"agreement" means that Paskolų klubas approved the application and that customer needs to sign the BNPL agreement.
+Once we receive information that the application has been rejected or the agreement has been successfully signed or rejected - we are going to POST a request to your provided callback URL with a JSON.
+
+Token example:
+
+eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0cmFuc2FjdGlvbnMiOnsiMTYxODkxMDcwMS00NzgxMjMiOnsic3RhdHVzIjoic3VjY2VzcyIsImFjdGlvbiI6InNpZ25lZCIsImN1cnJlbmN5IjoiRVVSIiwiYW1vdW50IjoyMDAsInBheW1lbnRQdXJwb3NlIjoiTklQUzEtMTYxODkxMDcwMS00NzgxMjMgUElTUCBEZW1vbnN0cmF0aW9uIiwiYmFuayI6eyJiaWMiOiJQS0lTTTIxIiwibmFtZSI6IlBhc2tvbMWzIGtsdWJhcyJ9fX0sImlhdCI6MTYzMzA3NzAwOSwiZXhwIjoxNjMzMTYzNDA5fQ.8icTlb3o4QzgjvaG5qoy3QMXI-IKpf9Kd8n8xD9u5xo
+Pending
+{
+  "transactions": {
+    "1618910701-478123": {
+      "status": "pending",
+      "action": "agreement",
+      "currency": "EUR",
+      "amount": 305.82,
+      "paymentPurpose": "NIPS1-1618910701-478123 POSL Demonstration",
+      "bank": {
+        "bic": "PKISM21",
+        "name": "Paskolų klubas"
+      }
+    }
+  },
+  "iat": 1633077009,
+  "exp": 1633163409
+}
+Success
+{
+  "transactions": {
+    "1618910701-478123": {
+      "status": "success",
+      "action": "signed",
+      "currency": "EUR",
+      "amount": 305.82,
+      "paymentPurpose": "NIPS1-1618910701-478123 POSL Demonstration",
+      "bank": {
+        "bic": "PKISM21",
+        "name": "Paskolų klubas"
+      }
+    }
+  },
+  "iat": 1633077009,
+  "exp": 1633163409
+}
+Rejected
+{
+  "transactions": {
+    "1618910701-478123": {
+      "status": "rejected",
+      "currency": "EUR",
+      "amount": 305.82,
+      "paymentPurpose": "NIPS1-1618910701-478123 POSL Demonstration",
+      "bank": {
+        "bic": "PKISM21",
+        "name": "Paskolų klubas"
+      }
+    }
+  },
+  "iat": 1633077009,
+  "exp": 1633163409
+}
+Response to callbacks
+We're expecting a response to be received server side callback within 10 seconds, otherwise we are going keep repeating POST a request to your provided server-side callback URL until you do so. Token contains array of up to 500 transactions. Once you receive a token - it's very important to:
+
+save a token to your system for later processing;
+respond with a JSON body { "status": "success" } and HTTP 200 response - no other response is accepted, otherwise we are going keep repeating POST, and the array with transactions will grow.
+Calculator
+By default this service is disabled, if you wish to use it please contact Neopay manager to sign the agreement. After signing the agreement service will be enabled.
+
+POS Lending Calculator
+
+IMPORTANT NOTE: this calculator can only be used for the Neopay PayForYou use case.
+
+12Play Person Verification
+By default this service is disabled, if you wish to use it please contact your Neopay sales manager to sign the Premium API service agreement. After signing the agreement the 12Play Person Verification service (12Play) will be enabled. You can check the flow of this feature using the 12Play test link
+
+12Play service initiation is very similar to the initiation of other Neopay services as described here, the only differences are the Widget host URL and the information provided with the JWT data token.
+
+To initiate the service all you need to do is redirect payer to User redirect URL, which will open the Neopay 12Play widget with the parameters you provided in the JWT token. To get the final URL, you need to combine 2 parameters: widget host + JWT data token:
+
+Widget host - https://verify.neopay.online/widget.html?
+    
+JWT data token - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwcm9qZWN0SWQiOjEsInZlcmlmaWNhdGlvbklkIjoiMTcwMDc0NzczNS02ODciLCJjbGllbnRSZWRpcmVjdFVybCI6Imh0dHBzOi8vbmVvcGF5Lmx0IiwiZGVmYXVsdExvY2FsZSI6IkxUIiwiZGVmYXVsdENvdW50cnkiOiJMVCIsInBheW1lbnRQdXJwb3NlIjoiVGVzdCBwdXJwb3NlIiwidXNlckNvZGUiOiJIeFRLdWN0WjdDdnpUNCsyeks3UE9nPT0iLCJ1c2VyUGhvbmUiOiIrMzcwNjAwMDAwMDAiLCJ2ZXJpZmljYXRpb25PcHRpb25zIjpbIm1vYmlsZV9pZCIsInNtYXJ0X2lkIl0sImVudGVyQW1vdW50Ijp7Im1pbkFtb3VudCI6MTAsIm1heEFtb3VudCI6MTAwMDAsInF1aWNrQW1vdW50cyI6WzEwLDEwMCw1MDBdfSwic2VjdXJpdHlRdWVzdGlvbnMiOlsiRmlyc3QgcXVlc3Rpb24iLCJTZWNvbmQgcXVlc3Rpb24iXSwibGltaXRzIjp0cnVlfQ.cuMMfEbncQRAlwsat9JFYhWAvPul92JioPK-OTR22ck
+    
+Example of the final User redirect URL - https://verify.neopay.online/widget.html?eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwcm9qZWN0SWQiOjEsInZlcmlmaWNhdGlvbklkIjoiMTcwMDc0NzczNS02ODciLCJjbGllbnRSZWRpcmVjdFVybCI6Imh0dHBzOi8vbmVvcGF5Lmx0IiwiZGVmYXVsdExvY2FsZSI6IkxUIiwiZGVmYXVsdENvdW50cnkiOiJMVCIsInBheW1lbnRQdXJwb3NlIjoiVGVzdCBwdXJwb3NlIiwidXNlckNvZGUiOiJIeFRLdWN0WjdDdnpUNCsyeks3UE9nPT0iLCJ1c2VyUGhvbmUiOiIrMzcwNjAwMDAwMDAiLCJ2ZXJpZmljYXRpb25PcHRpb25zIjpbIm1vYmlsZV9pZCIsInNtYXJ0X2lkIl0sImVudGVyQW1vdW50Ijp7Im1pbkFtb3VudCI6MTAsIm1heEFtb3VudCI6MTAwMDAsInF1aWNrQW1vdW50cyI6WzEwLDEwMCw1MDBdfSwic2VjdXJpdHlRdWVzdGlvbnMiOlsiRmlyc3QgcXVlc3Rpb24iLCJTZWNvbmQgcXVlc3Rpb24iXSwibGltaXRzIjp0cnVlfQ.cuMMfEbncQRAlwsat9JFYhWAvPul92JioPK-OTR22ck
+    
+NOTE: Unless explicitly stated otherwise, all of the Neopay services are initiated using the GET HTTP method. Java Script service initiation method is no longer supported.
+
+Payload
+To initiate the 12Play Person Verification service, initiation details must be provided in the JWT token payload as follows:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	integer	a unique project ID given by Neopay	YES
+verificationId	string(35)	It must be unique for each verificaton initiation. Must not exceed 35 symbols	YES
+clientRedirectUrl	string	the redirect URL is used to redirect the user once he returns from Neopay to your website after a successful or failed verification	YES
+verificationOptions	array	You may choose which options of verification are visible, the options of mobile_id and smart_id are available. At least 1 of them must be provided	YES
+defaultLocale	string	The widget language will be based on the provided country; if no value is provided, the default locale of the country will be used	NO
+defaultCountry	string	Verification options and payment banks will be shown based on the country provided. If no country is provided, by default Lithuanian options will be present	NO
+paymentPurpose	string (140)	The payment purpose of the payment. Use only if you wish to initiate a payment immediately after collecting the person verification details	NO
+userCode	encrypted string	You may provide the personal code of the user if you already have it. The same encryption method must be used as described in payerCode. If personal code is not provided, user will be able to enter it in our widget	NO
+userPhone	string	You may provide the phone number of the user if you already have it. If phone number is not provided, user will be able to enter it in our widget	NO
+enterAmount	array	Allows to configure the payment parameters if you wish to initiate a payment immediately after collecting the person verification details	NO
+minAmount	string	Allows to specify the minimum amount for the deposit	NO
+maxAmount	string	Allows to specify the maximum amount for the deposit	NO
+quickAmounts	array	Specify 3 specific deposit amounts for quick choosing. Amount must be separated by commas	NO
+securityQuestions	array	You may enter security questions for the user to answer in our widget. The responses will be delivered to you after the verification process	NO
+limits	bool	If "true" is provided, user will be able to self-impose a limit on their deposit operations. The user's choice will be delivered to you after the verification process	NO
+Example of a full JWT payload:
+
+{
+"projectId": 1,
+"verificationId": "1709802419-359",
+"clientRedirectUrl": "https://neopay.lt",
+"verificationOptions": [
+"mobile_id",
+"smart_id"
+],
+"defaultLocale": "LT",
+"defaultCountry": "LT",
+"paymentPurpose": "testas",
+"userCode": "Ubj6CXSgBX822UlZvrt3wA==",
+"userPhone": "+37061234567",
+"enterAmount": {    
+"minAmount": 10,
+"maxAmount": 10000,
+"quickAmounts": [ 
+ 10,
+ 100,
+ 500
+]  
+},
+"securityQuestions": [
+"First question",
+"Second question"
+],
+"limits": true 
+}
+Callbacks
+As with the other services, there are 2 types of callbacks: client side callbacks and server side callbacks. As usual, we highly suggest relying on the server side information as they are the final confirmation of a successfully completed service.
+
+Client side
+The client side callbacks are only delivered in the case only when the person verification service is used without making the deposit. Your provided clientRedirectUrl is used to notify your system about the verification status, the verification status and a token will be added at the end of it. There are 2 possible callbacks: success and canceled.
+
+Successful verification client side callback example:
+
+https://your.redirect.url?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsInZlcmlmaWNhdGlvbklkIjoiMTcwMDc0MTg4MS03NDQiLCJzdGF0dXMiOiJzdWNjZXNzIiwiaWF0IjoxNzAwNzQxODg2LCJleHAiOjE3MDA4MjgyODZ9.ogGl07OzeXJ30LPvnd9FjqSt7Ey01TYiBdseNRiuWFQ
+Callback JWT token payload data:
+
+{
+    "projectId": 1,
+    "verificationId": "1700741881-744",
+    "status": "success",
+    "iat": 1700747524,
+    "exp": 1700833924
+    }
+Canceled verification client side callback example:
+
+https://your.redirect.url?canceled=1&data=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsInZlcmlmaWNhdGlvbklkIjoiMTcwMDc0OTI2Ny0zMjkiLCJjbGllbnRSZWRpcmVjdFVybCI6Imh0dHBzOi8vbmVvcGF5Lmx0IiwiZGVmYXVsdExvY2FsZSI6IkxUIiwiZGVmYXVsdENvdW50cnkiOiJMVCIsInBheW1lbnRQdXJwb3NlIjoiVGVzdCBwdXJwb3NlIiwidXNlckNvZGUiOiJIeFRLdWN0WjdDdnpUNCsyeks3UE9nPT0iLCJ1c2VyUGhvbmUiOiIrMzcwNjAwMDAwMDAiLCJ2ZXJpZmljYXRpb25PcHRpb25zIjpbIm1vYmlsZV9pZCIsInNtYXJ0X2lkIl0sImVudGVyQW1vdW50Ijp7Im1pbkFtb3VudCI6MTAsIm1heEFtb3VudCI6MTAwMDAsInF1aWNrQW1vdW50cyI6WzEwLDEwMCw1MDBdfSwic2VjdXJpdHlRdWVzdGlvbnMiOlsiRmlyc3QgcXVlc3Rpb24iLCJTZWNvbmQgcXVlc3Rpb24iXSwibGltaXRzIjp0cnVlfQ.hlpLUlAPRjM2aJb5PSZ7Da_BKNR4Drqnakv9HIhV0oA
+Callback JWT token payload data:
+
+{
+"projectId": 1,
+"verificationId": "1700749267-329",
+"clientRedirectUrl": "https://neopay.lt",
+"defaultLocale": "LT",
+"defaultCountry": "LT",
+"paymentPurpose": "Test purpose",
+"userCode": "HxTKuctZ7CvzT4+2zK7POg==",
+"userPhone": "+37060000000",
+"verificationOptions": [
+"mobile_id",
+"smart_id"
+    ],
+    "enterAmount": {
+"minAmount": 10,
+"maxAmount": 10000,
+"quickAmounts": [
+  10,
+  100,
+  500
+]
+    },
+    "securityQuestions": [
+"First question",
+"Second question"
+    ],
+    "limits": true
+}
+Server side
+Server side callback is used to notify your system about successfully authorized or submitted verification. Please note that the successful server side callback must override any client side callback status that is present for the verification, and must be taken as the final confirmation of the verification success. The server side callback URL must be filled at the project information page in the Self Service portal.
+
+POST request
+Once we can confirm that user successfully completed their authorization or submitted the final verification form - we are going instantly POST a request to your provided server side callback URL with a body of JSON:
+
+Server side callback example for verification with the status "authorized":
+
+{"token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ2ZXJpZmljYXRpb25zIjp7IjE3MDA3MzY2OTQtNTkxIjp7InN0YXR1cyI6InN0YXR1cyIsImFjdGlvbiI6ImF1dGhvcml6ZSIsImZpcnN0TmFtZSI6IlRlc3RhcyIsImxhc3ROYW1lIjoiVGVzdGF1c2thcyIsInVzZXJDb2RlIjoiTE8wQ1NVU3lyeW5EQ3lWejVxdDg3Zz09IiwidXNlckNvdW50cnkiOiJMVCJ9fSwiaWF0IjoxNzAwNzQ3NTI0LCJleHAiOjE3MDA4MzM5MjR9.9CaPdJG3LtmSxbV4b0hGSObLWDUxqmRYDBJpaMwgkq0"
+Decoded JWT token payload data:
+
+{
+  "verifications": {
+    "1700736694-591": {
+      "status": "status",
+      "action": "authorize",
+      "firstName": "Testas",
+      "lastName": "Testauskas",
+      "userCode": "LO0CSUSyrynDCyVz5qt87g==",
+      "userCountry": "LT"
+    }
+  },
+  "iat": 1700747524,
+  "exp": 1700833924
+}
+Server side callback example for verification with the status "submit":
+
+{"token":"eyJhbGciOiJIUzI1NiJ9.eyJ2ZXJpZmljYXRpb25zIjp7IjE3MDA3NDc1MDEtNzI4Ijp7InN0YXR1cyI6InN1Y2Nlc3MiLCJhY3Rpb24iOiJzdWJtaXQiLCJzZWN1cml0eVF1ZXN0aW9uIjoiRmlyc3QgcXVlc3Rpb24iLCJzZWN1cml0eUFuc3dlciI6IlNvbWUgYW5zd2VyIiwibGltaXRzIjp7InR5cGUiOiJEYWlseSIsImFtb3VudCI6MTAsImN1cnJlbmN5IjoiRVVSIn19fSwiaWF0IjoxNzAwNzQ3NTI0LCJleHAiOjE3MDA4MzM5MjR9.-9YBAuHG8U-eoMKN0dmGOWApQrTPpr8OiyUjliNJYsk"}
+Decoded JWT token payload:
+
+{
+  "verifications": {
+    "1700747501-728": {
+      "status": "success",
+      "action": "submit",
+      "securityQuestion": "First question",
+      "securityAnswer": "Some answer",
+      "limits": {
+        "type": "Daily",
+        "amount": 10,
+        "currency": "EUR"
+      }
+    }
+  },
+  "iat": 1700747524,
+  "exp": 1700833924
+} 
+Payment Card Owner Verification (PCOV)
+The Payment Card Owner Verification (PCOV) service allows the verification of payment card ownership for user accounts. Please note that this service is disabled by default and needs to be enabled on a project basis by the Neopay manager after signing the agreement.
+
+In order to get the latest information about available banks that are compatible with Payment Card Owner Verification, please use our Banks API
+
+Like all of the Neopay services, the PCOV service is initiated by redirecting the customer to our service initiation page with the required data. The redirect URL consists of 2 parts:
+
+Widget host - https://psd2.neopay.lt/widget.html
+JWT data token - eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsInRyYW5zYWN0aW9uSWQiOiJUUzgzNyIsInNlcnZpY2VUeXBlIjoicGNvdiIsImNhcmROmSOlKKuxfeVs0r–8rCGxapApqMs
+By combining these 2 parts you get the redirect URL which can be used to redirect the use and start the service:
+
+https://psd2.neopay.lt/widget.html?eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsInRyYW5zYWN0aW9uSWQiOiJUUzgzNyIsInNlcnZpY2VUeXBlIjoicGNvdiIsImNhcmROmSOlKKuxfeVs0r--8rCGxapApqMs
+The redirect should be done using the GET HTTP method.
+
+Payload
+To execute the Payment Card Owner Verification service, a JWT data token must be created. More information about the process can be found in our full documentation page.
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	integer	Unique project ID by NEO Finance	YES
+transactionId	string(35)	Unique identifier for each initiation	YES
+clientRedirectUrl	string	Redirect URL after the operation	YES
+serviceType	string	“pcov” must be provided for this service	YES
+cardNumber	string	Masked payment card number to be verified (first 6 digits, last 4 digits, and each other digit replaced with *)	YES
+Example of JWT Payload:
+
+{
+  "projectId": 1,
+  "transactionId": "TS837",
+  "serviceType": "pcov",
+  "cardNumber": "515293******4333",
+  "clientRedirectUrl": "https://neopay.online"
+}
+Callbacks
+Client side
+Client side callbacks are used for displaying information to users after they return from the service initiation. The actual verification details must be checked through the server-side callback.
+
+Success:
+
+Redirect to your provided clientRedirectUrl with a token:
+
+https://neopay.online?token=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0cmFuc2FjdGlvbklkIjoiVFM4MzciLCJzdGF0dXMiOiJzdWNjZXNzIn0.-X0LFH09zFpeCPTR9Izfe8OvWrX38D6kouHNZ-3E4os
+Payload Data:
+
+{
+  "transactionId": "TS837",
+  "status": "success"
+}
+Canceled:
+
+If canceled by the user or due to a technical error, user will be redirected with:
+
+https://neopay.online?canceled=1&data=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsInRyYW5zYWN0aW9uSWQiOiIxNzA1OTk3NjEwLTUxNiIsImNsaWVudFJlZGlyZWN0VXJsIjoiaHR0cHM6Ly9uZW9wYXkub25saW5lIiwiY2FyZE51bWJlciI6IjUxNTI5MyoqKioqKjQzMzMiLCJzZXJ2aWNlVHlwZSI6ImFpc3AifQ.-tXm1KR2TsqKXmoGYO-Ukul0uBnBxa6MMd7riyElfdU
+Payload Data:
+
+{
+  "projectId": 1,
+  "transactionId": "TS837",
+  "clientRedirectUrl": "https://neopay.online",
+  "cardNumber": "515293******4333",
+  "serviceType": "pcov"
+}
+Server side
+Upon completing the payment card owner verification, a POST request is sent to your provided server-side callback URL with a JSON body:
+
+{
+  "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJQQ09WIjp7IjE3MDU5MTQ0NjMtODY3Ijp7InN0YXR1cyI6InN1Y2Nlc3MiLCJvd25lclZlcmlmaWNhdGlvblN1Y2Nlc3NmdWwiOmZhbHNlLCJiYW5rIjp7ImJpYyI6IkhBQkFMVDIyIiwibmFtZSI6IlN3ZWRiYW5rIn19fSwiaWF0IjoxNzA1OTE0NjExLCJleHAiOjE3MDYwMDEwMTF9.MsPZkesFBoZAbLO5tAoAJkH4-T0B62GXGQTVYsUP1VY"
+}
+Failed
+If the verification has failed due to a technical error or an outage, the token payload data will be:
+
+{
+  "PCOV": {
+    "TS837": {
+      "status": "failed",
+      "ownerVerificationSuccessful": false,
+      "errorMessage": "Klaida iš banko",
+      "bank": {
+        "bic": "AGBLLT2X",
+        "name": "Luminor"
+      }
+    }
+  },
+  "iat": 1706010804,
+  "exp": 1706097204
+}
+Success
+If the verification passed, the token payload data will be:
+
+{
+  "PCOV": {
+    "TS837": {
+      "status": "success",
+      "ownerVerificationSuccessful": true,
+      "ownerIban": "LT123250069334624567",
+      "ownerName": "Vardenis Pavardenis",
+      "bank": {
+        "bic": "HABALT22",
+        "name": "Swedbank"
+      }
+    }
+  },
+  "iat": 1705914611,
+  "exp": 1706001011
+}
+If the verification failed, the token payload data will be:
+
+{
+  "PCOV": {
+    "1705914463-867": {
+      "status": "success",
+      "ownerVerificationSuccessful": false,
+      "bank": {
+        "bic": "SANDLT22",
+        "name": "Swedbank"
+      }
+    }
+  },
+  "iat": 1705914611,
+  "exp": 1706001011
+}
+Response to Callbacks
+No responses are needed for the client side callbacks, just adjust the redirect screen accordingly to the status of the callback.
+Respond to server-side callbacks within 10 seconds with JSON body: { "status": "success" }.
+Save the token, process it and update your system information accordingly.
+The customer data is saved on our side only for 90 minutes. Process the information within this timeframe to avoid data loss.
+Debit/Credit Cards
+By default this service is disabled, if you wish to use it please contact Neopay manager to sign the agreement. After signing the agreement service will be enabled. To initiate credit card payments you need to pass bank parameter with the value DCTTGB22
+
+Note: the option to pay with card can be presented alongside other paymentOptions, which are described back in here
+
+Payload
+To execute a payment, payment details must be provided in a payload same as required for Payment initiation service plus mandatory field as follows:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+bank	string	passing DCTTGB22 is required to use this service
+Example JWT payload:
+
+{
+  "projectId": 1,
+  "amount": 0.01,
+  "currency": "EUR",
+  "transactionId": "TS837",
+  "bank":"DCTTGB22",
+  "serviceType":"pisp
+  "paymentPurpose": "Payment purpose",
+  "clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Featured payments
+Featured payments enables possibility to save payer's card data in order to initiate further payments: one-click, automatic, recurring.
+
+One-click payments enables payers to pay without inserting card data.
+Automatic payments enables charging payer irregularly for different amounts.
+Recurring payments enables charging payer regularly for the same amount.
+
+To use featured payment you must provide two additional values to the payload:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+cof	string	one of the following values must be passed to use this service: one-click, automatic, recurring
+payerEmail	Encrypted string	passing payer's email is required to use this service
+Payer email must be encrypted in the same method as described in Payer email notification.
+
+Example JWT payload:
+
+{
+  "projectId": 1,
+  "amount": 0.01,
+  "currency": "EUR",
+  "transactionId": "TS837",
+  "bank":"DCTTGB22",
+  "serviceType":"pisp"
+  "paymentPurpose": "Payment purpose",
+  "payerEmail":"RRTp/4YTI446UE+TYUaAEg==",
+  "cof": "recurring"
+  "clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+After successful payment you will get a callback. In the payload there will be an encrypted Card ID under cid parameter.
+
+Example JWT payload:
+
+{
+  "projectId": 1,
+  "amount": 0.01,
+  "currency": "EUR",
+  "transactionId": "TS837",
+  "paymentPurpose": "Payment purpose",
+  "cid": "9nGJzcU4cjHggzRLUx6uqxOf8LanM9rTIL/9YhrHW2cCfVp06uG5jjW5dhuszhvc",
+  "payerEmail":"RRTp/4YTI446UE+TYUaAEg==",
+  "cof": "recurring"
+}
+Note: you must save cid parameter as it will be the identifier for payer's card. By passing cid and payerEmail you will be able to remove a card from featured payments.
+
+One-Click Payment (Cards)
+To execute a One-Click Payment flow is the same as for Featured payments. Execute payments with "cof": "one-click" and users will be able to use saved card to make a payment.
+
+Alternatively, one-click payments can be started in the same way as default card payment by additionally providing payerEmail. To use this feature it must be enabled for your Project by Neopay Team (contact your sales manager regarding this). In the process payer will be asked if the wish to save his card information for faster payments, if the payer agrees that required information will be saved to passed his email address and at the next one-click payment payer will be able to make payment with one-click (approving payment without typing card data).
+
+Automatic payments (Cards)
+To use automatic payment you must provide same data as featured payment with additional value to the payload:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+cid	string	to use this service you must provide payer's cid value you got after successful featured payment
+To make an automatic payment, you need to call our API endpoint by passing a signed JWT token: POST https://psd2.neopay.lt/openapi/card/charge
+
+Example JWT payload:
+
+{
+  "projectId": 1,
+  "amount": 0.01,
+  "currency": "EUR",
+  "transactionId": "TS837",
+  "bank":"DCTTGB22",
+  "paymentPurpose": "Payment purpose",
+  "cid": "9nGJzcU4cjHggzRLUx6uqxOf8LanM9rTIL/9YhrHW2cCfVp06uG5jjW5dhuszhvc",
+  "payerEmail":"RRTp/4YTI446UE+TYUaAEg==",
+  "cof": "automatic"
+}
+Curl example:
+
+    curl --location --request POST 'https://psd2.neopay.lt/openapi/card/charge' \
+    --header 'Accept: application/json' \
+    --header 'Content-Type: application/json' \
+    --data '{"token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsImFtb3VudCI6MC4wMSwicGF5bWVudFB1cnBvc2UiOiJQSVNQIERlbW9uc3RyYXRpb24iLCJ0cmFuc2FjdGlvbklkIjoiMTY2Mzg0Mjc5MC00NzIiLCJjdXJyZW5jeSI6IkVVUiIsImNpZCI6IjluR0p6Y1U0Y2pIZ2d6UkxVeDZ1cXhPZjhMYW5NOXJUSUwvOVlockhXMmNDZlZwMDZ1RzVqalc1ZGh1c3podmMiLCJwYXllckVtYWlsIjoiUlJUcC80WVRJNDQ2VUUrVFlVYUFFZz09IiwiY29mIjoiYXV0b21hdGljIn0.sydMiJL2Gc4wX7bcIEUPJyqJQft5PVZJmKWHI50WNIc"}'
+Success response example:
+
+{
+"success": true
+}
+Error response example:
+
+{
+"type": "https://tools.ietf.org/html/rfc2616#section-10",
+"title": "An error occurred",
+"status": 400,
+"detail": "Bad Request"
+}
+Recurring payments (Cards)
+To execute a recurring payment, you must do initiation of featured payment with additional value to the payload. Recurring card payment agreement signing initiation is called by passing additional parameter "serviceType":"rpas".
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+serviceType	string (140)	rpas must be provided in order to use this service
+To execute recurring card payment, payment details must be provided in a payload as follows:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	integer	a unique project ID given by NEO Finance	YES
+transactionId	string(35)	It must be unique for each payment initiation. Must not exceed 35 symbols.	YES
+amount	double	payment initiation amount	YES
+currency	string	payment currency	YES
+payerEmail	Encrypted string	payer's email address	YES
+frequency	string	Available values: Daily, Weekly, Monthly, Quarterly, Annually, Semi Annually, Every Working Day, Last Day Of Month, Once A Month, Last Working Day	YES
+startDate	string	Day of the first payment (must be in the future)	YES
+endDate	string	Agreement end date	NO
+paymentPurpose	string (140)	provide details about the payment	YES
+clientRedirectUrl	string	this redirect URL is used to redirect the payer once he returns from Neopay after successful or failed operation. If no URL is provided, the only way for the client to exit our payment environment will be by closing the web browser and they will not be redirected back to your website	NO
+serviceType	string (140)	rpas must be provided in order to use this service	YES
+Example JWT payload
+
+{
+  "projectId": 1,
+  "transactionId": "1681813610-675",
+  "amount": 0.01,
+  "currency": "EUR",
+    "payerEmail": "RRTp/4YTI446UE+TYUaAEg==",
+  "frequency": "Monthly",
+  "startDate": "2023-05-01",
+  "endDate": "2025-12-01",
+  "paymentPurpose": "My Payment purpose",
+  "serviceType": "rpas",
+  "clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+After successful initiation you will get server-side callback with a body of JSON.
+
+Example of decoded token payload data:
+
+{
+"agreements": {
+"1681813694-539": {
+  "status": "success",
+  "action": "signed",
+  "currency": "EUR",
+  "amount": 0.01,
+  "paymentPurpose": "NIPS1-1681813694-539 PISP Demonstration",
+  "frequency": "Monthly",
+  "startDate": "2023-05-01 00:00:00",
+  "cid": "UMnY5Q0bakhnWsHX84QxhhkhL89VDX0yJ7kSffNtIMh9/USmGCP9Kxveba8CPpNj",
+  "bank": {
+    "bic": "DCTTGB22",
+    "name": "Credit card"
+  }
+}
+    },
+    "iat": 1681813791,
+    "exp": 1681900191
+    }
+Callbacks
+You will get server-side callbacks about successful & unsuccessful recurring payments charging. When the recurring payment will be successful charged on the provided date and frequency period, we are going instantly POST a request to your provided callback URL with a body of JSON.
+
+Example of decoded token payload data:
+
+{
+"transactions": {
+"1-2ef9e1e5-f835-4ed7-a40b-765982d6fad5": {
+  "status": "success",
+  "action": "signed",
+  "currency": "EUR",
+  "amount": 0.01,
+  "paymentPurpose": "NIPS1-1-2ef9e1e5-f835-4ed7-a40b-765982d6fad5 Recurring agreement \"1681813694-539\" charge",
+  "cid": "UMnY5Q0bakhnWsHX84QxhhkhL89VDX0yJ7kSffNtIMh9/USmGCP9Kxveba8CPpNj",
+  "rpaTransactionId": "1681813694-539",
+  "bank": {
+    "bic": "DCTTGB22",
+    "name": "Credit card"
+  }
+}
+    },
+    "iat": 1681814464,
+    "exp": 1681900864
+    }
+If recurring payment charge is unsuccessful, then you will get rejected payment callback. We are going to POST a request to your provided callback URL a body of JSON.
+
+Example of decoded token payload data:
+
+{
+"transactions": {
+"1-17ac34df-61db-401f-bd31-0b647feb3d5e": {
+  "status": "rejected",
+  "currency": "EUR",
+  "amount": 0.01,
+  "paymentPurpose": "NIPS1-1-17ac34df-61db-401f-bd31-0b647feb3d5e Recurring agreement \"1681731624-780\" charge",
+  "rpaTransactionId": "1681731624-780",
+  "cid": "UMnY5Q0bakhnWsHX84QxhhkhL89VDX0yJ7kSffNtIMh9/USmGCP9Kxveba8CPpNj",
+  "errorMessage": "Amount of funds available to cover specified message amount is insufficient",
+  "bank": {
+    "bic": "DCTTGB22",
+    "name": "Credit card"
+  }
+}
+    },
+    "iat": 1681814734,
+    "exp": 1681901134
+    }
+Be informed array is supported in server side token. It may consist up to 500 agreements.
+
+Note: to all callbacks you must respond as it's desribed here.
+
+Cancel recurring payment (Cards)
+You can cancel existing recurring payment from future charging. In order to do that you have to call our API endpoint by passing a signed JWT token: POST https://psd2.neopay.lt/openapi/rpa/cancel
+
+Example JWT payload:
+
+Curl example:
+
+    curl --location 'https://psd2.neopay.lt/openapi/rpa/cancel' \
+    --header 'Content-Type: application/json' \
+    --data '{"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwcm9qZWN0SWQiOjEsInRyYW5zYWN0aW9uSWQiOiIxNjgxODEzNjk0LTUzOSJ9.ow_WtkWIoK-0_BlWMDRmf2GrJzRJzq_1S5Af889Xt-A"}'
+Success response example:
+
+{
+"success": true
+}
+Error response example:
+
+{
+"type": "https://tools.ietf.org/html/rfc2616#section-10",
+"title": "An error occurred",
+"status": 400,
+"detail": "Bad Request"
+}
+After successful initiation you will get server-side callback with a body of JSON.
+
+Example of decoded token payload data:
+
+{
+"agreements": {
+"1681813694-539": {
+  "status": "success",
+  "action": "cancelled",
+  "currency": "EUR",
+  "amount": 0.01,
+  "paymentPurpose": "NIPS1-1681813694-539 PISP Demonstration",
+  "frequency": "Monthly",
+  "startDate": "2023-05-01 00:00:00",
+  "cid": "UMnY5Q0bakhnWsHX84QxhhkhL89VDX0yJ7kSffNtIMh9/USmGCP9Kxveba8CPpNj",
+  "bank": {
+    "bic": "DCTTGB22",
+    "name": "Credit card"
+  }
+}
+    },
+    "iat": 1681814103,
+    "exp": 1681900503
+    }
+Remove saved card
+To remove a saved card after featured payment execution, you need to call our API endpoint: POST https://psd2.neopay.lt/openapi/card/remove and add signed JWT token.
+
+Example JWT payload:
+
+{
+  "projectId": 1,
+  "cid": "9nGJzcU4cjHggzRLUx6uqxOf8LanM9rTIL/9YhrHW2cCfVp06uG5jjW5dhuszhvc",
+  "payerEmail":"RRTp/4YTI446UE+TYUaAEg=="
+}
+Curl example:
+
+    curl --location --request POST 'https://psd2.neopay.lt/openapi/card/remove' \
+    --header 'Content-Type: application/json' \
+    --header 'Accept: application/json' \
+    --data '{"token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsImNpZCI6IjluR0p6Y1U0Y2pIZ2d6UkxVeDZ1cXhPZjhMYW5NOXJUSUwvOVlockhXMmNDZlZwMDZ1RzVqalc1ZGh1c3podmMiLCJwYXllckVtYWlsIjoiUlJUcC80WVRJNDQ2VUUrVFlVYUFFZz09In0.mTp-fy46vmZkHjoQm6H8MAJ__zKjLhZoamYxiguHlBw"}'
+Success response example:
+
+{
+"success": true
+}
+Error response example:
+
+{
+"type": "https://tools.ietf.org/html/rfc2616#section-10",
+"title": "An error occurred",
+"status": 400,
+"detail": "Bad Request"
+}
+    
+Google Pay and Apple Pay
+You can also allow customers to choose either the Google Pay or Apple Pay solution directly from your website and not our widget and to do so the only difference is the bank parameter value:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION
+payerEmail	Encrypted string	passing payer's email is required to use this service
+bank	string	using APLEUS66LT will initiate the Apple Pay payment, using GOOGUSM1LT will initiate the Google Pay payment
+Payer email must be encrypted in the same method as described in Payer email notification.
+
+Example JWT payload:
+
+{
+  "projectId": 1,
+  "amount": 0.01,
+  "currency": "EUR",
+  "transactionId": "TS837",
+  "bank":"APLEUS66LT",
+  "serviceType":"pisp
+  "paymentPurpose": "Payment purpose",
+  "payerEmail":"RRTp/4YTI446UE+TYUaAEg==",
+  "clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Google Pay and Apple Pay express checkout
+It is also possible to have the express checkout option with Apple Pay and Google Pay payment methods, this allows the customer to skip the Neopay payment widget entirely and go through the whole payment process right there on your website.
+
+There are a couple of prerequisites for this to work.
+
+Express checkout files
+For the express checkout to work you need to add the following files from the following URLs to your website:
+
+https://psd2.neopay.lt/express_checkout.css
+
+https://psd2.neopay.lt/express_checkout.js
+
+Express checkout HTML Division element
+You must also add div element where the button will be present:
+
+<div id="express-checkout-container"></div>
+Express checkout javascript code
+You must also add the following javascript code where the payment button, payment token and event handlers will be shown.
+
+    <script type="text/javascript">
+        new ExpressCheckout(
+                {
+                        container: '#express-checkout-container',
+                        token: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsImFtb3VudCI6MC4wMSwiY3VycmVuY3kiOiJFVVIiLCJ0cmFuc2FjdGlvbklkIjoiMTcxMjY2ODMwOC04NjMiLCJwYXltZW50UHVycG9zZSI6IkV4cHJlc3MgY2hlY2tvdXQgZGVtbyIsImRlZmF1bHRDb3VudHJ5IjoiTFQiLCJkZWZhdWx0TG9jYWxlIjoiTFQiLCJiYW5rIjoiR09PR1VTTTFMVCJ9.00c0Bfr9tBPBn8hzGmZbwEM7Y362LIvWCpYkhmvuzRM',
+                        options: {
+                                onPaymentCompleted: () => {
+                                        // You can insert your own logic here, which will be executed when the client side tells you that the payment is successful, additionally a notification will come via the server side
+ console.info('Payment completed');
+                                },
+                                onPaymentFailed: () => {
+                                     // You can insert your own logic here, which will be executed when the client side warns that the payment has been rejected
+ console.info('Payment failed');
+                                },
+                                onError: (error) => {
+                                     // You can insert your own logic here, which will be executed when the payment window cannot be displayed, e.g. inactive project, too large payment amount in testing mode, etc.
+ console.info('Error occurred: ' + error);
+                                }
+                        }
+                }
+        );
+</script>
+Example of the express checkout payment JWT token
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwcm9qZWN0SWQiOjEsImFtb3VudCI6MC4wMSwiY3VycmVuY3kiOiJFVVIiLCJ0cmFuc2FjdGlvbklkIjoiMTcxMjY2ODMwOC04NjMiLCJwYXltZW50UHVycG9zZSI6IkV4cHJlc3MgY2hlY2tvdXQgZGVtbyIsImRlZmF1bHRDb3VudHJ5IjoiTFQiLCJkZWZhdWx0TG9jYWxlIjoiTFQiLCJiYW5rIjoiR09PR1VTTTFMVCJ9.kc70DvacGkryZKLQiDGgbCB9y74jiHkTFzSV-GOtnYA
+Example JWT payload:
+
+{
+    "projectId": 1,
+    "amount": 0.01,
+    "currency": "EUR",
+    "transactionId": "1712668308-863",
+    "paymentPurpose": "Express checkout demo",
+    "defaultCountry": "LT",
+    "defaultLocale": "LT",
+    "bank": "GOOGUSM1LT"
+}
+NOTE: Using APLEUS66LT bank will initiate the Apple Pay payment, using GOOGUSM1LT bank will initiate the Google Pay payment.
+
+Example of the express checkout HTML file
+    <!DOCTYPE html> 
+    <html>
+    <link rel="stylesheet" href="https://psd2.neopay.lt/express_checkout.css">
+    <body>
+    Container:
+    <div id="express-checkout-container"></div>
+<script type="text/javascript" src="https://psd2.neopay.lt/express_checkout.js"></script>
+<script type="text/javascript">
+        new ExpressCheckout(
+                {
+                        container: '#express-checkout-container',
+                        token: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsImFtb3VudCI6MC4wMSwiY3VycmVuY3kiOiJFVVIiLCJ0cmFuc2FjdGlvbklkIjoiMTcxMjY2ODMwOC04NjMiLCJwYXltZW50UHVycG9zZSI6IkV4cHJlc3MgY2hlY2tvdXQgZGVtbyIsImRlZmF1bHRDb3VudHJ5IjoiTFQiLCJkZWZhdWx0TG9jYWxlIjoiTFQiLCJiYW5rIjoiR09PR1VTTTFMVCJ9.00c0Bfr9tBPBn8hzGmZbwEM7Y362LIvWCpYkhmvuzRM',
+                        options: {
+                                onPaymentCompleted: () => {
+                                        console.info('Payment completed');
+                                },
+                                onPaymentFailed: () => {
+                                        console.info('Payment failed');
+                                },
+                                onError: (error) => {
+                                        console.info('Error occurred: ' + error);
+                                }
+                        }
+                }
+        );
+</script>
+</body>
+</html>
+Refunds (Cards)
+Card payment refund works the same as Refunds and allows to make up to 100 payments refunds with one API request.
+
+To initiate card payment refund you need to call our API endpoint: https://mano.neopay.lt/openapi/self-service/refunds with a JSON body:
+
+ {"token":"eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsInBheW1lbnRzIjpbeyJ0cmFuc2FjdGlvbklkIjoiMTY3MTYyMjI2OS04MDMiLCJhbW91bnQiOiIwLjAxIn1dfQ.CoulagNlncgq0N50YFApdkBSRIhswgzIs0ITYTwAnOg"}
+Token payload data:
+
+JWT PAYLOAD CLAIM	FORMAT	DESCRIPTION	MANDATORY
+projectId	string	Project ID from which you wish to initiate the refund.	YES
+payments	array	The list of payments (up to 100) that you wish to refund. Each of the entries must include transactionId and amount parameters	YES
+transactionId	string(35)	Transaction ID of an already completed Card payment transaction that you wish to refund	YES
+amount	double	Refund amount. Full or partial refunds are available	YES
+Example JWT payload:
+
+{
+    "projectId": 1,
+    "payments": [
+        {
+            "transactionId": "1671622269-803",
+            "amount": "50.01"
+        }
+    ]
+}
+Further process is the same as described in Refunds
+
+Get card data
+To get saved payer's card data, you need to call our API endpoint: POST https://psd2.neopay.lt/openapi/card/data/ and add signed JWT token.
+
+Example JWT payload:
+
+{
+"projectId": 1,
+"cid": "9nGJzcU4cjHggzRLUx6uqxOf8LanM9rTIL/9YhrHW2cCfVp06uG5jjW5dhuszhvc",
+"payerEmail": "RRTp/4YTI446UE+TYUaAEg=="
+}
+Curl example:
+
+    curl --location --request POST 'https://psd2.neopay.lt/openapi/card/data' \
+    --header 'Content-Type: application/json' \
+    --header 'Accept: application/json' \
+    --data '{"token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJwcm9qZWN0SWQiOjEsImNpZCI6IjluR0p6Y1U0Y2pIZ2d6UkxVeDZ1cXhPZjhMYW5NOXJUSUwvOVlockhXMmNDZlZwMDZ1RzVqalc1ZGh1c3podmMiLCJwYXllckVtYWlsIjoiUlJUcC80WVRJNDQ2VUUrVFlVYUFFZz09In0.mTp-fy46vmZkHjoQm6H8MAJ__zKjLhZoamYxiguHlBw"}'
+Success response example:
+
+{
+"pan": "123456******1234",
+"expDate": "12/25",
+"payerName": "Name Surname",
+"scheme": "visa"
+}
+Note: scheme parameter can have the following values: visa, mastercard, maestro or amex.
+
+Error response example:
+
+{
+"type": "https://tools.ietf.org/html/rfc2616#section-10",
+"title": "An error occurred",
+"status": 400,
+"detail": "Bad Request"
+}
+Service Testing
+In order to test your integration "Test payment" is enabled during integration stage (or by request). It's going to be disabled after your integration is ready to go LIVE
+
+Once "Test payment" is clicked it simulates the successful payment from client side, and therefore client side and server side callbacks may be tested without making a real payment.
+
+Note, test payment may be also called using feature parameters in order to test payments when bank list is provided at your website.
+
+To test a payment when bank list is provided at your website, provide parameter bank with a following variable:
+
+Example JWT payload
+
+{
+  "projectId": 1,
+  "amount": 0.01,
+  "currency": "EUR",
+  "bank":"TESTLT123",
+  "transactionId": "TS837",
+  "paymentPurpose": "Payment purpose",
+  "clientRedirectUrl": "https://your_client-redirect_url_here.domain"
+}
+Available test bank BICs:
+
+COUNTRY	TEST BIC	DEFAULT COUNTRY
+Lithuania	TESTLT123	LT
+Latvia	TESTLV123	LV
+Estonia	TESTEE123	EE
+Netherlands	TESTNL123	NL
+Sweden	TESTSE123	SE
+Be informed defaultCountry has to be provided according to the country test BIC.
+
+Transaction export
+Payment initiation & cards
+It is possible for you to export specific transaction or daily transaction data report using the API. In order to get your transaction details via the API, you need to call this endpoint with a GET request:
+
+https://mano.neopay.lt/openapi/self-service/transactions/{token}
+
+where {token} is a JWT token that contains data about desired transactions, and which is signed with your project KEY, JWT token example:
+
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJkYXRlIjoiMjAyMS0wNi0wOCIsInByb2plY3RJZCI6IjEifQ.HRhFB__CGZauKE9Y3YdxNIRFNokFXGMzw6KEt9QAjVY
+Example of the JWT payload for daily report:
+
+{
+  "projectId": 1,
+  "date": "2024-05-08"
+}
+Example of the JWT payload for a single transaction:
+
+{
+  "projectId": 1,
+  "transactionId": "11223344-55"
+}
+Note: You can get only one selected day per request and no older than 60 days from today.
+
+Result will be an array of transactions in the case of the daily report, or just the single transaction data, example:
+
+[
+    {
+        "externalId": "11223344-55",
+        "paymentPurpose": "NIPS1-11223344-55 PISP Demonstration",
+        "formattedAmount": "0.01",
+        "currency": "EUR",
+        "status": "Started",
+        "createdAt": "2024-05-08 16:19:06",
+        "aspspName": "Swedbank",
+        "countryName": "Lithuania",
+        "projectName": "psd2.neopay.lt",
+        "userIdentity": "",
+        "paidAt": "",
+        "lastError": "",
+        "payerAccountNumber": "LT1035200XXXXXXXXXXX"
+    }
+]
+Note: For other cases usability, all of the available transaction statuses are these: Started, Pending, Success, Rejected, Failed, Unknown, Partially signed.
+
+Bulk refund payments
+It is possible for you to export daily bulk refund payment transactions report using the API. In order to get your bulk refund payment transaction details via the API, you need to call this endpoint with a GET request:
+
+https://mano.neopay.lt/openapi/self-service/payouts-transactions/{token}
+
+where {token} is a JWT token that contains data about desired transactions, and which is signed with your project KEY, JWT token example:
+
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJkYXRlIjoiMjAyMS0wNi0wOCIsInByb2plY3RJZCI6IjEifQ.HRhFB__CGZauKE9Y3YdxNIRFNokFXGMzw6KEt9QAjVY
+Example of the JWT payload:
+
+{
+  "projectId": 1,
+  "date": "2023-06-08"
+}
+Note: You can get only one selected day per request and no older than 60 days from today.
+
+Result will be an array of transactions, example:
+
+[
+    {
+        "externalId": "11223344-55",
+        "paymentPurpose": "NIPS1-11223344-55 PISP Demonstration",
+        "status": "Started",
+        "createdAt": "2023-06-08 16:19:06",
+        "aspspName": "AB NEO Finance",
+        "countryName": "Lithuania",
+        "projectName": "psd2.neopay.lt",
+        "paidAt": "",
+        "lastError": "",
+        "payerAccountNumber": "LT1035200XXXXXXXXXXX",
+        "payments": [
+{
+    "transactionId": "123457-22-1",
+    "formattedAmount": "0.01",
+    "currency": "EUR",
+    "paymentPurpose": "Payment purpose",
+    "status": "Started",
+    "createdAt": "2023-06-08 16:19:06",
+    "receiverName": "Account Holder Name",
+    "receiverAccountNumber": "LT4435200XXXXXXXXXXX"
+},
+{
+    "transactionId": "123457-22-2",
+    "formattedAmount": "0.01",
+    "currency": "EUR",
+    "paymentPurpose": "Payment purpose",
+    "status": "Started",
+    "createdAt": "2023-06-08 16:19:06",
+    "receiverName": "Account Holder Name",
+    "receiverAccountNumber": "LT4435200XXXXXXXXXXX"
+}
+    }
+]
+Note: Do not use this functionality for bulk refund payment transactions status check as we send you callbacks for this need. For other cases usability, all of the available statuses are those: Started, Pending, Success, Rejected, Failed, Unknown, Partially signed, Partially accepted.
+
+Payment confirmation file
+It is possible for you to download payment confirmation file in the PDF format using the API. This feature is available only for outgoing payments from NEO Finance bank account. The feature must be enabled for your project by Neopay Team (contact your sales manager regarding this). In order to get your payment confirmation file via the API, you need to call this endpoint with a GET request:
+
+https://mano.neopay.lt/openapi/self-service/payment-confirmation-file/{token}
+
+where {token} is a JWT token that contains data about desired bulk refund payment, and which is signed with your project KEY, JWT token example:
+
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJwcm9qZWN0SWQiOjEsInRyYW5zYWN0aW9uSWQiOiJzMTVhZTRmYmIxMiJ9._kahObxCLKqrSqpmhUcF-LdcwQIsacV_wNhwBm_dawU
+Example of the JWT payload for a payment confirmation file:
+
+{
+  "projectId": 1,
+  "transactionId": "s15ae4fbb12"
+}
+Response will be a PDF file in binary format.
+
+Note: This feature only works, when there is one outgoing payment in the batch. In order to receive payment confirmation file, outgoing payment has to be successful (Payment status: ACSC, CONF)
