@@ -405,11 +405,20 @@ Neopay:
   - `project_id`, `project_key`
   - `widget_host` (default: `https://psd2.neopay.lt/widget.html?`)
   - `client_redirect_url` (kur Neopay nukreips userį po payment)
+  - `enable_bank_preselect`:
+    - `false`: frontas rodo tik Neopay (banką useris pasirenka widget'e)
+    - `true`: frontas gali rodyti bankų sąrašą (gaunamą iš backend) ir perduoti `neopay_bank_bic` į `checkout/confirm`
+
+Bankų sąrašas (kai `enable_bank_preselect=true`):
+
+- `GET /api/v1/payments/neopay/banks?country_code=LT`
 
 Server-side callback endpoint (reikia suvesti Neopay self-service portale):
 
 - `POST /api/v1/payments/neopay/callback` su body `{ "token": "..." }`
 - atsakymas turi būti `{ "status": "success" }` (kitu atveju Neopay kartos callback)
+
+Pastaba: galutinis bankas užfiksuojamas iš callback (net jei preselect'inom banką, useris jį gali pakeisti widget'e). Order API grąžina `neopay_bank_bic` / `neopay_bank_name`.
 
 Testavimui `localhost` dažniausiai neveiks, nes Neopay serveris turi pasiekti callback URL. Rekomendacija: naudoti `ngrok`/`cloudflared` ir suvesti viešą HTTPS URL.
 

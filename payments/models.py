@@ -70,6 +70,12 @@ class NeopayConfig(models.Model):
     project_id = models.BigIntegerField()
     project_key = models.CharField(max_length=255)
 
+    enable_bank_preselect = models.BooleanField(default=False)
+
+    banks_api_base_url = models.URLField(
+        blank=True, default="https://psd2.neopay.lt/api"
+    )
+
     widget_host = models.URLField(
         blank=True, default="https://psd2.neopay.lt/widget.html?"
     )

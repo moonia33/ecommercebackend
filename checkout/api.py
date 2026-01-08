@@ -659,6 +659,8 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
     pickup_point_id = (getattr(payload, "pickup_point_id",
                        None) or "").strip() or None
 
+    neopay_bank_bic = (getattr(payload, "neopay_bank_bic", None) or "").strip() or None
+
     payment_method = (payload.payment_method or "").strip() or "klix"
     if payment_method not in ["klix", "bank_transfer", "neopay"]:
         raise HttpError(400, "Unsupported payment_method")
@@ -872,10 +874,15 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 currency=order.currency,
                 transaction_id=tx_id,
                 payment_purpose=f"Order {order.id}",
+                bank_bic=neopay_bank_bic,
             )
             pi.external_id = tx_id
             pi.redirect_url = link
-            pi.raw_request = {**(pi.raw_request or {}), "neopay": neopay_payload}
+            pi.raw_request = {
+                **(pi.raw_request or {}),
+                "neopay": neopay_payload,
+                "neopay_bank_bic_requested": (neopay_bank_bic or ""),
+            }
             pi.save(update_fields=["external_id", "redirect_url", "raw_request", "updated_at"])
 
         # MVP: Klix redirect_url is empty until we plug in Klix API.
@@ -973,6 +980,8 @@ def list_orders(request, limit: int = 20):
                 payment_status=(pi.status if pi else ""),
                 payment_redirect_url=(pi.redirect_url if pi else ""),
                 payment_instructions=payment_instructions,
+                neopay_bank_bic=(pi.neopay_bank_bic if pi else ""),
+                neopay_bank_name=(pi.neopay_bank_name if pi else ""),
                 items=lines_out,
                 items_total=items_total,
                 shipping_total=shipping_total,
@@ -1058,6 +1067,8 @@ def get_order(request, order_id: int):
         payment_status=(pi.status if pi else ""),
         payment_redirect_url=(pi.redirect_url if pi else ""),
         payment_instructions=payment_instructions,
+        neopay_bank_bic=(pi.neopay_bank_bic if pi else ""),
+        neopay_bank_name=(pi.neopay_bank_name if pi else ""),
         items=lines_out,
         items_total=items_total,
         shipping_total=shipping_total,

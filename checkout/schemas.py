@@ -93,6 +93,7 @@ class CheckoutConfirmIn(Schema):
     shipping_method: str = "lpexpress"
     pickup_point_id: str | None = None
     payment_method: str = "klix"
+    neopay_bank_bic: str | None = None
     consents: list[OrderConsentIn]
 
 
@@ -135,6 +136,9 @@ class OrderOut(Schema):
     payment_status: str = ""
     payment_redirect_url: str = ""
     payment_instructions: str = ""
+
+    neopay_bank_bic: str = ""
+    neopay_bank_name: str = ""
 
     items: list[OrderLineOut]
 

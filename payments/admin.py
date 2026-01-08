@@ -28,6 +28,7 @@ class NeopayConfigAdmin(admin.ModelAdmin):
         "id",
         "is_active",
         "project_id",
+        "enable_bank_preselect",
         "widget_host",
         "client_redirect_url",
         "updated_at",
