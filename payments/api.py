@@ -18,8 +18,22 @@ def neopay_callback(request, payload: NeopayCallbackIn):
         raise HttpError(400, "Missing token")
 
     decoded = decode_neopay_token(token)
-    transactions = decoded.get("transactions") or {}
-    if not isinstance(transactions, dict):
+    transactions = decoded.get("transactions")
+
+    # Neopay may send either:
+    # 1) server-side callback token: { transactions: { <txId>: { status, bank, ... } } }
+    # 2) client redirect token: { transactionId, status, bank, ... }
+    if transactions is None:
+        tx_id = (decoded.get("transactionId") or "").strip()
+        if not tx_id:
+            raise HttpError(400, "Invalid token payload")
+        info = {
+            "status": decoded.get("status"),
+            "action": decoded.get("action"),
+            "bank": decoded.get("bank"),
+        }
+        transactions = {tx_id: info}
+    elif not isinstance(transactions, dict):
         raise HttpError(400, "Invalid token payload")
 
     from checkout.models import PaymentIntent
@@ -65,6 +79,15 @@ def neopay_callback(request, payload: NeopayCallbackIn):
                 pi.status = PaymentIntent.Status.FAILED
             elif status in ["canceled", "cancelled"]:
                 pi.status = PaymentIntent.Status.CANCELLED
+            elif status in [
+                "signed",
+                "pending",
+                "started",
+                "unknown",
+                "partially signed",
+                "partially_signed",
+            ]:
+                pi.status = PaymentIntent.Status.PENDING
 
             pi.save(update_fields=["status", "raw_response", "neopay_bank_bic", "neopay_bank_name", "updated_at"])
 
