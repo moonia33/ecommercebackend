@@ -95,6 +95,14 @@ class CheckoutConfirmOut(Schema):
     payment_instructions: str = ""
 
 
+class PaymentMethodOut(Schema):
+    code: str
+    name: str
+    kind: str
+    provider: str = ""
+    instructions: str = ""
+
+
 class OrderLineOut(Schema):
     id: int
     sku: str
@@ -113,6 +121,11 @@ class OrderOut(Schema):
     shipping_method: str
     carrier_code: str = ""
     tracking_number: str = ""
+
+    payment_provider: str = ""
+    payment_status: str = ""
+    payment_redirect_url: str = ""
+    payment_instructions: str = ""
 
     items: list[OrderLineOut]
 

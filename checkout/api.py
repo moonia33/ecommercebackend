@@ -27,6 +27,7 @@ from .schemas import (
     MoneyOut,
     OrderOut,
     OrderLineOut,
+    PaymentMethodOut,
     ShippingMethodOut,
 )
 from .services import get_shipping_net, money_from_net, get_shipping_tax_class
@@ -54,6 +55,28 @@ def checkout_consents(request):
                 settings, "CHECKOUT_PRIVACY_VERSION", "v1"),
             required=True,
             url=getattr(settings, "CHECKOUT_PRIVACY_URL", "/privacy"),
+        ),
+    ]
+
+
+@router.get("/payment-methods", response=list[PaymentMethodOut], auth=_auth)
+def payment_methods(request, country_code: str = "LT"):
+    _require_user(request)
+    instructions = (getattr(settings, "BANK_TRANSFER_INSTRUCTIONS", "") or "").strip()
+    return [
+        PaymentMethodOut(
+            code="bank_transfer",
+            name="Paprastas pavedimas",
+            kind="offline",
+            provider="bank_transfer",
+            instructions=instructions,
+        ),
+        PaymentMethodOut(
+            code="klix",
+            name="Bankinis mokėjimas (Klix)",
+            kind="gateway",
+            provider="klix",
+            instructions="",
         ),
     ]
 
@@ -766,12 +789,20 @@ def list_orders(request, limit: int = 20):
 
     orders = (
         Order.objects.filter(user=user)
+        .select_related("payment_intent")
         .prefetch_related("lines")
         .order_by("-created_at")[:limit]
     )
 
     result: list[OrderOut] = []
     for o in orders:
+        pi = getattr(o, "payment_intent", None)
+        payment_instructions = (
+            (getattr(settings, "BANK_TRANSFER_INSTRUCTIONS", "") or "").strip()
+            if (pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER)
+            else ""
+        )
+
         lines_out: list[OrderLineOut] = []
         for ln in o.lines.all():
             unit = MoneyOut(currency=o.currency, net=ln.unit_net,
@@ -798,6 +829,10 @@ def list_orders(request, limit: int = 20):
                 shipping_method=o.shipping_method,
                 carrier_code=o.carrier_code,
                 tracking_number=o.tracking_number,
+                payment_provider=(pi.provider if pi else ""),
+                payment_status=(pi.status if pi else ""),
+                payment_redirect_url=(pi.redirect_url if pi else ""),
+                payment_instructions=payment_instructions,
                 items=lines_out,
                 items_total=items_total,
                 shipping_total=shipping_total,
@@ -815,6 +850,7 @@ def get_order(request, order_id: int):
 
     o = (
         Order.objects.filter(user=user, id=order_id)
+        .select_related("payment_intent")
         .prefetch_related("lines")
         .first()
     )
@@ -837,6 +873,13 @@ def get_order(request, order_id: int):
     order_total = MoneyOut(currency=o.currency, net=o.total_net, vat_rate=Decimal(
         "0"), vat=o.total_vat, gross=o.total_gross)
 
+    pi = getattr(o, "payment_intent", None)
+    payment_instructions = (
+        (getattr(settings, "BANK_TRANSFER_INSTRUCTIONS", "") or "").strip()
+        if (pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER)
+        else ""
+    )
+
     return OrderOut(
         id=o.id,
         status=o.status,
@@ -846,6 +889,10 @@ def get_order(request, order_id: int):
         shipping_method=o.shipping_method,
         carrier_code=o.carrier_code,
         tracking_number=o.tracking_number,
+        payment_provider=(pi.provider if pi else ""),
+        payment_status=(pi.status if pi else ""),
+        payment_redirect_url=(pi.redirect_url if pi else ""),
+        payment_instructions=payment_instructions,
         items=lines_out,
         items_total=items_total,
         shipping_total=shipping_total,

@@ -384,6 +384,12 @@ Susijęs setting'as:
 
 - `BANK_TRANSFER_INSTRUCTIONS` – tekstas, kurį grąžina API į `payment_instructions`.
 
+Mokėjimo būdų sąrašas frontui:
+
+- `GET /api/v1/checkout/payment-methods?country_code=LT`
+  - Grąžina aktyvius mokėjimo būdus (kol kas hardcoded: `bank_transfer`, `klix`).
+  - `bank_transfer` atveju grąžina `instructions` (tas pats tekstas kaip `BANK_TRANSFER_INSTRUCTIONS`).
+
 ### Orders
 
 - `GET /api/v1/checkout/orders`
@@ -394,6 +400,13 @@ Frontui svarbu:
 - `tracking_number` – užpildomas po lipduko sugeneravimo (admin'e)
 - `carrier_code` – pvz. `dpd` arba `lpexpress`
 - `delivery_status` – po sėkmingo lipduko sugeneravimo automatiškai nustatomas `label_created` (tiek single, tiek bulk)
+
+Mokėjimai frontui (per `orders` endpointus):
+
+- `payment_provider` (pvz. `bank_transfer` arba `klix`)
+- `payment_status` (pvz. `pending`, `succeeded`)
+- `payment_redirect_url` (kol kas dažniausiai tuščias; bus naudojamas integracijoms)
+- `payment_instructions` (pildoma tik kai `payment_provider=bank_transfer`)
 
 Pavyzdys: `GET /api/v1/checkout/orders/{order_id}` (sutrumpintas):
 
