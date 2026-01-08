@@ -555,8 +555,13 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                        None) or "").strip() or None
 
     payment_method = (payload.payment_method or "").strip() or "klix"
-    if payment_method != "klix":
+    if payment_method not in ["klix", "bank_transfer"]:
         raise HttpError(400, "Unsupported payment_method")
+
+    bank_transfer_instructions = (
+        getattr(settings, "BANK_TRANSFER_INSTRUCTIONS", "")
+        or ""
+    ).strip()
 
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
 
@@ -570,6 +575,11 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 payment_provider=(pi.provider if pi else "klix"),
                 payment_status=(pi.status if pi else "pending"),
                 redirect_url=(pi.redirect_url if pi else ""),
+                payment_instructions=(
+                    bank_transfer_instructions
+                    if (pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER)
+                    else ""
+                ),
             )
 
     # Order-level consents are required at purchase time.
@@ -718,14 +728,19 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             ]
         )
 
+        provider = (
+            PaymentIntent.Provider.BANK_TRANSFER
+            if payment_method == "bank_transfer"
+            else PaymentIntent.Provider.KLIX
+        )
         pi = PaymentIntent.objects.create(
             order=order,
-            provider=PaymentIntent.Provider.KLIX,
+            provider=provider,
             status=PaymentIntent.Status.PENDING,
             currency="EUR",
             amount_gross=order.total_gross,
             raw_request={
-                "provider": "klix",
+                "provider": provider,
                 "created_at": timezone.now().isoformat(),
             },
         )
@@ -740,6 +755,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         payment_provider=pi.provider,
         payment_status=pi.status,
         redirect_url=pi.redirect_url or "",
+        payment_instructions=(bank_transfer_instructions if pi.provider == PaymentIntent.Provider.BANK_TRANSFER else ""),
     )
 
 

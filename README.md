@@ -348,6 +348,11 @@ Confirm pavyzdys:
 - `POST /api/v1/checkout/checkout/confirm` body:
   - `{ "shipping_address_id": 1, "shipping_method": "lpexpress", "payment_method": "klix", "consents": [{"kind":"terms","document_version":"v1"},{"kind":"privacy","document_version":"v1"}] }`
 
+Paprastam pavedimui (be redirect):
+
+- `POST /api/v1/checkout/checkout/confirm` body:
+  - `{ "shipping_address_id": 1, "shipping_method": "lpexpress", "payment_method": "bank_transfer", "consents": [{"kind":"terms","document_version":"v1"},{"kind":"privacy","document_version":"v1"}] }`
+
 Paštomatų atveju (pvz. DPD):
 
 - `POST /api/v1/checkout/checkout/confirm` body:
@@ -366,7 +371,18 @@ Idempotency:
 
 Mokėjimai (MVP):
 
-- sukuriamas `PaymentIntent` su `provider=klix`, bet realus `redirect_url` bus prijungtas kai turėsime Klix API dokumentaciją.
+- `checkout/confirm` visada sukuria `Order` ir `PaymentIntent`.
+- `payment_method=klix`:
+  - `PaymentIntent.provider=klix`
+  - `redirect_url` kol kas tuščias (bus prijungtas kai turėsime Klix API dokumentaciją)
+- `payment_method=bank_transfer`:
+  - `PaymentIntent.provider=bank_transfer`
+  - `redirect_url` visada tuščias
+  - `checkout/confirm` atsakyme grįžta `payment_instructions`, kurias frontas turi parodyti po užsakymo patvirtinimo
+
+Susijęs setting'as:
+
+- `BANK_TRANSFER_INSTRUCTIONS` – tekstas, kurį grąžina API į `payment_instructions`.
 
 ### Orders
 

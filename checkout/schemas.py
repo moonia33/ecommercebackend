@@ -92,6 +92,7 @@ class CheckoutConfirmOut(Schema):
     payment_provider: str
     payment_status: str
     redirect_url: str = ""
+    payment_instructions: str = ""
 
 
 class OrderLineOut(Schema):
