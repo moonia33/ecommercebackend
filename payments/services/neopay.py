@@ -28,7 +28,7 @@ def get_neopay_config() -> NeopayConfigData | None:
             return None
         return NeopayConfigData(
             project_id=int(cfg.project_id),
-            project_key=str(cfg.project_key),
+            project_key=str(cfg.project_key).strip(),
             widget_host=(cfg.widget_host or "https://psd2.neopay.lt/widget.html?").strip(),
             client_redirect_url=(cfg.client_redirect_url or "").strip(),
             enable_bank_preselect=bool(getattr(cfg, "enable_bank_preselect", False)),
