@@ -48,13 +48,20 @@ def list_terminals(
 
     out: list[TerminalOut] = []
     for o in qs:
+        raw_addr = ""
+        try:
+            if isinstance(o.raw, dict):
+                raw_addr = str(o.raw.get("address") or "").strip()
+        except Exception:
+            raw_addr = ""
+
         out.append(
             TerminalOut(
                 id=str(o.terminal_id or ""),
                 name=str(o.name or ""),
                 countryCode=str(o.country_code or ""),
                 locality=str(o.locality or ""),
-                street=str(o.street or ""),
+                street=str((o.street or "").strip() or raw_addr),
                 postalCode=str(o.postal_code or ""),
                 latitude=float(o.latitude) if o.latitude is not None else None,
                 longitude=float(o.longitude) if o.longitude is not None else None,

@@ -28,7 +28,15 @@ class UnisendTerminal(models.Model):
         ]
 
     def __str__(self) -> str:
-        parts = [p for p in [self.locality, self.name, self.street] if p]
+        raw_addr = ""
+        try:
+            if isinstance(self.raw, dict):
+                raw_addr = str(self.raw.get("address") or "").strip()
+        except Exception:
+            raw_addr = ""
+
+        street = (self.street or "").strip() or raw_addr
+        parts = [p for p in [self.locality, self.name, street] if p]
         label = " - ".join(parts) if parts else self.terminal_id
         return f"{label} ({self.terminal_id})"
 

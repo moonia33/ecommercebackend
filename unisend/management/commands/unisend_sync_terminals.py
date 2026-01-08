@@ -50,7 +50,11 @@ class Command(BaseCommand):
             obj.country_code = str(it.get("countryCode") or country_code or "").strip().upper()
             obj.name = str(it.get("name") or "").strip()
             obj.locality = str(it.get("locality") or it.get("city") or "").strip()
-            obj.street = str(it.get("street") or "").strip()
+            obj.street = str(
+                it.get("street")
+                or it.get("address")
+                or ""
+            ).strip()
             obj.postal_code = str(it.get("postalCode") or "").strip()
 
             lat = it.get("latitude")
