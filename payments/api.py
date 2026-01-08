@@ -75,10 +75,28 @@ def neopay_callback(request, payload: NeopayCallbackIn):
 
             if status == "success":
                 pi.status = PaymentIntent.Status.SUCCEEDED
+                try:
+                    if getattr(pi, "order", None) is not None:
+                        pi.order.status = pi.order.Status.PAID
+                        pi.order.save(update_fields=["status", "updated_at"])
+                except Exception:
+                    pass
             elif status in ["failed", "rejected", "error"]:
                 pi.status = PaymentIntent.Status.FAILED
+                try:
+                    if getattr(pi, "order", None) is not None:
+                        pi.order.status = pi.order.Status.CANCELLED
+                        pi.order.save(update_fields=["status", "updated_at"])
+                except Exception:
+                    pass
             elif status in ["canceled", "cancelled"]:
                 pi.status = PaymentIntent.Status.CANCELLED
+                try:
+                    if getattr(pi, "order", None) is not None:
+                        pi.order.status = pi.order.Status.CANCELLED
+                        pi.order.save(update_fields=["status", "updated_at"])
+                except Exception:
+                    pass
             elif status in [
                 "signed",
                 "pending",
