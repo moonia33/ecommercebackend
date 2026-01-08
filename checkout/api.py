@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.conf import settings
+from django.db import models
 from django.db import transaction
 from django.utils import timezone
 from ninja import Router
@@ -38,6 +39,25 @@ router = Router(tags=["checkout"])
 _auth = JWTAuth()
 
 
+def _bank_transfer_instructions_for(*, order_id: int | None, country_code: str) -> str:
+    country_code = (country_code or "").strip().upper()
+    try:
+        from payments.models import PaymentMethod
+
+        pm = (
+            PaymentMethod.objects.filter(is_active=True, code="bank_transfer")
+            .filter(models.Q(country_code="") | models.Q(country_code=country_code))
+            .order_by("-country_code")
+            .first()
+        )
+        if pm:
+            return pm.instructions_for_order(order_id=order_id)
+    except Exception:
+        pass
+
+    return (getattr(settings, "BANK_TRANSFER_INSTRUCTIONS", "") or "").strip()
+
+
 @router.get("/consents", response=list[ConsentDefinitionOut], auth=_auth)
 def checkout_consents(request):
     _require_user(request)
@@ -63,6 +83,35 @@ def checkout_consents(request):
 @router.get("/payment-methods", response=list[PaymentMethodOut], auth=_auth)
 def payment_methods(request, country_code: str = "LT"):
     _require_user(request)
+    country_code = (country_code or "").strip().upper() or "LT"
+    try:
+        from payments.models import PaymentMethod
+
+        methods = list(
+            PaymentMethod.objects.filter(is_active=True)
+            .filter(
+                models.Q(country_code="") | models.Q(country_code=country_code)
+            )
+            .order_by("sort_order", "code")
+        )
+    except Exception:
+        methods = []
+
+    if methods:
+        out: list[PaymentMethodOut] = []
+        for m in methods:
+            out.append(
+                PaymentMethodOut(
+                    code=m.code,
+                    name=m.name,
+                    kind=m.kind,
+                    provider=m.provider,
+                    instructions=(m.instructions or "").strip(),
+                )
+            )
+        return out
+
+    # Fallback (dev / before DB config exists)
     instructions = (getattr(settings, "BANK_TRANSFER_INSTRUCTIONS", "") or "").strip()
     return [
         PaymentMethodOut(
@@ -614,11 +663,6 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
     if payment_method not in ["klix", "bank_transfer"]:
         raise HttpError(400, "Unsupported payment_method")
 
-    bank_transfer_instructions = (
-        getattr(settings, "BANK_TRANSFER_INSTRUCTIONS", "")
-        or ""
-    ).strip()
-
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
 
     if idem_key:
@@ -632,7 +676,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 payment_status=(pi.status if pi else "pending"),
                 redirect_url=(pi.redirect_url if pi else ""),
                 payment_instructions=(
-                    bank_transfer_instructions
+                    _bank_transfer_instructions_for(order_id=existing.id, country_code=existing.country_code)
                     if (pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER)
                     else ""
                 ),
@@ -824,12 +868,20 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         # Clear cart after creating the order.
         CartItem.objects.filter(cart=cart).delete()
 
+        bank_transfer_instructions = _bank_transfer_instructions_for(
+            order_id=order.id, country_code=order.country_code
+        )
+
     return CheckoutConfirmOut(
         order_id=order.id,
         payment_provider=pi.provider,
         payment_status=pi.status,
         redirect_url=pi.redirect_url or "",
-        payment_instructions=(bank_transfer_instructions if pi.provider == PaymentIntent.Provider.BANK_TRANSFER else ""),
+        payment_instructions=(
+            bank_transfer_instructions
+            if pi.provider == PaymentIntent.Provider.BANK_TRANSFER
+            else ""
+        ),
     )
 
 
@@ -848,11 +900,9 @@ def list_orders(request, limit: int = 20):
     result: list[OrderOut] = []
     for o in orders:
         pi = getattr(o, "payment_intent", None)
-        payment_instructions = (
-            (getattr(settings, "BANK_TRANSFER_INSTRUCTIONS", "") or "").strip()
-            if (pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER)
-            else ""
-        )
+        payment_instructions = ""
+        if pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER:
+            payment_instructions = _bank_transfer_instructions_for(order_id=o.id, country_code=o.country_code)
 
         fees_out: list[FeeOut] = []
         fees_net = Decimal("0.00")
@@ -976,11 +1026,9 @@ def get_order(request, order_id: int):
         "0"), vat=o.total_vat, gross=o.total_gross)
 
     pi = getattr(o, "payment_intent", None)
-    payment_instructions = (
-        (getattr(settings, "BANK_TRANSFER_INSTRUCTIONS", "") or "").strip()
-        if (pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER)
-        else ""
-    )
+    payment_instructions = ""
+    if pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER:
+        payment_instructions = _bank_transfer_instructions_for(order_id=o.id, country_code=o.country_code)
 
     return OrderOut(
         id=o.id,

@@ -388,15 +388,21 @@ Mokėjimai (MVP):
   - `redirect_url` visada tuščias
   - `checkout/confirm` atsakyme grįžta `payment_instructions`, kurias frontas turi parodyti po užsakymo patvirtinimo
 
-Susijęs setting'as:
+Konfigūracija (rekomenduojama per admin / DB):
+
+- `Payments -> Payment methods`:
+  - `code=bank_transfer` – čia suvedami pavedimo rekvizitai / instrukcijos (gali būti šablonas su `{order_id}`)
+  - `code=klix` (ar kitas gateway) – gali būti naudojamas kaip aktyvus pasirinkimas frontui
+
+Fallback setting'as (jei DB dar nesukonfigūruota):
 
 - `BANK_TRANSFER_INSTRUCTIONS` – tekstas, kurį grąžina API į `payment_instructions`.
 
 Mokėjimo būdų sąrašas frontui:
 
 - `GET /api/v1/checkout/payment-methods?country_code=LT`
-  - Grąžina aktyvius mokėjimo būdus (kol kas hardcoded: `bank_transfer`, `klix`).
-  - `bank_transfer` atveju grąžina `instructions` (tas pats tekstas kaip `BANK_TRANSFER_INSTRUCTIONS`).
+  - Grąžina aktyvius mokėjimo būdus iš DB (`Payments -> Payment methods`).
+  - Jei DB tuščia, grąžina fallback (hardcoded: `bank_transfer`, `klix`).
 
 ### Orders
 

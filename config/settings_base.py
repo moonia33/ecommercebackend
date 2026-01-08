@@ -135,6 +135,7 @@ INSTALLED_APPS = [
     "catalog",
     "zaliuojibanga",
     "shipping",
+    "payments",
     "checkout",
     "dpd",
     "unisend",
