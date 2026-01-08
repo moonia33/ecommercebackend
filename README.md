@@ -405,22 +405,57 @@ Neopay:
   - `project_id`, `project_key`
   - `widget_host` (default: `https://psd2.neopay.lt/widget.html?`)
   - `client_redirect_url` (kur Neopay nukreips userį po payment)
+  - `banks_api_base_url` (Banks API bazinis URL)
   - `enable_bank_preselect`:
     - `false`: frontas rodo tik Neopay (banką useris pasirenka widget'e)
     - `true`: frontas gali rodyti bankų sąrašą (gaunamą iš backend) ir perduoti `neopay_bank_bic` į `checkout/confirm`
+
+  - `force_bank_bic` / `force_bank_name` (nebūtina):
+    - Jei nustatyta – backend'as visais atvejais įdės `bank` į Neopay JWT (override) ir `GET /payments/neopay/banks` grąžins tik šitą banką.
+    - Naudinga sandbox'e, kai projektui leidžiamas tik vienas testinis bankas (pvz. `TESTLT123`).
 
 Bankų sąrašas (kai `enable_bank_preselect=true`):
 
 - `GET /api/v1/payments/neopay/banks?country_code=LT`
 
-Server-side callback endpoint (reikia suvesti Neopay self-service portale):
+Callback'ai (2 tipai):
+
+Client redirect (browser redirect į frontą):
+
+- Naudoja `NeopayConfig.client_redirect_url`.
+- URL gali būti bet koks (pvz. `/modules/neopay/callback` arba `/order-confirmation`) – svarbu, kad sutaptų su `client_redirect_url`.
+- Frontas turi persiųsti tokeną į backend'ą:
+  - `POST /api/v1/payments/neopay/callback` su body `{ "token": "..." }`
+
+Server-side callback endpoint (Neopay serveris, rekomenduojama produkcijai; reikia suvesti Neopay self-service portale):
 
 - `POST /api/v1/payments/neopay/callback` su body `{ "token": "..." }`
 - atsakymas turi būti `{ "status": "success" }` (kitu atveju Neopay kartos callback)
 
-Pastaba: galutinis bankas užfiksuojamas iš callback (net jei preselect'inom banką, useris jį gali pakeisti widget'e). Order API grąžina `neopay_bank_bic` / `neopay_bank_name`.
+Pastaba: galutinis bankas užfiksuojamas iš callback (net jei preselect'inom banką, useris jį gali pakeisti widget'e). Order API grąžina `neopay_bank_bic` / `neopay_bank_name`. Gavus `success` iš callback, `Order.status` nustatomas į `paid`.
 
 Testavimui `localhost` dažniausiai neveiks, nes Neopay serveris turi pasiekti callback URL. Rekomendacija: naudoti `ngrok`/`cloudflared` ir suvesti viešą HTTPS URL.
+
+Local testavimas per `cloudflared`/tunnel:
+
+- Jei `client_redirect_url` rodo į tunnel host'ą, fronto Vite dev serveris gali blokuoti host'ą.
+  - Reikia įtraukti tunnel host'ą į `server.allowedHosts` (Vite config).
+- Jei frontas iš tunnel origin kviečia backend API (pvz. `POST /api/v1/payments/neopay/callback`), backend'e reikia leisti CORS/CSRF:
+  - `CORS_ALLOWED_ORIGINS` + `CSRF_TRUSTED_ORIGINS` turi turėti `https://<tunnel-host>`.
+
+Sandbox vs Production (deploy checklist):
+
+- Sandbox host'ai (pvz.):
+  - `widget_host=https://psd2.sandboxnpay.online/widget.html`
+  - `banks_api_base_url=https://psd2.sandboxnpay.online/api`
+- Production host'ai:
+  - `widget_host=https://psd2.neopay.lt/widget.html?`
+  - `banks_api_base_url=https://psd2.neopay.lt/api`
+- Prieš deploy į production:
+  - Pašalinti test tunnel URL iš `client_redirect_url` ir suvesti realų viešą fronto URL.
+  - Išjungti `force_bank_bic` (palikti tuščią), kad būtų rodomi realūs bankai.
+  - Patikrinti, kad Neopay self-service portale server-side callback URL suvestas į realų backend (`/api/v1/payments/neopay/callback`).
+  - Įsitikinti, kad `project_id`/`project_key` yra production projekto.
 
 Fallback setting'as (jei DB dar nesukonfigūruota):
 
