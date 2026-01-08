@@ -85,29 +85,65 @@ def neopay_banks(request, country_code: str = "LT"):
     import requests
 
     base = (cfg.banks_api_base_url or "https://psd2.neopay.lt/api").rstrip("/")
-    url = f"{base}/countries/{cfg.project_id}"
-    try:
-        r = requests.get(
-            url,
-            timeout=20,
-            headers={
-                "Accept": "application/json",
-                "User-Agent": "inultimo-backend/1.0",
-            },
-        )
-    except requests.RequestException as e:
-        raise HttpError(502, f"Neopay banks api request failed: {type(e).__name__}")
+    candidates = [
+        f"{base}/countries/{cfg.project_id}",
+        f"{base}/countries/{cfg.project_id}/",
+        # Fallback: some environments expose only the generic countries list.
+        f"{base}/countries",
+        f"{base}/countries/",
+    ]
+    # Some environments/document versions use base without '/api'.
+    if base.endswith("/api"):
+        root = base[: -len("/api")]
+        candidates.append(f"{root}/api/countries/{cfg.project_id}")
+        candidates.append(f"{root}/api/countries/{cfg.project_id}/")
 
-    if r.status_code >= 400:
-        body = (r.text or "").strip().replace("\n", " ")
-        if len(body) > 300:
-            body = body[:300] + "..."
-        raise HttpError(
-            502,
-            f"Neopay banks api failed: {r.status_code} url={url} body={body}",
-        )
+    last_response = None
+    last_exc: Exception | None = None
 
-    data = r.json()
+    for url in candidates:
+        try:
+            r = requests.get(
+                url,
+                timeout=20,
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "inultimo-backend/1.0",
+                },
+            )
+        except requests.RequestException as e:
+            last_exc = e
+            continue
+
+        last_response = r
+        if r.status_code == 404:
+            continue
+        if r.status_code >= 400:
+            body = (r.text or "").strip().replace("\n", " ")
+            if len(body) > 300:
+                body = body[:300] + "..."
+            raise HttpError(502, f"Neopay banks api failed: {r.status_code} url={url} body={body}")
+
+        data = r.json()
+        break
+    else:
+        if last_exc is not None:
+            raise HttpError(502, f"Neopay banks api request failed: {type(last_exc).__name__}")
+        if last_response is not None:
+            body = (last_response.text or "").strip().replace("\n", " ")
+            if len(body) > 300:
+                body = body[:300] + "..."
+            raise HttpError(
+                502,
+                f"Neopay banks api failed: {last_response.status_code} url={candidates[-1]} body={body}",
+            )
+        raise HttpError(502, "Neopay banks api failed: no response")
+
+    # 'data' is set from the first successful candidate above.
+
+    # If we hit the generic endpoint, normalize to the same shape we expect.
+    if isinstance(data, list):
+        data = {"countries": data}
 
     # Best-effort parsing; Neopay may change response shape.
     countries = None
