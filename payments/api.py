@@ -86,9 +86,26 @@ def neopay_banks(request, country_code: str = "LT"):
 
     base = (cfg.banks_api_base_url or "https://psd2.neopay.lt/api").rstrip("/")
     url = f"{base}/countries/{cfg.project_id}"
-    r = requests.get(url, timeout=20)
+    try:
+        r = requests.get(
+            url,
+            timeout=20,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "inultimo-backend/1.0",
+            },
+        )
+    except requests.RequestException as e:
+        raise HttpError(502, f"Neopay banks api request failed: {type(e).__name__}")
+
     if r.status_code >= 400:
-        raise HttpError(502, f"Neopay banks api failed: {r.status_code}")
+        body = (r.text or "").strip().replace("\n", " ")
+        if len(body) > 300:
+            body = body[:300] + "..."
+        raise HttpError(
+            502,
+            f"Neopay banks api failed: {r.status_code} url={url} body={body}",
+        )
 
     data = r.json()
 
