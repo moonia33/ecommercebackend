@@ -47,6 +47,13 @@ class CartItem(models.Model):
     variant = models.ForeignKey(
         "catalog.Variant", on_delete=models.PROTECT, related_name="cart_items"
     )
+    offer = models.ForeignKey(
+        "catalog.InventoryItem",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="cart_items",
+    )
     qty = models.PositiveIntegerField(default=1)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -55,7 +62,15 @@ class CartItem(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["cart", "variant"], name="uniq_cart_variant"),
+                fields=["cart", "variant"],
+                condition=models.Q(offer__isnull=True),
+                name="uniq_cart_variant_when_offer_null",
+            ),
+            models.UniqueConstraint(
+                fields=["cart", "offer"],
+                condition=models.Q(offer__isnull=False),
+                name="uniq_cart_offer_when_offer_present",
+            ),
             models.CheckConstraint(check=models.Q(
                 qty__gte=1), name="chk_cart_qty_gte_1"),
         ]
@@ -327,6 +342,14 @@ class OrderLine(models.Model):
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
+        related_name="order_lines",
+    )
+
+    offer = models.ForeignKey(
+        "catalog.InventoryItem",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
         related_name="order_lines",
     )
 

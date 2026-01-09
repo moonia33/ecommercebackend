@@ -153,6 +153,16 @@ def inventory_available_for_variant(*, variant_id: int) -> int:
         return 0
 
 
+def inventory_available_for_offer(*, offer_id: int) -> int:
+    from catalog.models import InventoryItem
+
+    offer_id = int(offer_id)
+    inv = InventoryItem.objects.filter(id=offer_id).first()
+    if not inv:
+        return 0
+    return max(0, int(inv.qty_on_hand) - int(inv.qty_reserved))
+
+
 def reserve_inventory_for_order(*, order_id: int) -> None:
     from catalog.models import InventoryItem
     from checkout.models import InventoryAllocation, OrderLine
@@ -186,6 +196,27 @@ def reserve_inventory_for_order(*, order_id: int) -> None:
             continue
         need = int(ln.qty)
         if need <= 0:
+            continue
+
+        if ln.offer_id:
+            inv = next((i for i in inv_items if int(i.id) == int(ln.offer_id)), None)
+            if not inv:
+                raise ValueError("No inventory for offer")
+            available = max(0, int(inv.qty_on_hand) - int(inv.qty_reserved))
+            if available < need:
+                raise ValueError("Not enough stock")
+            inv.qty_reserved = int(inv.qty_reserved) + int(need)
+            inv.updated_at = now
+            updates.append(inv)
+            allocations_to_create.append(
+                InventoryAllocation(
+                    order_id=order_id,
+                    order_line=ln,
+                    inventory_item=inv,
+                    qty=int(need),
+                    status=InventoryAllocation.Status.RESERVED,
+                )
+            )
             continue
 
         candidates = inv_by_variant.get(int(ln.variant_id), [])

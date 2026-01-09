@@ -105,7 +105,23 @@ Kodas (pvz. užsakymo būsenos pranešimui vėliau): naudok [notifications/servi
 ## Catalog (MVP)
 
 - Admin'e: `Catalog -> Categories/Brands/Products`
-- Produktai turi `price_eur` (EUR-only) ir `stock_qty` (paprastas likutis MVP'ui).
+- Kainos šaltinis: `Variant.price_eur` (EUR-only, **neto**).
+- Likučių šaltinis: `InventoryItem.qty_on_hand/qty_reserved` (sandėlio lygis). `qty_available = qty_on_hand - qty_reserved`.
+
+### Offer (InventoryItem) koncepcija (frontui)
+
+`InventoryItem` pas mus veikia kaip **Offer**: tai yra konkretus parduodamas vienetas (variantas + sandėlis + būklė + (akcijos parametrai)).
+
+Svarbiausi laukai:
+
+- **`condition_grade`**: `NEW`, `RETURNED_A`, `DAMAGED_B`
+- **`offer_visibility`**: `NORMAL` arba `OUTLET`
+- **`offer_priority`**: didesnis laimi (returned A paprastai bus didesnis priority)
+- **`offer_label`**: tekstas UI badge (pvz. "Grąžinta prekė", "Pažeista pakuotė")
+- **`offer_price_override_eur`**: fiksuota sale kaina (neto)
+- **`offer_discount_percent`**: sale % nuo `Variant.price_eur`
+
+Pagrindinis principas: **krepšelio eilutė turi būti pririšta prie konkretaus offer (`offer_id`)**, jei norim garantuoti returned/outlet miksą.
 
 ### Facetai (Feature + Value)
 
@@ -165,6 +181,7 @@ Jei importuojant iš XML turite HTML lauką, rekomenduojamas kelias yra jį norm
 Query:
 
 - `country_code` (privalomas) — PVZ: `LT`
+- `channel` (nebūtinas, default `normal`) — `normal` arba `outlet`
 - `q` (nebūtinas) — paieška pagal pavadinimą/slug
 - `category_slug` (nebūtinas)
 - `brand_slug` (nebūtinas)
@@ -174,12 +191,25 @@ Query:
 Pavyzdys:
 
 - `/api/v1/catalog/products?country_code=LT&page=1&page_size=24`
+- `/api/v1/catalog/products?country_code=LT&channel=outlet&page=1&page_size=24`
+
+Pastaba: `channel=outlet` grąžina tik tuos produktus, kurie turi bent vieną `OUTLET` offer su `qty_available>0`.
 
 ### GET `/api/v1/catalog/products/{slug}`
 
 Query:
 
 - `country_code` (privalomas)
+- `channel` (nebūtinas, default `normal`) — `normal` arba `outlet`
+
+`channel` įtakoja, kokie offer'iai (NORMAL vs OUTLET) bus parinkti ir kokia kaina bus grąžinta variantams.
+
+Variantų kainodara frontui:
+
+- `price` — **sale** kaina (jei yra offer su nuolaida), kitaip list
+- `compare_at_price` — list kaina (tik jei yra nuolaida)
+- `discount_percent` — procentas (tik jei yra nuolaida)
+- `offer_id`, `offer_label`, `condition_grade`, `offer_visibility` — offer metaduomenys UI ir add-to-cart
 
 Pavyzdys:
 
@@ -200,8 +230,13 @@ Checkout endpointai yra po `/api/v1/checkout/...`.
 
 - `GET /api/v1/checkout/cart?country_code=LT`
 - `POST /api/v1/checkout/cart/items?country_code=LT` body: `{ "variant_id": 123, "qty": 2 }`
+- `POST /api/v1/checkout/cart/items?country_code=LT` body: `{ "variant_id": 123, "offer_id": 456, "qty": 1 }`
 - `PATCH /api/v1/checkout/cart/items/{item_id}?country_code=LT` body: `{ "qty": 3 }` (jei `qty<=0` – item pašalinamas)
 - `DELETE /api/v1/checkout/cart/items/{item_id}?country_code=LT`
+
+`offer_id` reikalingas, kai norim į krepšelį dėti konkretų offer (pvz. returned A arba outlet B). Tai leidžia viename krepšelyje turėti:
+
+- tą patį `variant_id`, bet skirtingus `offer_id` (skirtinga būklė/kaina/warehouse)
 
 Pastabos frontui (dev):
 
@@ -213,7 +248,8 @@ Pastabos frontui (dev):
 - Prisijungęs useris turi **vieną aktyvų krepšelį** (1:1).
 - Neprisijungusiam krepšelis laikomas per Django session cookie (`session_key`).
 - Kai useris prisijungia tame pačiame browseryje, guest krepšelis yra **sujungiamas** į userio krepšelį:
-  - jei userio krepšelyje tas pats variantas jau yra – `qty` **susumuojamas**;
+  - jei eilutė turi `offer_id`: sujungiama pagal tą patį `offer_id`;
+  - jei `offer_id` nėra: sujungiama pagal tą patį `variant_id` (kai userio eilutė irgi be offer);
   - jei varianto nėra – eilutė **pridedama**.
   - po sujungimo guest krepšelis pašalinamas.
 

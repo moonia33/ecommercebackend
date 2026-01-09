@@ -69,6 +69,12 @@ class VariantOut(Schema):
     is_active: bool
     stock_available: int
     price: MoneyOut
+    compare_at_price: MoneyOut | None = None
+    offer_id: int | None = None
+    offer_label: str = ""
+    condition_grade: str = ""
+    offer_visibility: str = ""
+    discount_percent: int | None = None
     options: list[VariantOptionOut]
 
 

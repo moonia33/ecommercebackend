@@ -650,6 +650,15 @@ class InventoryItem(models.Model):
         Warehouse, on_delete=models.PROTECT, related_name="inventory_items"
     )
 
+    class ConditionGrade(models.TextChoices):
+        NEW = "NEW", "New"
+        RETURNED_A = "RETURNED_A", "Returned (A)"
+        DAMAGED_B = "DAMAGED_B", "Damaged (B)"
+
+    class OfferVisibility(models.TextChoices):
+        NORMAL = "NORMAL", "Normal"
+        OUTLET = "OUTLET", "Outlet"
+
     qty_on_hand = models.IntegerField(default=0)
     qty_reserved = models.IntegerField(default=0)
     cost_eur = models.DecimalField(
@@ -659,6 +668,31 @@ class InventoryItem(models.Model):
         blank=True,
         help_text="Optional per-warehouse purchase cost override.",
     )
+
+    condition_grade = models.CharField(
+        max_length=20,
+        choices=ConditionGrade.choices,
+        default=ConditionGrade.NEW,
+    )
+    offer_visibility = models.CharField(
+        max_length=10,
+        choices=OfferVisibility.choices,
+        default=OfferVisibility.NORMAL,
+    )
+    offer_priority = models.IntegerField(default=0)
+    offer_label = models.CharField(max_length=255, blank=True)
+    offer_price_override_eur = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    offer_discount_percent = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+    )
+    allow_additional_promotions = models.BooleanField(default=False)
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -683,6 +717,16 @@ class InventoryItem(models.Model):
                 check=models.Q(cost_eur__gte=0) | models.Q(
                     cost_eur__isnull=True),
                 name="chk_inventory_cost_eur_gte_0",
+            ),
+            models.CheckConstraint(
+                check=models.Q(offer_price_override_eur__gte=0)
+                | models.Q(offer_price_override_eur__isnull=True),
+                name="chk_inventory_offer_price_override_eur_gte_0",
+            ),
+            models.CheckConstraint(
+                check=models.Q(offer_discount_percent__gte=0, offer_discount_percent__lte=100)
+                | models.Q(offer_discount_percent__isnull=True),
+                name="chk_inventory_offer_discount_percent_0_100",
             ),
         ]
 

@@ -11,7 +11,7 @@ from ninja.errors import HttpError
 
 from accounts.auth import JWTAuth
 from accounts.models import UserAddress
-from catalog.models import Variant
+from catalog.models import Category, InventoryItem, Variant
 from pricing.services import get_vat_rate
 
 from .models import Cart, CartItem, Order, OrderConsent, OrderFee, OrderLine, PaymentIntent
@@ -33,11 +33,13 @@ from .schemas import (
     ShippingMethodOut,
 )
 from .services import (
+    calculate_fee_money,
     calculate_fees,
     get_shipping_net,
-    inventory_available_for_variant,
-    money_from_net,
     get_shipping_tax_class,
+    inventory_available_for_variant,
+    inventory_available_for_offer,
+    money_from_net,
     reserve_inventory_for_order,
 )
 
@@ -212,9 +214,15 @@ def _get_cart_for_request(request, *, create: bool) -> Cart | None:
         # If a guest cart exists for this session, merge/attach it.
         if guest_cart and guest_cart.id != user_cart.id:
             with transaction.atomic():
-                for it in CartItem.objects.filter(cart=guest_cart).select_related("variant"):
-                    existing = CartItem.objects.filter(
-                        cart=user_cart, variant=it.variant).first()
+                for it in CartItem.objects.filter(cart=guest_cart).select_related("variant", "offer"):
+                    if it.offer_id:
+                        existing = CartItem.objects.filter(
+                            cart=user_cart, offer_id=it.offer_id
+                        ).first()
+                    else:
+                        existing = CartItem.objects.filter(
+                            cart=user_cart, variant=it.variant, offer__isnull=True
+                        ).first()
                     if existing:
                         existing.qty = existing.qty + it.qty
                         existing.save(update_fields=["qty", "updated_at"])
@@ -342,6 +350,51 @@ def _variant_money(*, variant: Variant, country_code: str, qty: int) -> tuple[Mo
     )
 
 
+def _effective_offer_unit_net(*, list_unit_net: Decimal, offer: InventoryItem) -> Decimal:
+    if offer.offer_price_override_eur is not None:
+        return Decimal(offer.offer_price_override_eur)
+    if offer.offer_discount_percent is not None:
+        pct = int(offer.offer_discount_percent)
+        pct = max(0, min(100, pct))
+        return (Decimal(list_unit_net) * (Decimal(100 - pct) / Decimal(100))).quantize(Decimal("0.01"))
+    return Decimal(list_unit_net)
+
+
+def _cart_item_money(*, item: CartItem, country_code: str) -> tuple[MoneyOut, MoneyOut, Decimal]:
+    v = item.variant
+    product = v.product
+    if not product or not product.tax_class_id:
+        raise HttpError(400, "Product has no tax_class assigned")
+
+    try:
+        vat_rate = get_vat_rate(country_code=country_code,
+                                tax_class=product.tax_class)
+    except LookupError:
+        raise HttpError(400, "VAT rate not configured for country/tax_class")
+    except ValueError as exc:
+        raise HttpError(400, str(exc))
+
+    list_unit_net = Decimal(v.price_eur)
+    unit_net = (
+        _effective_offer_unit_net(list_unit_net=list_unit_net, offer=item.offer)
+        if getattr(item, "offer_id", None)
+        else list_unit_net
+    )
+
+    unit = money_from_net(currency="EUR", unit_net=unit_net,
+                          vat_rate=vat_rate, qty=1)
+    total = money_from_net(
+        currency="EUR", unit_net=unit_net, vat_rate=vat_rate, qty=int(item.qty))
+
+    return (
+        MoneyOut(currency=unit.currency, net=unit.net,
+                 vat_rate=unit.vat_rate, vat=unit.vat, gross=unit.gross),
+        MoneyOut(currency=total.currency, net=total.net,
+                 vat_rate=total.vat_rate, vat=total.vat, gross=total.gross),
+        vat_rate,
+    )
+
+
 def _serialize_cart_items(*, items: list[CartItem], country_code: str) -> tuple[list[CartItemOut], MoneyOut]:
     out_items: list[CartItemOut] = []
 
@@ -351,10 +404,13 @@ def _serialize_cart_items(*, items: list[CartItem], country_code: str) -> tuple[
 
     for it in items:
         v = it.variant
-        unit_price, line_total, _vat_rate = _variant_money(
-            variant=v, country_code=country_code, qty=int(it.qty))
+        unit_price, line_total, _vat_rate = _cart_item_money(
+            item=it, country_code=country_code)
 
-        stock_available = inventory_available_for_variant(variant_id=v.id)
+        if it.offer_id:
+            stock_available = inventory_available_for_offer(offer_id=it.offer_id)
+        else:
+            stock_available = inventory_available_for_variant(variant_id=v.id)
 
         total_net += line_total.net
         total_vat += line_total.vat
@@ -364,6 +420,7 @@ def _serialize_cart_items(*, items: list[CartItem], country_code: str) -> tuple[
             CartItemOut(
                 id=it.id,
                 variant_id=v.id,
+                offer_id=(int(it.offer_id) if it.offer_id else None),
                 sku=v.sku,
                 name=(v.product.name if v.product_id else v.sku),
                 qty=it.qty,
@@ -404,7 +461,7 @@ def get_cart(request, country_code: str = "LT"):
         )
     items = list(
         CartItem.objects.select_related(
-            "variant", "variant__product", "variant__product__tax_class")
+            "variant", "variant__product", "variant__product__tax_class", "offer")
         .filter(cart=cart)
         .order_by("id")
     )
@@ -428,17 +485,33 @@ def add_cart_item(request, payload: CartItemAddIn, country_code: str = "LT"):
     if not variant:
         raise HttpError(404, "Variant not found")
 
+    offer = None
+    if getattr(payload, "offer_id", None):
+        offer = (
+            InventoryItem.objects.filter(
+                id=int(payload.offer_id),
+                variant_id=variant.id,
+            )
+            .select_related("warehouse")
+            .first()
+        )
+        if not offer:
+            raise HttpError(404, "Offer not found")
+
     cart = _get_cart_for_request(request, create=True)
     if cart is None:
         raise HttpError(400, "Session is not available")
 
     with transaction.atomic():
-        item = CartItem.objects.filter(cart=cart, variant=variant).first()
+        if offer is not None:
+            item = CartItem.objects.filter(cart=cart, offer=offer).first()
+        else:
+            item = CartItem.objects.filter(cart=cart, variant=variant, offer__isnull=True).first()
         if item:
             item.qty = item.qty + qty
             item.save(update_fields=["qty", "updated_at"])
         else:
-            CartItem.objects.create(cart=cart, variant=variant, qty=qty)
+            CartItem.objects.create(cart=cart, variant=variant, offer=offer, qty=qty)
 
     return get_cart(request, country_code=country_code)
 
@@ -452,7 +525,7 @@ def update_cart_item(request, item_id: int, payload: CartItemUpdateIn, country_c
         raise HttpError(404, "Cart item not found")
     item = (
         CartItem.objects.select_related(
-            "variant", "variant__product", "variant__product__tax_class")
+            "variant", "variant__product", "variant__product__tax_class", "offer")
         .filter(cart=cart, id=item_id)
         .first()
     )
@@ -570,7 +643,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         raise HttpError(400, "Cart is empty")
     items = list(
         CartItem.objects.select_related(
-            "variant", "variant__product", "variant__product__tax_class")
+            "variant", "variant__product", "variant__product__tax_class", "offer")
         .filter(cart=cart)
         .order_by("id")
     )
@@ -579,7 +652,10 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
 
     # Stock check
     for it in items:
-        available = inventory_available_for_variant(variant_id=it.variant_id)
+        if getattr(it, "offer_id", None):
+            available = inventory_available_for_offer(offer_id=it.offer_id)
+        else:
+            available = inventory_available_for_variant(variant_id=it.variant_id)
         if int(available) < int(it.qty):
             raise HttpError(409, f"Not enough stock for {it.variant.sku}")
 
@@ -735,7 +811,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         raise HttpError(400, "Cart is empty")
     items = list(
         CartItem.objects.select_related(
-            "variant", "variant__product", "variant__product__tax_class")
+            "variant", "variant__product", "variant__product__tax_class", "offer")
         .filter(cart=cart)
         .order_by("id")
     )
@@ -800,13 +876,14 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         lines: list[OrderLine] = []
         for it in items:
             v = it.variant
-            unit_price, line_total, vat_rate = _variant_money(
-                variant=v, country_code=country_code, qty=int(it.qty))
+            unit_price, line_total, vat_rate = _cart_item_money(
+                item=it, country_code=country_code)
 
             lines.append(
                 OrderLine(
                     order=order,
                     variant=v,
+                    offer=(it.offer if getattr(it, "offer_id", None) else None),
                     sku=v.sku,
                     name=(v.product.name if v.product_id else v.sku),
                     unit_net=unit_price.net,

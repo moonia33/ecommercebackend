@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import Min, Q
+from django.db.models import Case, DecimalField, ExpressionWrapper, F, Min, Q, Value, When
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
@@ -22,7 +22,7 @@ from .api_schemas import (
     VariantOptionOut,
     VariantOut,
 )
-from .models import Brand, Category, Product, Variant
+from .models import Brand, Category, InventoryItem, Product, Variant
 
 router = Router(tags=["catalog"])
 
@@ -37,6 +37,27 @@ def _money_out(*, currency: str, unit_net: Decimal, vat_rate: Decimal) -> MoneyO
         "vat": b.unit_vat,
         "gross": b.unit_gross,
     }
+
+
+def _effective_offer_unit_net(*, list_unit_net: Decimal, offer: InventoryItem) -> Decimal:
+    if offer.offer_price_override_eur is not None:
+        return Decimal(offer.offer_price_override_eur)
+    if offer.offer_discount_percent is not None:
+        pct = int(offer.offer_discount_percent)
+        pct = max(0, min(100, pct))
+        return (Decimal(list_unit_net) * (Decimal(100 - pct) / Decimal(100))).quantize(Decimal("0.01"))
+    return Decimal(list_unit_net)
+
+
+def _discount_percent(*, list_unit_net: Decimal, sale_unit_net: Decimal) -> int | None:
+    list_unit_net = Decimal(list_unit_net)
+    sale_unit_net = Decimal(sale_unit_net)
+    if list_unit_net <= 0:
+        return None
+    if sale_unit_net >= list_unit_net:
+        return None
+    pct = int(((list_unit_net - sale_unit_net) / list_unit_net * Decimal(100)).quantize(Decimal("1")))
+    return max(0, min(100, pct))
 
 
 class ProductPagination(PageNumberPagination):
@@ -100,22 +121,62 @@ def brand_detail(request, slug: str):
 
 @router.get("/products", response=list[ProductListOut])
 @paginate(ProductPagination)
-def products(request, country_code: str = "LT"):
+def products(request, country_code: str = "LT", channel: str = "normal"):
     country_code = (country_code or "").strip().upper()
     if len(country_code) != 2:
         raise HttpError(400, "Invalid country_code")
 
+    channel = (channel or "normal").strip().lower()
+    if channel not in {"normal", "outlet"}:
+        raise HttpError(400, "Invalid channel")
+
+    visibility = (
+        InventoryItem.OfferVisibility.OUTLET
+        if channel == "outlet"
+        else InventoryItem.OfferVisibility.NORMAL
+    )
+
     # Representative list price: min active variant price (net) per product.
-    min_price_expr = Min("variants__price_eur",
-                         filter=Q(variants__is_active=True))
+    min_price_expr = Min("variants__price_eur", filter=Q(variants__is_active=True))
+
+    # Representative offer price: min effective offer sale price (net) per product.
+    # Only consider inventory items with available stock and matching visibility.
+    offer_price_expr = Case(
+        When(
+            variants__inventory_items__offer_price_override_eur__isnull=False,
+            then=F("variants__inventory_items__offer_price_override_eur"),
+        ),
+        When(
+            variants__inventory_items__offer_discount_percent__isnull=False,
+            then=ExpressionWrapper(
+                F("variants__price_eur")
+                * (Value(100) - F("variants__inventory_items__offer_discount_percent"))
+                / Value(100),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
+        ),
+        default=F("variants__price_eur"),
+        output_field=DecimalField(max_digits=12, decimal_places=2),
+    )
+
+    offer_filter = (
+        Q(variants__is_active=True)
+        & Q(variants__inventory_items__offer_visibility=visibility)
+        & Q(variants__inventory_items__qty_on_hand__gt=F("variants__inventory_items__qty_reserved"))
+    )
+    min_offer_price_expr = Min(offer_price_expr, filter=offer_filter)
 
     qs = (
         Product.objects.filter(is_active=True)
         .select_related("brand", "category", "tax_class")
         .prefetch_related("images")
         .annotate(_min_variant_price=min_price_expr)
+        .annotate(_min_offer_price=min_offer_price_expr)
         .order_by("name", "id")
     )
+
+    if channel == "outlet":
+        qs = qs.filter(_min_offer_price__isnull=False)
 
     vat_cache: dict[int, Decimal] = {}
 
@@ -136,7 +197,10 @@ def products(request, country_code: str = "LT"):
 
     out: list[ProductListOut] = []
     for p in qs:
-        net = p._min_variant_price if p._min_variant_price is not None else 0
+        if getattr(p, "_min_offer_price", None) is not None:
+            net = p._min_offer_price
+        else:
+            net = p._min_variant_price if p._min_variant_price is not None else 0
         rate = vat_rate_for(p)
 
         imgs = list(p.images.all())
@@ -192,10 +256,14 @@ def products(request, country_code: str = "LT"):
 
 
 @router.get("/products/{slug}", response=ProductDetailOut)
-def product_detail(request, slug: str, country_code: str = "LT"):
+def product_detail(request, slug: str, country_code: str = "LT", channel: str = "normal"):
     country_code = (country_code or "").strip().upper()
     if len(country_code) != 2:
         raise HttpError(400, "Invalid country_code")
+
+    channel = (channel or "normal").strip().lower()
+    if channel not in {"normal", "outlet"}:
+        raise HttpError(400, "Invalid channel")
 
     product = (
         Product.objects.filter(slug=slug, is_active=True)
@@ -229,12 +297,36 @@ def product_detail(request, slug: str, country_code: str = "LT"):
 
     variants: list[VariantOut] = []
     for v in variants_qs:
-        # Stock: sum across inventory items.
-        inv = list(v.inventory_items.all())
-        if inv:
-            stock = sum([ii.qty_available for ii in inv])
-        else:
-            stock = 0
+        inv_all = list(v.inventory_items.all())
+
+        visibility = (
+            InventoryItem.OfferVisibility.OUTLET
+            if channel == "outlet"
+            else InventoryItem.OfferVisibility.NORMAL
+        )
+        inv = [ii for ii in inv_all if ii.offer_visibility == visibility]
+
+        stock = sum([ii.qty_available for ii in inv]) if inv else 0
+
+        best_offer: InventoryItem | None = None
+        inv_available = [ii for ii in inv if ii.qty_available > 0]
+        if inv_available:
+            inv_available.sort(
+                key=lambda ii: (
+                    -int(ii.offer_priority or 0),
+                    _effective_offer_unit_net(list_unit_net=Decimal(v.price_eur), offer=ii),
+                    int(ii.id),
+                )
+            )
+            best_offer = inv_available[0]
+
+        list_unit_net = Decimal(v.price_eur)
+        sale_unit_net = (
+            _effective_offer_unit_net(list_unit_net=list_unit_net, offer=best_offer)
+            if best_offer
+            else list_unit_net
+        )
+        disc_pct = _discount_percent(list_unit_net=list_unit_net, sale_unit_net=sale_unit_net)
 
         options = list(v.option_values.select_related(
             "option_type", "option_value").all())
@@ -249,7 +341,17 @@ def product_detail(request, slug: str, country_code: str = "LT"):
                 "name": v.name,
                 "is_active": bool(v.is_active),
                 "stock_available": int(stock),
-                "price": _money_out(currency="EUR", unit_net=Decimal(v.price_eur), vat_rate=Decimal(vat_rate)),
+                "price": _money_out(currency="EUR", unit_net=sale_unit_net, vat_rate=Decimal(vat_rate)),
+                "compare_at_price": (
+                    _money_out(currency="EUR", unit_net=list_unit_net, vat_rate=Decimal(vat_rate))
+                    if disc_pct is not None
+                    else None
+                ),
+                "offer_id": (int(best_offer.id) if best_offer else None),
+                "offer_label": (best_offer.offer_label if best_offer else ""),
+                "condition_grade": (best_offer.condition_grade if best_offer else ""),
+                "offer_visibility": (best_offer.offer_visibility if best_offer else ""),
+                "discount_percent": disc_pct,
                 "options": [
                     {
                         "option_type_code": r.option_type.code,

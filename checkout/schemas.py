@@ -16,6 +16,7 @@ class MoneyOut(Schema):
 class CartItemOut(Schema):
     id: int
     variant_id: int
+    offer_id: int | None = None
     sku: str
     name: str
     qty: int
@@ -33,6 +34,7 @@ class CartOut(Schema):
 
 class CartItemAddIn(Schema):
     variant_id: int
+    offer_id: int | None = None
     qty: int = 1
 
 
