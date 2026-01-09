@@ -81,9 +81,6 @@ env = environ.Env(
 
     # Promotions/Coupons policy
     COUPON_ALLOWED_CHANNELS=(list, ["normal"]),
-    COUPON_ALLOW_ON_DISCOUNTED_ITEMS=(bool, False),
-    PROMO_ALLOW_ON_DISCOUNTED_ITEMS=(bool, False),
-    PROMO_ALLOW_STACK_WITH_COUPON=(bool, False),
 )
 
 # Loads variables from .env if present (dev convenience). In prod use real env vars.
@@ -295,6 +292,3 @@ API_BASE_PATH = env("API_BASE_PATH", default=env(
 
 # --- Promotions/Coupons policy ---
 COUPON_ALLOWED_CHANNELS = [c.strip().lower() for c in env.list("COUPON_ALLOWED_CHANNELS", default=["normal"]) if c.strip()]
-COUPON_ALLOW_ON_DISCOUNTED_ITEMS = env.bool("COUPON_ALLOW_ON_DISCOUNTED_ITEMS", default=False)
-PROMO_ALLOW_ON_DISCOUNTED_ITEMS = env.bool("PROMO_ALLOW_ON_DISCOUNTED_ITEMS", default=False)
-PROMO_ALLOW_STACK_WITH_COUPON = env.bool("PROMO_ALLOW_STACK_WITH_COUPON", default=False)
