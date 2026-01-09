@@ -382,6 +382,40 @@ class OrderLine(models.Model):
         return f"order:{self.order_id} {self.sku} x{self.qty}"
 
 
+class InventoryAllocation(models.Model):
+    class Status(models.TextChoices):
+        RESERVED = "reserved", "Reserved"
+        CAPTURED = "captured", "Captured"
+        RELEASED = "released", "Released"
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="inventory_allocations")
+    order_line = models.ForeignKey(OrderLine, on_delete=models.CASCADE, related_name="inventory_allocations")
+    inventory_item = models.ForeignKey(
+        "catalog.InventoryItem",
+        on_delete=models.PROTECT,
+        related_name="allocations",
+    )
+
+    qty = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RESERVED)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["order", "status", "-created_at"]),
+            models.Index(fields=["inventory_item", "status"]),
+        ]
+        constraints = [
+            models.CheckConstraint(check=models.Q(qty__gte=0), name="chk_alloc_qty_gte_0"),
+        ]
+
+    def __str__(self) -> str:
+        return f"order:{self.order_id} line:{self.order_line_id} inv:{self.inventory_item_id} {self.qty} {self.status}"
+
+
 class PaymentIntent(models.Model):
     class Provider(models.TextChoices):
         KLIX = "klix", "Klix (Citadele)"

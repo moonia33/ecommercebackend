@@ -32,7 +32,14 @@ from .schemas import (
     FeeOut,
     ShippingMethodOut,
 )
-from .services import calculate_fees, get_shipping_net, money_from_net, get_shipping_tax_class
+from .services import (
+    calculate_fees,
+    get_shipping_net,
+    inventory_available_for_variant,
+    money_from_net,
+    get_shipping_tax_class,
+    reserve_inventory_for_order,
+)
 
 
 router = Router(tags=["checkout"])
@@ -347,6 +354,8 @@ def _serialize_cart_items(*, items: list[CartItem], country_code: str) -> tuple[
         unit_price, line_total, _vat_rate = _variant_money(
             variant=v, country_code=country_code, qty=int(it.qty))
 
+        stock_available = inventory_available_for_variant(variant_id=v.id)
+
         total_net += line_total.net
         total_vat += line_total.vat
         total_gross += line_total.gross
@@ -358,7 +367,7 @@ def _serialize_cart_items(*, items: list[CartItem], country_code: str) -> tuple[
                 sku=v.sku,
                 name=(v.product.name if v.product_id else v.sku),
                 qty=it.qty,
-                stock_available=int(v.stock_qty),
+                stock_available=int(stock_available),
                 unit_price=unit_price,
                 line_total=line_total,
             )
@@ -570,7 +579,8 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
 
     # Stock check
     for it in items:
-        if it.variant.stock_qty < it.qty:
+        available = inventory_available_for_variant(variant_id=it.variant_id)
+        if int(available) < int(it.qty):
             raise HttpError(409, f"Not enough stock for {it.variant.sku}")
 
     out_items, items_total = _serialize_cart_items(
@@ -811,6 +821,14 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             )
 
         OrderLine.objects.bulk_create(lines)
+
+        try:
+            reserve_inventory_for_order(order_id=order.id)
+        except ValueError as exc:
+            msg = str(exc) or "Not enough stock"
+            if "not enough" in msg.lower():
+                raise HttpError(409, "Not enough stock")
+            raise HttpError(409, msg)
 
         OrderConsent.objects.bulk_create(
             [

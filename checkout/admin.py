@@ -3,6 +3,7 @@ from __future__ import annotations
 from django import forms
 from django.contrib import admin
 from django.contrib import messages
+from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import path, reverse
@@ -291,6 +292,8 @@ class OrderAdmin(admin.ModelAdmin):
 
     actions = (
         "recalculate_selected",
+        "mark_paid_capture_inventory",
+        "mark_cancelled_release_inventory",
         "mark_supplier_reservation_pending",
         "mark_supplier_reservation_reserved",
         "mark_supplier_reservation_failed",
@@ -355,6 +358,90 @@ class OrderAdmin(admin.ModelAdmin):
                 name="supplier_reservation_status_changed",
                 payload={"before": before, "after": after},
             )
+
+        self.message_user(request, f"Atnaujinta užsakymų: {changed}")
+
+    @admin.action(description="Pažymėti kaip apmokėtą (capture inventory) – bank_transfer")
+    def mark_paid_capture_inventory(self, request: HttpRequest, queryset):
+        from checkout.models import PaymentIntent
+        from checkout.services import capture_inventory_for_order
+
+        changed = 0
+        for o in queryset.select_related("payment_intent").all():
+            pi = getattr(o, "payment_intent", None)
+            if not pi or pi.provider != PaymentIntent.Provider.BANK_TRANSFER:
+                continue
+            if o.status == Order.Status.PAID and pi.status == PaymentIntent.Status.SUCCEEDED:
+                continue
+
+            with transaction.atomic():
+                o = Order.objects.select_for_update().filter(id=o.id).first()  # type: ignore
+                if not o:
+                    continue
+                pi = getattr(o, "payment_intent", None)
+                if not pi or pi.provider != PaymentIntent.Provider.BANK_TRANSFER:
+                    continue
+
+                o.status = Order.Status.PAID
+                o.save(update_fields=["status", "updated_at"])
+                pi.status = PaymentIntent.Status.SUCCEEDED
+                pi.save(update_fields=["status", "updated_at"])
+                capture_inventory_for_order(order_id=o.id)
+
+            try:
+                OrderEvent.objects.create(
+                    order_id=o.id,
+                    kind=OrderEvent.Kind.PAYMENT,
+                    name="manual_paid_capture_inventory",
+                    actor_user=(request.user if getattr(request, "user", None) and request.user.is_authenticated else None),
+                    actor_label=str(getattr(request.user, "email", "") or getattr(request.user, "username", "") or ""),
+                    payload={"provider": "bank_transfer"},
+                )
+            except Exception:
+                pass
+
+            changed += 1
+
+        self.message_user(request, f"Atnaujinta užsakymų: {changed}")
+
+    @admin.action(description="Atšaukti (release inventory)")
+    def mark_cancelled_release_inventory(self, request: HttpRequest, queryset):
+        from checkout.models import PaymentIntent
+        from checkout.services import release_inventory_for_order
+
+        changed = 0
+        for o in queryset.select_related("payment_intent").all():
+            with transaction.atomic():
+                o = Order.objects.select_for_update().filter(id=o.id).first()  # type: ignore
+                if not o:
+                    continue
+
+                if o.status == Order.Status.CANCELLED:
+                    continue
+
+                release_inventory_for_order(order_id=o.id)
+
+                o.status = Order.Status.CANCELLED
+                o.save(update_fields=["status", "updated_at"])
+
+                pi = getattr(o, "payment_intent", None)
+                if pi and pi.status not in {PaymentIntent.Status.SUCCEEDED, PaymentIntent.Status.CANCELLED}:
+                    pi.status = PaymentIntent.Status.CANCELLED
+                    pi.save(update_fields=["status", "updated_at"])
+
+            try:
+                OrderEvent.objects.create(
+                    order_id=o.id,
+                    kind=OrderEvent.Kind.PAYMENT,
+                    name="manual_cancel_release_inventory",
+                    actor_user=(request.user if getattr(request, "user", None) and request.user.is_authenticated else None),
+                    actor_label=str(getattr(request.user, "email", "") or getattr(request.user, "username", "") or ""),
+                    payload={},
+                )
+            except Exception:
+                pass
+
+            changed += 1
 
         self.message_user(request, f"Atnaujinta užsakymų: {changed}")
 

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
+from django.db import transaction
+from django.utils import timezone
 
 from catalog.models import TaxClass
 from pricing.services import compute_vat, get_vat_rate
@@ -135,3 +138,229 @@ def calculate_fees(
         out.append((r, m))
 
     return out
+
+
+def inventory_available_for_variant(*, variant_id: int) -> int:
+    from catalog.models import InventoryItem
+
+    agg = InventoryItem.objects.filter(variant_id=int(variant_id)).aggregate(
+        total=models.Sum(models.F("qty_on_hand") - models.F("qty_reserved"))
+    )
+    total = agg.get("total")
+    try:
+        return max(0, int(total or 0))
+    except Exception:
+        return 0
+
+
+def reserve_inventory_for_order(*, order_id: int) -> None:
+    from catalog.models import InventoryItem
+    from checkout.models import InventoryAllocation, OrderLine
+
+    order_id = int(order_id)
+
+    lines = list(
+        OrderLine.objects.filter(order_id=order_id)
+        .select_related("variant")
+        .order_by("id")
+    )
+    if not lines:
+        return
+
+    inv_items = list(
+        InventoryItem.objects.select_related("warehouse")
+        .select_for_update()
+        .filter(variant_id__in=[ln.variant_id for ln in lines if ln.variant_id])
+        .order_by("warehouse__sort_order", "warehouse__code", "id")
+    )
+    inv_by_variant: dict[int, list[InventoryItem]] = {}
+    for it in inv_items:
+        inv_by_variant.setdefault(int(it.variant_id), []).append(it)
+
+    allocations_to_create: list[InventoryAllocation] = []
+    updates: list[InventoryItem] = []
+    now = timezone.now()
+
+    for ln in lines:
+        if not ln.variant_id:
+            continue
+        need = int(ln.qty)
+        if need <= 0:
+            continue
+
+        candidates = inv_by_variant.get(int(ln.variant_id), [])
+        if not candidates:
+            raise ValueError("No inventory for variant")
+
+        for inv in candidates:
+            if need <= 0:
+                break
+            available = max(0, int(inv.qty_on_hand) - int(inv.qty_reserved))
+            if available <= 0:
+                continue
+            take = min(available, need)
+            if take <= 0:
+                continue
+            inv.qty_reserved = int(inv.qty_reserved) + int(take)
+            inv.updated_at = now
+            updates.append(inv)
+            allocations_to_create.append(
+                InventoryAllocation(
+                    order_id=order_id,
+                    order_line=ln,
+                    inventory_item=inv,
+                    qty=int(take),
+                    status=InventoryAllocation.Status.RESERVED,
+                )
+            )
+            need -= int(take)
+
+        if need > 0:
+            raise ValueError("Not enough stock")
+
+    if updates:
+        InventoryItem.objects.bulk_update(updates, ["qty_reserved", "updated_at"])
+    if allocations_to_create:
+        InventoryAllocation.objects.bulk_create(allocations_to_create)
+
+
+def capture_inventory_for_order(*, order_id: int) -> None:
+    from catalog.models import InventoryItem
+    from checkout.models import InventoryAllocation
+
+    order_id = int(order_id)
+    rows = list(
+        InventoryAllocation.objects.select_for_update()
+        .filter(order_id=order_id, status=InventoryAllocation.Status.RESERVED)
+        .select_related("inventory_item")
+        .order_by("id")
+    )
+    if not rows:
+        return
+
+    inv_ids = [r.inventory_item_id for r in rows]
+    inv_items = {
+        i.id: i
+        for i in InventoryItem.objects.select_for_update()
+        .filter(id__in=inv_ids)
+        .order_by("id")
+    }
+
+    inv_updates: list[InventoryItem] = []
+    alloc_updates: list[InventoryAllocation] = []
+    now = timezone.now()
+
+    for r in rows:
+        inv = inv_items.get(r.inventory_item_id)
+        if not inv:
+            continue
+        q = int(r.qty)
+        inv.qty_on_hand = max(0, int(inv.qty_on_hand) - q)
+        inv.qty_reserved = max(0, int(inv.qty_reserved) - q)
+        inv.updated_at = now
+        inv_updates.append(inv)
+        r.status = InventoryAllocation.Status.CAPTURED
+        r.updated_at = now
+        alloc_updates.append(r)
+
+    if inv_updates:
+        InventoryItem.objects.bulk_update(inv_updates, ["qty_on_hand", "qty_reserved", "updated_at"])
+    if alloc_updates:
+        InventoryAllocation.objects.bulk_update(alloc_updates, ["status", "updated_at"])
+
+
+def release_inventory_for_order(*, order_id: int) -> None:
+    from catalog.models import InventoryItem
+    from checkout.models import InventoryAllocation
+
+    order_id = int(order_id)
+    rows = list(
+        InventoryAllocation.objects.select_for_update()
+        .filter(order_id=order_id, status=InventoryAllocation.Status.RESERVED)
+        .select_related("inventory_item")
+        .order_by("id")
+    )
+    if not rows:
+        return
+
+    inv_ids = [r.inventory_item_id for r in rows]
+    inv_items = {
+        i.id: i
+        for i in InventoryItem.objects.select_for_update()
+        .filter(id__in=inv_ids)
+        .order_by("id")
+    }
+
+    inv_updates: list[InventoryItem] = []
+    alloc_updates: list[InventoryAllocation] = []
+
+    for r in rows:
+        inv = inv_items.get(r.inventory_item_id)
+        if not inv:
+            continue
+        q = int(r.qty)
+        inv.qty_reserved = max(0, int(inv.qty_reserved) - q)
+        inv.updated_at = now
+        inv_updates.append(inv)
+        r.status = InventoryAllocation.Status.RELEASED
+        r.updated_at = now
+        alloc_updates.append(r)
+
+    if inv_updates:
+        InventoryItem.objects.bulk_update(inv_updates, ["qty_reserved", "updated_at"])
+    if alloc_updates:
+        InventoryAllocation.objects.bulk_update(alloc_updates, ["status", "updated_at"])
+
+
+def expire_pending_payment_reservations(*, now=None) -> int:
+    from checkout.models import Order, PaymentIntent
+
+    now = now or timezone.now()
+
+    ttl_gateway_min = int(getattr(settings, "INVENTORY_RESERVATION_TTL_MINUTES_GATEWAY", 30) or 30)
+    ttl_bank_hours = int(getattr(settings, "INVENTORY_RESERVATION_TTL_HOURS_BANK_TRANSFER", 72) or 72)
+
+    cutoff_gateway = now - timedelta(minutes=ttl_gateway_min)
+    cutoff_bank = now - timedelta(hours=ttl_bank_hours)
+
+    qs = (
+        Order.objects.filter(status=Order.Status.PENDING_PAYMENT)
+        .select_related("payment_intent")
+        .order_by("id")
+    )
+
+    expired_ids: list[int] = []
+    for o in qs:
+        pi = getattr(o, "payment_intent", None)
+        provider = (getattr(pi, "provider", "") or "").strip()
+        if provider == PaymentIntent.Provider.BANK_TRANSFER:
+            if o.created_at < cutoff_bank:
+                expired_ids.append(o.id)
+        else:
+            if o.created_at < cutoff_gateway:
+                expired_ids.append(o.id)
+
+    if not expired_ids:
+        return 0
+
+    expired = 0
+    with transaction.atomic():
+        for oid in expired_ids:
+            o = Order.objects.select_for_update().select_related("payment_intent").filter(id=oid).first()
+            if not o:
+                continue
+            if o.status != Order.Status.PENDING_PAYMENT:
+                continue
+
+            release_inventory_for_order(order_id=o.id)
+            o.status = Order.Status.CANCELLED
+            o.save(update_fields=["status", "updated_at"])
+
+            pi = getattr(o, "payment_intent", None)
+            if pi and pi.status not in {PaymentIntent.Status.SUCCEEDED, PaymentIntent.Status.CANCELLED}:
+                pi.status = PaymentIntent.Status.CANCELLED
+                pi.save(update_fields=["status", "updated_at"])
+
+            expired += 1
+
+    return expired

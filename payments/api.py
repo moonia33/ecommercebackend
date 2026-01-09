@@ -37,6 +37,7 @@ def neopay_callback(request, payload: NeopayCallbackIn):
         raise HttpError(400, "Invalid token payload")
 
     from checkout.models import PaymentIntent
+    from checkout.services import capture_inventory_for_order, release_inventory_for_order
 
     with transaction.atomic():
         for tx_id, info in transactions.items():
@@ -79,6 +80,7 @@ def neopay_callback(request, payload: NeopayCallbackIn):
                     if getattr(pi, "order", None) is not None:
                         pi.order.status = pi.order.Status.PAID
                         pi.order.save(update_fields=["status", "updated_at"])
+                        capture_inventory_for_order(order_id=pi.order.id)
                 except Exception:
                     pass
             elif status in ["failed", "rejected", "error"]:
@@ -87,6 +89,7 @@ def neopay_callback(request, payload: NeopayCallbackIn):
                     if getattr(pi, "order", None) is not None:
                         pi.order.status = pi.order.Status.CANCELLED
                         pi.order.save(update_fields=["status", "updated_at"])
+                        release_inventory_for_order(order_id=pi.order.id)
                 except Exception:
                     pass
             elif status in ["canceled", "cancelled"]:
@@ -95,6 +98,7 @@ def neopay_callback(request, payload: NeopayCallbackIn):
                     if getattr(pi, "order", None) is not None:
                         pi.order.status = pi.order.Status.CANCELLED
                         pi.order.save(update_fields=["status", "updated_at"])
+                        release_inventory_for_order(order_id=pi.order.id)
                 except Exception:
                     pass
             elif status in [
