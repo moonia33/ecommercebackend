@@ -294,10 +294,19 @@ class Order(models.Model):
             fees_vat += Decimal(f.vat)
             fees_gross += Decimal(f.gross)
 
+        # Discounts (always -)
+        discounts_net = Decimal("0.00")
+        discounts_vat = Decimal("0.00")
+        discounts_gross = Decimal("0.00")
+        for d in self.discounts.all():
+            discounts_net += Decimal(d.net)
+            discounts_vat += Decimal(d.vat)
+            discounts_gross += Decimal(d.gross)
+
         # Totals
-        self.total_net = self.items_net + self.shipping_net + fees_net
-        self.total_vat = self.items_vat + self.shipping_vat + fees_vat
-        self.total_gross = self.items_gross + self.shipping_gross + fees_gross
+        self.total_net = self.items_net + self.shipping_net + fees_net - discounts_net
+        self.total_vat = self.items_vat + self.shipping_vat + fees_vat - discounts_vat
+        self.total_gross = self.items_gross + self.shipping_gross + fees_gross - discounts_gross
 
 
 class OrderEvent(models.Model):
@@ -332,6 +341,34 @@ class OrderEvent(models.Model):
 
     def __str__(self) -> str:
         return f"order:{self.order_id} event:{self.kind}:{self.name}"
+
+
+class OrderDiscount(models.Model):
+    class Kind(models.TextChoices):
+        COUPON = "coupon", "Coupon"
+        PROMO = "promo", "Promo"
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="discounts")
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.COUPON)
+
+    code = models.CharField(max_length=80, blank=True, default="")
+    name = models.CharField(max_length=200, blank=True, default="")
+
+    net = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    vat = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    gross = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["order", "kind"]),
+            models.Index(fields=["kind", "code"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"order:{self.order_id} discount:{self.kind}:{self.code}"
 
 
 class OrderLine(models.Model):

@@ -38,6 +38,7 @@ def neopay_callback(request, payload: NeopayCallbackIn):
 
     from checkout.models import PaymentIntent
     from checkout.services import capture_inventory_for_order, release_inventory_for_order
+    from promotions.services import redeem_coupon_for_paid_order
 
     with transaction.atomic():
         for tx_id, info in transactions.items():
@@ -81,6 +82,7 @@ def neopay_callback(request, payload: NeopayCallbackIn):
                         pi.order.status = pi.order.Status.PAID
                         pi.order.save(update_fields=["status", "updated_at"])
                         capture_inventory_for_order(order_id=pi.order.id)
+                        redeem_coupon_for_paid_order(order_id=pi.order.id)
                 except Exception:
                     pass
             elif status in ["failed", "rejected", "error"]:

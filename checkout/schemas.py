@@ -55,6 +55,8 @@ class CheckoutPreviewIn(Schema):
     shipping_method: str = "lpexpress"
     pickup_point_id: str | None = None
     payment_method: str = "klix"
+    channel: str = "normal"
+    coupon_code: str | None = None
 
 
 class CheckoutPreviewOut(Schema):
@@ -65,6 +67,7 @@ class CheckoutPreviewOut(Schema):
     items: list[CartItemOut]
 
     items_total: MoneyOut
+    discount_total: MoneyOut
     shipping_total: MoneyOut
     fees_total: MoneyOut
     fees: list["FeeOut"]
@@ -96,6 +99,8 @@ class CheckoutConfirmIn(Schema):
     pickup_point_id: str | None = None
     payment_method: str = "klix"
     neopay_bank_bic: str | None = None
+    channel: str = "normal"
+    coupon_code: str | None = None
     consents: list[OrderConsentIn]
 
 
@@ -149,6 +154,7 @@ class OrderOut(Schema):
     items: list[OrderLineOut]
 
     items_total: MoneyOut
+    discount_total: MoneyOut
     shipping_total: MoneyOut
     fees_total: MoneyOut
     fees: list[FeeOut]

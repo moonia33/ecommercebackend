@@ -13,8 +13,9 @@ from accounts.auth import JWTAuth
 from accounts.models import UserAddress
 from catalog.models import Category, InventoryItem, Variant
 from pricing.services import get_vat_rate
+from promotions.models import Coupon
 
-from .models import Cart, CartItem, Order, OrderConsent, OrderFee, OrderLine, PaymentIntent
+from .models import Cart, CartItem, Order, OrderConsent, OrderDiscount, OrderFee, OrderLine, PaymentIntent
 from .schemas import (
     CartItemAddIn,
     CartItemOut,
@@ -466,8 +467,7 @@ def get_cart(request, country_code: str = "LT"):
         .order_by("id")
     )
 
-    out_items, items_total = _serialize_cart_items(
-        items=items, country_code=country_code)
+    out_items, items_total = _serialize_cart_items(items=items, country_code=country_code)
     return CartOut(country_code=country_code, items=out_items, items_total=items_total)
 
 
@@ -497,6 +497,23 @@ def add_cart_item(request, payload: CartItemAddIn, country_code: str = "LT"):
         )
         if not offer:
             raise HttpError(404, "Offer not found")
+    else:
+        candidates = list(
+            InventoryItem.objects.filter(
+                variant_id=variant.id,
+                offer_visibility=InventoryItem.OfferVisibility.NORMAL,
+                qty_on_hand__gt=models.F("qty_reserved"),
+            ).order_by("id")
+        )
+        if candidates:
+            candidates.sort(
+                key=lambda ii: (
+                    -int(ii.offer_priority or 0),
+                    _effective_offer_unit_net(list_unit_net=Decimal(variant.price_eur), offer=ii),
+                    int(ii.id),
+                )
+            )
+            offer = candidates[0]
 
     cart = _get_cart_for_request(request, create=True)
     if cart is None:
@@ -628,6 +645,11 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
 
     shipping_method = (payload.shipping_method or "").strip() or "lpexpress"
     payment_method = (getattr(payload, "payment_method", "") or "").strip() or "klix"
+    channel = (getattr(payload, "channel", "normal") or "normal").strip().lower()
+    if channel not in {"normal", "outlet"}:
+        raise HttpError(400, "Invalid channel")
+
+    coupon_code = (getattr(payload, "coupon_code", None) or "").strip().lower() or None
 
     country_code = _country_code_from_address(addr)
 
@@ -650,6 +672,35 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
     if not items:
         raise HttpError(400, "Cart is empty")
 
+    coupon = None
+    if coupon_code:
+        if channel not in set(getattr(settings, "COUPON_ALLOWED_CHANNELS", ["normal"])):
+            raise HttpError(400, "Coupon is not allowed for this channel")
+
+        primary = user.get_primary_customer_group() if user else None
+        if primary and not bool(getattr(primary, "allow_coupons", True)):
+            raise HttpError(400, "Coupons are not allowed for this customer")
+
+        coupon = Coupon.objects.filter(code=coupon_code).first()
+        if not coupon or not coupon.is_valid_now():
+            raise HttpError(400, "Invalid coupon")
+
+        # Usage limits are counted only when orders are PAID, but we still validate against
+        # already redeemed usage here.
+        if coupon.usage_limit_total is not None and int(coupon.times_redeemed) >= int(coupon.usage_limit_total):
+            raise HttpError(400, "Coupon usage limit reached")
+        if coupon.usage_limit_per_user is not None:
+            from promotions.models import CouponRedemption
+
+            used = CouponRedemption.objects.filter(coupon=coupon, user=user).count()
+            if int(used) >= int(coupon.usage_limit_per_user):
+                raise HttpError(400, "Coupon usage limit reached for user")
+
+    # Coupon discount (applies only to cart/items total)
+    discount_net = Decimal("0.00")
+    discount_vat = Decimal("0.00")
+    discount_gross = Decimal("0.00")
+
     # Stock check
     for it in items:
         if getattr(it, "offer_id", None):
@@ -662,12 +713,47 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
     out_items, items_total = _serialize_cart_items(
         items=items, country_code=country_code)
 
+    if coupon:
+        eligible_items_net = Decimal("0.00")
+        eligible_items_vat = Decimal("0.00")
+
+        for it in items:
+            _unit, line_total, _vat_rate = _cart_item_money(item=it, country_code=country_code)
+
+            is_discounted_offer = bool(
+                it.offer_id
+                and it.offer
+                and (
+                    it.offer.offer_price_override_eur is not None
+                    or it.offer.offer_discount_percent is not None
+                )
+            )
+            allow_stack_for_line = bool(
+                coupon.apply_on_discounted_items
+                or (it.offer and bool(getattr(it.offer, "allow_additional_promotions", False)))
+            )
+            if is_discounted_offer and not allow_stack_for_line:
+                continue
+
+            eligible_items_net += Decimal(line_total.net)
+            eligible_items_vat += Decimal(line_total.vat)
+
+        discount_net = coupon.get_discount_net_for(eligible_items_net=eligible_items_net)
+        if discount_net:
+            eff_rate = (eligible_items_vat / eligible_items_net) if eligible_items_net else Decimal("0")
+            discount_vat = (discount_net * eff_rate).quantize(Decimal("0.01"))
+            discount_gross = (discount_net + discount_vat).quantize(Decimal("0.01"))
+
+        if discount_net <= 0 and not coupon.is_free_shipping_for(shipping_method=shipping_method):
+            raise HttpError(400, "Coupon is not applicable to cart items")
+
     try:
-        shipping_net = get_shipping_net(
-            shipping_method=shipping_method, country_code=country_code
-        )
+        shipping_net = get_shipping_net(shipping_method=shipping_method, country_code=country_code)
     except ValueError:
         raise HttpError(400, "Unsupported shipping_method")
+
+    if coupon and coupon.is_free_shipping_for(shipping_method=shipping_method):
+        shipping_net = Decimal("0.00")
     tax_class = get_shipping_tax_class()
     if not tax_class:
         shipping_vat_rate = Decimal("0")
@@ -705,9 +791,9 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
             )
         )
 
-    order_net = items_total.net + shipping_money.net + fees_net
-    order_vat = items_total.vat + shipping_money.vat + fees_vat
-    order_gross = items_total.gross + shipping_money.gross + fees_gross
+    order_net = items_total.net + shipping_money.net + fees_net - discount_net
+    order_vat = items_total.vat + shipping_money.vat + fees_vat - discount_vat
+    order_gross = items_total.gross + shipping_money.gross + fees_gross - discount_gross
 
     shipping_total = MoneyOut(
         currency="EUR",
@@ -715,6 +801,13 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         vat_rate=shipping_money.vat_rate,
         vat=shipping_money.vat,
         gross=shipping_money.gross,
+    )
+    discount_total = MoneyOut(
+        currency="EUR",
+        net=discount_net,
+        vat_rate=Decimal("0"),
+        vat=discount_vat,
+        gross=discount_gross,
     )
     fees_total = MoneyOut(currency="EUR", net=fees_net, vat_rate=Decimal("0"), vat=fees_vat, gross=fees_gross)
     order_total = MoneyOut(currency="EUR", net=order_net, vat_rate=Decimal(
@@ -725,6 +818,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         shipping_method=shipping_method,
         items=out_items,
         items_total=items_total,
+        discount_total=discount_total,
         shipping_total=shipping_total,
         fees_total=fees_total,
         fees=fees_out,
@@ -752,6 +846,11 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         raise HttpError(400, "Unsupported payment_method")
 
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
+
+    channel = (getattr(payload, "channel", "normal") or "normal").strip().lower()
+    if channel not in {"normal", "outlet"}:
+        raise HttpError(400, "Invalid channel")
+    coupon_code = (getattr(payload, "coupon_code", None) or "").strip().lower() or None
 
     if idem_key:
         existing = Order.objects.filter(
@@ -803,6 +902,8 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             shipping_method=shipping_method,
             pickup_point_id=pickup_point_id,
             payment_method=payment_method,
+            channel=channel,
+            coupon_code=coupon_code,
         ),
     )
 
@@ -872,6 +973,21 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             shipping_country_code=addr.country_code,
             shipping_phone=addr.phone,
         )
+
+        if coupon_code:
+            coupon = Coupon.objects.filter(code=coupon_code).first()
+            OrderDiscount.objects.create(
+                order=order,
+                kind=OrderDiscount.Kind.COUPON,
+                code=coupon_code,
+                name=(coupon.name if coupon else ""),
+                net=preview.discount_total.net,
+                vat=preview.discount_total.vat,
+                gross=preview.discount_total.gross,
+            )
+            if coupon and coupon.is_valid_now() and coupon.is_free_shipping_for(shipping_method=shipping_method):
+                order.shipping_net_manual = Decimal("0.00")
+                order.save(update_fields=["shipping_net_manual"])
 
         lines: list[OrderLine] = []
         for it in items:
@@ -943,6 +1059,19 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 )
             OrderFee.objects.bulk_create(fee_rows)
 
+        order.recalculate_totals()
+        order.save(update_fields=[
+            "items_net",
+            "items_vat",
+            "items_gross",
+            "shipping_net",
+            "shipping_vat",
+            "shipping_gross",
+            "total_net",
+            "total_vat",
+            "total_gross",
+        ])
+
         provider = (
             PaymentIntent.Provider.BANK_TRANSFER
             if payment_method == "bank_transfer"
@@ -1010,7 +1139,7 @@ def list_orders(request, limit: int = 20):
     orders = (
         Order.objects.filter(user=user)
         .select_related("payment_intent")
-        .prefetch_related("lines", "fees")
+        .prefetch_related("lines", "fees", "discounts")
         .order_by("-created_at")[:limit]
     )
 
@@ -1058,6 +1187,16 @@ def list_orders(request, limit: int = 20):
             "0"), vat=o.shipping_vat, gross=o.shipping_gross)
         fees_total = MoneyOut(currency=o.currency, net=fees_net, vat_rate=Decimal(
             "0"), vat=fees_vat, gross=fees_gross)
+
+        disc_net = Decimal("0.00")
+        disc_vat = Decimal("0.00")
+        disc_gross = Decimal("0.00")
+        for d in o.discounts.all():
+            disc_net += Decimal(d.net)
+            disc_vat += Decimal(d.vat)
+            disc_gross += Decimal(d.gross)
+        discount_total = MoneyOut(currency=o.currency, net=disc_net, vat_rate=Decimal("0"), vat=disc_vat, gross=disc_gross)
+
         order_total = MoneyOut(currency=o.currency, net=o.total_net, vat_rate=Decimal(
             "0"), vat=o.total_vat, gross=o.total_gross)
 
@@ -1083,6 +1222,7 @@ def list_orders(request, limit: int = 20):
                 neopay_bank_name=(pi.neopay_bank_name if pi else ""),
                 items=lines_out,
                 items_total=items_total,
+                discount_total=discount_total,
                 shipping_total=shipping_total,
                 fees_total=fees_total,
                 fees=fees_out,
@@ -1101,7 +1241,7 @@ def get_order(request, order_id: int):
     o = (
         Order.objects.filter(user=user, id=order_id)
         .select_related("payment_intent")
-        .prefetch_related("lines", "fees")
+        .prefetch_related("lines", "fees", "discounts")
         .first()
     )
     if not o:
@@ -1145,6 +1285,16 @@ def get_order(request, order_id: int):
 
     fees_total = MoneyOut(currency=o.currency, net=fees_net, vat_rate=Decimal(
         "0"), vat=fees_vat, gross=fees_gross)
+
+    disc_net = Decimal("0.00")
+    disc_vat = Decimal("0.00")
+    disc_gross = Decimal("0.00")
+    for d in o.discounts.all():
+        disc_net += Decimal(d.net)
+        disc_vat += Decimal(d.vat)
+        disc_gross += Decimal(d.gross)
+    discount_total = MoneyOut(currency=o.currency, net=disc_net, vat_rate=Decimal("0"), vat=disc_vat, gross=disc_gross)
+
     order_total = MoneyOut(currency=o.currency, net=o.total_net, vat_rate=Decimal(
         "0"), vat=o.total_vat, gross=o.total_gross)
 
@@ -1174,6 +1324,7 @@ def get_order(request, order_id: int):
         neopay_bank_name=(pi.neopay_bank_name if pi else ""),
         items=lines_out,
         items_total=items_total,
+        discount_total=discount_total,
         shipping_total=shipping_total,
         fees_total=fees_total,
         fees=fees_out,

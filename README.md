@@ -234,6 +234,8 @@ Checkout endpointai yra po `/api/v1/checkout/...`.
 - `PATCH /api/v1/checkout/cart/items/{item_id}?country_code=LT` body: `{ "qty": 3 }` (jei `qty<=0` – item pašalinamas)
 - `DELETE /api/v1/checkout/cart/items/{item_id}?country_code=LT`
 
+`offer_id` yra nebūtinas. Jei jo nepaduodi, backend'as automatiškai parinks **best NORMAL offer** tam variantui (pagal `offer_priority` ir `qty_available`; returned A paprastai laimi).
+
 `offer_id` reikalingas, kai norim į krepšelį dėti konkretų offer (pvz. returned A arba outlet B). Tai leidžia viename krepšelyje turėti:
 
 - tą patį `variant_id`, bet skirtingus `offer_id` (skirtinga būklė/kaina/warehouse)
@@ -379,6 +381,45 @@ Mokesčiai (fees):
   - `fees[]`
 - `checkout/confirm` užfiksuoja pritaikytus mokesčius DB (`checkout.OrderFee`) ir įtraukia juos į order totals.
 - `fees` visada yra **+** (nuolaidos bus atskira sistema).
+
+### Kuponai (coupon_code) ir nuolaidos (discount_total)
+
+Checkout palaiko order-level kuponą (1 kupono kodas per checkout flow).
+
+Pagrindinės taisyklės:
+
+- Kuponas skaičiuojamas nuo **items** sumos (krepšelio prekių), t.y. nuo `items_total`.
+- Kuponas **nemažina** `fees_total`.
+- Shipping nuolaida yra atskiras flag'as: kuponas gali būti `free_shipping=true` (tuomet shipping kaina tampa 0.00, jei shipping metodas leidžiamas).
+- Kupono galiojimas kanalams ir ar taikyti prekėms su nuolaida yra valdoma per settings (kaip ir aptarta).
+
+Kupono laukai (admin'e `Promotions -> Coupons`):
+
+- `percent_off` – procentinė nuolaida (0-100)
+- `amount_off_net_eur` – fiksuota nuolaida (EUR, neto)
+- `apply_on_discounted_items` – ar kuponas gali būti taikomas prekėms, kurios jau turi offer nuolaidą
+- `free_shipping` – ar kuponas padaro pristatymą nemokamą
+- `free_shipping_methods` – leidžiamų shipping metodų sąrašas (tuščias = visi)
+
+Kupono limitai:
+
+- `usage_limit_total` – bendras panaudojimų limitas visiems (global)
+- `usage_limit_per_user` – panaudojimų limitas vienam vartotojui
+- `times_redeemed` – panaudojimų skaitiklis
+
+Svarbu: limitai yra skaičiuojami ir `times_redeemed` didinamas **tik tada, kai order statusas tampa `PAID`**.
+
+Techniškai:
+
+- per `checkout/preview` ir `checkout/confirm` mes tik validuojam limitus pagal jau apmokėtus (PAID) redemption'us;
+- kai payment callback'as (arba admin action bank transfer atveju) pažymi orderį `PAID`, tada sukuriamas `CouponRedemption` ir atominiu būdu padidinamas `times_redeemed`.
+
+API:
+
+- `POST /api/v1/checkout/checkout/preview` priima `coupon_code` (optional)
+- `POST /api/v1/checkout/checkout/confirm` priima `coupon_code` (optional)
+- `checkout/preview` grąžina `discount_total`
+- `GET /api/v1/checkout/orders` ir `GET /api/v1/checkout/orders/{order_id}` grąžina `discount_total`
 
 ### Order-level consent (pirkimo momentui)
 
@@ -549,6 +590,7 @@ Pavyzdys: `GET /api/v1/checkout/orders/{order_id}` (sutrumpintas):
     }
   ],
   "items_total": { "currency": "EUR", "net": "10.00", "vat_rate": "0", "vat": "0.00", "gross": "10.00" },
+  "discount_total": { "currency": "EUR", "net": "0.00", "vat_rate": "0", "vat": "0.00", "gross": "0.00" },
   "shipping_total": { "currency": "EUR", "net": "0.00", "vat_rate": "0", "vat": "0.00", "gross": "0.00" },
   "order_total": { "currency": "EUR", "net": "10.00", "vat_rate": "0", "vat": "0.00", "gross": "10.00" },
   "created_at": "2026-01-07T12:00:00+00:00"

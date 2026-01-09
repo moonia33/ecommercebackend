@@ -365,6 +365,7 @@ class OrderAdmin(admin.ModelAdmin):
     def mark_paid_capture_inventory(self, request: HttpRequest, queryset):
         from checkout.models import PaymentIntent
         from checkout.services import capture_inventory_for_order
+        from promotions.services import redeem_coupon_for_paid_order
 
         changed = 0
         for o in queryset.select_related("payment_intent").all():
@@ -387,6 +388,7 @@ class OrderAdmin(admin.ModelAdmin):
                 pi.status = PaymentIntent.Status.SUCCEEDED
                 pi.save(update_fields=["status", "updated_at"])
                 capture_inventory_for_order(order_id=o.id)
+                redeem_coupon_for_paid_order(order_id=o.id)
 
             try:
                 OrderEvent.objects.create(
