@@ -329,7 +329,6 @@ class VariantInline(admin.TabularInline):
             "barcode",
             "name",
             "price_eur",
-            "stock_qty",
             "is_active",
         ]
 
@@ -376,7 +375,7 @@ class ProductAdmin(admin.ModelAdmin):
         ("Klasifikacija", {
          "fields": ("brand", "category", "group", "tax_class")}),
         ("Turinys", {"fields": ("description",)}),
-        ("Kainodara / sandėlis", {"fields": ("price_eur", "stock_qty")}),
+        ("Kainodara / sandėlis", {"fields": ("price_eur",)}),
         ("SEO", {"fields": ("seo_title", "seo_description", "seo_keywords")}),
         ("Meta", {"fields": ("created_at", "updated_at")}),
     )
@@ -499,12 +498,11 @@ class VariantAdmin(admin.ModelAdmin):
 
     @admin.display(description="Stock (available)")
     def stock_available(self, obj: Variant) -> int:
-        # If multi-warehouse inventory is used, show sum across warehouses;
-        # otherwise fall back to the legacy Variant.stock_qty.
+        # Sum across warehouses.
         annotated = getattr(obj, "_stock_available", None)
         if annotated is not None:
             return int(annotated)
-        return int(obj.stock_qty)
+        return 0
 
 
 @admin.register(Warehouse)

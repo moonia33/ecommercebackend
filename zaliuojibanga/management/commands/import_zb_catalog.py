@@ -402,7 +402,6 @@ class Command(BaseCommand):
                                 category=category,
                                 tax_class=tax_class,
                                 price_eur=price_net,
-                                stock_qty=0,
                                 is_active=True,
                                 seo_description=seo_desc,
                             )
@@ -416,7 +415,6 @@ class Command(BaseCommand):
                                 name="",
                                 price_eur=price_net,
                                 cost_eur=cost_net,
-                                stock_qty=0,
                                 is_active=True,
                             )
                             created_variants += 1

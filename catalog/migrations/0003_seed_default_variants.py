@@ -15,7 +15,6 @@ def seed_default_variants(apps, schema_editor):
             barcode="",
             name="",
             price_eur=product.price_eur,
-            stock_qty=product.stock_qty,
             is_active=product.is_active,
         )
 

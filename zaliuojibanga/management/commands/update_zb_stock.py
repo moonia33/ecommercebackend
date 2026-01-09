@@ -167,9 +167,6 @@ class Command(BaseCommand):
                 to_create: list[InventoryItem] = []
                 to_update: list[InventoryItem] = []
 
-                # Also update Variant.stock_qty for listing convenience.
-                variants_to_update: list[Variant] = []
-
                 for variant, qty in resolved:
                     inv = inv_by_variant_id.get(variant.pk)
                     if inv is None:
@@ -186,9 +183,6 @@ class Command(BaseCommand):
                         inv.qty_on_hand = qty
                         to_update.append(inv)
 
-                    variant.stock_qty = qty
-                    variants_to_update.append(variant)
-
                     affected_product_ids.add(variant.product_id)
 
                 if to_create:
@@ -198,10 +192,6 @@ class Command(BaseCommand):
                 if to_update:
                     InventoryItem.objects.bulk_update(
                         to_update, ["qty_on_hand"])  # reserved stays as-is
-
-                if variants_to_update:
-                    Variant.objects.bulk_update(
-                        variants_to_update, ["stock_qty"])
 
                 updated_inventory += len(resolved)
                 updated_variants += len(resolved)
@@ -228,26 +218,8 @@ class Command(BaseCommand):
             if batch:
                 process_batch(batch)
 
-        # Update Product.stock_qty as sum of variants
         if affected_product_ids:
-            if dry_run:
-                updated_products = len(affected_product_ids)
-            else:
-                totals = (
-                    Variant.objects.filter(
-                        product_id__in=list(affected_product_ids))
-                    .values("product_id")
-                    .annotate(total=Sum("stock_qty"))
-                )
-                total_map = {row["product_id"]: (
-                    row["total"] or 0) for row in totals}
-
-                products = list(Product.objects.filter(
-                    id__in=list(affected_product_ids)))
-                for p in products:
-                    p.stock_qty = int(total_map.get(p.id, 0) or 0)
-                Product.objects.bulk_update(products, ["stock_qty"])
-                updated_products = len(products)
+            updated_products = len(affected_product_ids)
 
         self.stdout.write(
             self.style.SUCCESS(

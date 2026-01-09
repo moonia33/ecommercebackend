@@ -229,12 +229,12 @@ def product_detail(request, slug: str, country_code: str = "LT"):
 
     variants: list[VariantOut] = []
     for v in variants_qs:
-        # Stock: sum across inventory if present, else fallback to legacy stock_qty.
+        # Stock: sum across inventory items.
         inv = list(v.inventory_items.all())
         if inv:
             stock = sum([ii.qty_available for ii in inv])
         else:
-            stock = int(v.stock_qty)
+            stock = 0
 
         options = list(v.option_values.select_related(
             "option_type", "option_value").all())
