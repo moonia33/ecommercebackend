@@ -23,6 +23,7 @@ from .api_schemas import (
     VariantOut,
 )
 from .models import Brand, Category, InventoryItem, Product, Variant
+from promotions.services import apply_promo_to_unit_net
 
 router = Router(tags=["catalog"])
 
@@ -145,6 +146,10 @@ def products(request, country_code: str = "LT", channel: str = "normal"):
     # Only consider inventory items with available stock and matching visibility.
     offer_price_expr = Case(
         When(
+            variants__inventory_items__never_discount=True,
+            then=F("variants__price_eur"),
+        ),
+        When(
             variants__inventory_items__offer_price_override_eur__isnull=False,
             then=F("variants__inventory_items__offer_price_override_eur"),
         ),
@@ -200,10 +205,27 @@ def products(request, country_code: str = "LT", channel: str = "normal"):
     out: list[ProductListOut] = []
     for p in qs:
         if getattr(p, "_min_offer_price", None) is not None:
-            net = p._min_offer_price
+            base_net = Decimal(p._min_offer_price)
         else:
-            net = p._min_variant_price if p._min_variant_price is not None else 0
+            base_net = Decimal(p._min_variant_price if p._min_variant_price is not None else 0)
         rate = vat_rate_for(p)
+
+        sale_net, _rule = apply_promo_to_unit_net(
+            base_unit_net=base_net,
+            channel=channel,
+            category_id=p.category_id,
+            brand_id=p.brand_id,
+            product_id=p.id,
+            variant_id=None,
+            customer_group_id=None,
+            allow_additional_promotions=True,
+            is_discounted_offer=False,
+        )
+
+        compare_at_price = None
+        discount_percent = _discount_percent(list_unit_net=base_net, sale_unit_net=sale_net)
+        if discount_percent is not None:
+            compare_at_price = _money_out(currency="EUR", unit_net=base_net, vat_rate=rate)
 
         imgs = list(p.images.all())
         imgs.sort(key=lambda i: (i.sort_order, i.id))
@@ -250,7 +272,9 @@ def products(request, country_code: str = "LT", channel: str = "normal"):
                 if p.category
                 else None,
                 "images": images_out,
-                "price": _money_out(currency="EUR", unit_net=Decimal(net), vat_rate=rate),
+                "price": _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
+                "compare_at_price": compare_at_price,
+                "discount_percent": discount_percent,
             }
         )
 
@@ -323,12 +347,35 @@ def product_detail(request, slug: str, country_code: str = "LT", channel: str = 
             best_offer = inv_available[0]
 
         list_unit_net = Decimal(v.price_eur)
-        sale_unit_net = (
+        base_unit_net = (
             _effective_offer_unit_net(list_unit_net=list_unit_net, offer=best_offer)
             if best_offer
             else list_unit_net
         )
-        disc_pct = _discount_percent(list_unit_net=list_unit_net, sale_unit_net=sale_unit_net)
+
+        is_discounted_offer = bool(
+            best_offer
+            and (not bool(getattr(best_offer, "never_discount", False)))
+            and (
+                best_offer.offer_price_override_eur is not None
+                or best_offer.offer_discount_percent is not None
+            )
+        )
+
+        sale_unit_net, _rule = apply_promo_to_unit_net(
+            base_unit_net=base_unit_net,
+            channel=channel,
+            category_id=product.category_id,
+            brand_id=product.brand_id,
+            product_id=product.id,
+            variant_id=v.id,
+            customer_group_id=None,
+            allow_additional_promotions=bool(getattr(best_offer, "allow_additional_promotions", False)) if best_offer else False,
+            is_discounted_offer=is_discounted_offer,
+        )
+
+        compare_base = base_unit_net
+        disc_pct = _discount_percent(list_unit_net=compare_base, sale_unit_net=sale_unit_net)
 
         options = list(v.option_values.select_related(
             "option_type", "option_value").all())
@@ -345,7 +392,7 @@ def product_detail(request, slug: str, country_code: str = "LT", channel: str = 
                 "stock_available": int(stock),
                 "price": _money_out(currency="EUR", unit_net=sale_unit_net, vat_rate=Decimal(vat_rate)),
                 "compare_at_price": (
-                    _money_out(currency="EUR", unit_net=list_unit_net, vat_rate=Decimal(vat_rate))
+                    _money_out(currency="EUR", unit_net=compare_base, vat_rate=Decimal(vat_rate))
                     if disc_pct is not None
                     else None
                 ),

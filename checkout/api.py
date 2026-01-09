@@ -14,6 +14,7 @@ from accounts.models import UserAddress
 from catalog.models import Category, InventoryItem, Variant
 from pricing.services import get_vat_rate
 from promotions.models import Coupon
+from promotions.services import apply_promo_to_unit_net
 
 from .models import Cart, CartItem, Order, OrderConsent, OrderDiscount, OrderFee, OrderLine, PaymentIntent
 from .schemas import (
@@ -354,6 +355,7 @@ def _variant_money(*, variant: Variant, country_code: str, qty: int) -> tuple[Mo
 def _effective_offer_unit_net(*, list_unit_net: Decimal, offer: InventoryItem) -> Decimal:
     if bool(getattr(offer, "never_discount", False)):
         return Decimal(list_unit_net)
+
     if offer.offer_price_override_eur is not None:
         return Decimal(offer.offer_price_override_eur)
     if offer.offer_discount_percent is not None:
@@ -363,7 +365,24 @@ def _effective_offer_unit_net(*, list_unit_net: Decimal, offer: InventoryItem) -
     return Decimal(list_unit_net)
 
 
-def _cart_item_money(*, item: CartItem, country_code: str) -> tuple[MoneyOut, MoneyOut, Decimal]:
+def _discount_percent(*, list_unit_net: Decimal, sale_unit_net: Decimal) -> int | None:
+    list_unit_net = Decimal(list_unit_net)
+    sale_unit_net = Decimal(sale_unit_net)
+    if list_unit_net <= 0:
+        return None
+    if sale_unit_net >= list_unit_net:
+        return None
+    pct = int(((list_unit_net - sale_unit_net) / list_unit_net * Decimal(100)).quantize(Decimal("1")))
+    return max(0, min(100, pct))
+
+
+def _cart_item_money(
+    *,
+    item: CartItem,
+    country_code: str,
+    channel: str = "normal",
+    customer_group_id: int | None = None,
+) -> tuple[MoneyOut, MoneyOut, MoneyOut | None, int | None, Decimal]:
     v = item.variant
     product = v.product
     if not product or not product.tax_class_id:
@@ -378,10 +397,32 @@ def _cart_item_money(*, item: CartItem, country_code: str) -> tuple[MoneyOut, Mo
         raise HttpError(400, str(exc))
 
     list_unit_net = Decimal(v.price_eur)
-    unit_net = (
+    base_unit_net = (
         _effective_offer_unit_net(list_unit_net=list_unit_net, offer=item.offer)
         if getattr(item, "offer_id", None)
         else list_unit_net
+    )
+
+    is_discounted_offer = bool(
+        item.offer_id
+        and item.offer
+        and (not bool(getattr(item.offer, "never_discount", False)))
+        and (
+            item.offer.offer_price_override_eur is not None
+            or item.offer.offer_discount_percent is not None
+        )
+    )
+
+    unit_net, _rule = apply_promo_to_unit_net(
+        base_unit_net=base_unit_net,
+        channel=channel,
+        category_id=(v.product.category_id if v.product_id else None),
+        brand_id=(v.product.brand_id if v.product_id else None),
+        product_id=(v.product_id if v.product_id else None),
+        variant_id=v.id,
+        customer_group_id=customer_group_id,
+        allow_additional_promotions=bool(getattr(item.offer, "allow_additional_promotions", False)) if item.offer_id else False,
+        is_discounted_offer=is_discounted_offer,
     )
 
     unit = money_from_net(currency="EUR", unit_net=unit_net,
@@ -389,16 +430,28 @@ def _cart_item_money(*, item: CartItem, country_code: str) -> tuple[MoneyOut, Mo
     total = money_from_net(
         currency="EUR", unit_net=unit_net, vat_rate=vat_rate, qty=int(item.qty))
 
+    compare_at = None
+    disc_pct = _discount_percent(list_unit_net=base_unit_net, sale_unit_net=unit_net)
+    if disc_pct is not None:
+        base = money_from_net(currency="EUR", unit_net=base_unit_net, vat_rate=vat_rate, qty=1)
+        compare_at = MoneyOut(currency=base.currency, net=base.net, vat_rate=base.vat_rate, vat=base.vat, gross=base.gross)
+
     return (
-        MoneyOut(currency=unit.currency, net=unit.net,
-                 vat_rate=unit.vat_rate, vat=unit.vat, gross=unit.gross),
-        MoneyOut(currency=total.currency, net=total.net,
-                 vat_rate=total.vat_rate, vat=total.vat, gross=total.gross),
+        MoneyOut(currency=unit.currency, net=unit.net, vat_rate=unit.vat_rate, vat=unit.vat, gross=unit.gross),
+        MoneyOut(currency=total.currency, net=total.net, vat_rate=total.vat_rate, vat=total.vat, gross=total.gross),
+        compare_at,
+        disc_pct,
         vat_rate,
     )
 
 
-def _serialize_cart_items(*, items: list[CartItem], country_code: str) -> tuple[list[CartItemOut], MoneyOut]:
+def _serialize_cart_items(
+    *,
+    items: list[CartItem],
+    country_code: str,
+    channel: str = "normal",
+    customer_group_id: int | None = None,
+) -> tuple[list[CartItemOut], MoneyOut]:
     out_items: list[CartItemOut] = []
 
     total_net = Decimal("0.00")
@@ -407,8 +460,12 @@ def _serialize_cart_items(*, items: list[CartItem], country_code: str) -> tuple[
 
     for it in items:
         v = it.variant
-        unit_price, line_total, _vat_rate = _cart_item_money(
-            item=it, country_code=country_code)
+        unit_price, line_total, compare_at, disc_pct, _vat_rate = _cart_item_money(
+            item=it,
+            country_code=country_code,
+            channel=channel,
+            customer_group_id=customer_group_id,
+        )
 
         if it.offer_id:
             stock_available = inventory_available_for_offer(offer_id=it.offer_id)
@@ -429,6 +486,8 @@ def _serialize_cart_items(*, items: list[CartItem], country_code: str) -> tuple[
                 qty=it.qty,
                 stock_available=int(stock_available),
                 unit_price=unit_price,
+                compare_at_price=compare_at,
+                discount_percent=disc_pct,
                 line_total=line_total,
             )
         )
@@ -712,15 +771,27 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         if int(available) < int(it.qty):
             raise HttpError(409, f"Not enough stock for {it.variant.sku}")
 
+    primary = user.get_primary_customer_group() if user else None
+    customer_group_id = int(primary.id) if primary else None
+
     out_items, items_total = _serialize_cart_items(
-        items=items, country_code=country_code)
+        items=items,
+        country_code=country_code,
+        channel=channel,
+        customer_group_id=customer_group_id,
+    )
 
     if coupon:
         eligible_items_net = Decimal("0.00")
         eligible_items_vat = Decimal("0.00")
 
         for it in items:
-            _unit, line_total, _vat_rate = _cart_item_money(item=it, country_code=country_code)
+            _unit, line_total, _compare_at, _disc_pct, _vat_rate = _cart_item_money(
+                item=it,
+                country_code=country_code,
+                channel=channel,
+                customer_group_id=customer_group_id,
+            )
 
             if it.offer and bool(getattr(it.offer, "never_discount", False)):
                 continue
@@ -736,10 +807,13 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
                     )
                 )
             )
+            # If compare_at is present, the unit price was reduced vs base (offer-adjusted)
+            # price - this indicates a promo discount for that line.
+            is_promo_discounted_line = bool(_compare_at)
             allow_stack_for_line = bool(
                 coupon.apply_on_discounted_items
             )
-            if is_discounted_offer and not allow_stack_for_line:
+            if (is_discounted_offer or is_promo_discounted_line) and not allow_stack_for_line:
                 continue
 
             eligible_items_net += Decimal(line_total.net)
@@ -992,6 +1066,14 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 vat=preview.discount_total.vat,
                 gross=preview.discount_total.gross,
             )
+
+            from promotions.services import reserve_coupon_for_order
+
+            # Reserve coupon usage immediately on order creation so usage limits apply
+            # even before payment is completed (important for bank transfer flows).
+            if not reserve_coupon_for_order(order_id=order.id):
+                raise HttpError(400, "Coupon usage limit reached")
+
             if coupon and coupon.is_valid_now() and coupon.is_free_shipping_for(shipping_method=shipping_method):
                 order.shipping_net_manual = Decimal("0.00")
                 order.save(update_fields=["shipping_net_manual"])
@@ -999,8 +1081,14 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         lines: list[OrderLine] = []
         for it in items:
             v = it.variant
-            unit_price, line_total, vat_rate = _cart_item_money(
-                item=it, country_code=country_code)
+            primary = user.get_primary_customer_group() if user else None
+            customer_group_id = int(primary.id) if primary else None
+            unit_price, line_total, _compare_at, _disc_pct, vat_rate = _cart_item_money(
+                item=it,
+                country_code=country_code,
+                channel=channel,
+                customer_group_id=customer_group_id,
+            )
 
             lines.append(
                 OrderLine(

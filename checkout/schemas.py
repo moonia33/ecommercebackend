@@ -22,6 +22,8 @@ class CartItemOut(Schema):
     qty: int
     stock_available: int
     unit_price: MoneyOut
+    compare_at_price: MoneyOut | None = None
+    discount_percent: int | None = None
     line_total: MoneyOut
 
 

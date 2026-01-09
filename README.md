@@ -599,6 +599,16 @@ Pavyzdys: `GET /api/v1/checkout/orders/{order_id}` (sutrumpintas):
 
 Admin'e (debug): `Checkout -> Carts / Orders / Payment intents`.
 
+### Kuponai (sutrumpintai)
+
+- Kupono stacking:
+  - jei eilutė jau yra discounted (offer price < list price) arba promo-discounted (`compare_at_price` yra), kuponas taikomas tik kai `Coupon.apply_on_discounted_items=True`.
+- Usage limitai:
+  - limitai (`usage_limit_total`, `usage_limit_per_user`) rezervuojami order sukūrimo metu (`checkout_confirm`), sukuriant `CouponRedemption` ir padidinant `Coupon.times_redeemed`.
+  - jei orderis atšaukiamas (`CANCELLED`) – rezervacija atlaisvinama.
+- Admin:
+  - order detalėje matosi `OrderDiscount` (coupon/promo) breakdown per inline.
+
 ## Supplier importai (Žalioji banga)
 
 ### Katalogas (products)

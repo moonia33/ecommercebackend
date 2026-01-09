@@ -93,6 +93,9 @@ class ProductListOut(Schema):
     # Representative price for lists: min active variant net + VAT breakdown
     price: MoneyOut
 
+    compare_at_price: MoneyOut | None = None
+    discount_percent: int | None = None
+
 
 class ProductDetailOut(Schema):
     id: int

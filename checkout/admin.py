@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.urls import path, reverse
 from django.utils import timezone
 
-from .models import Cart, CartItem, FeeRule, Order, OrderConsent, OrderEvent, OrderFee, OrderLine, PaymentIntent
+from .models import Cart, CartItem, FeeRule, Order, OrderConsent, OrderDiscount, OrderEvent, OrderFee, OrderLine, PaymentIntent
 
 
 class CartItemInline(admin.TabularInline):
@@ -112,6 +112,19 @@ class OrderFeeInline(admin.TabularInline):
         return False
 
 
+class OrderDiscountInline(admin.TabularInline):
+    model = OrderDiscount
+    extra = 0
+    readonly_fields = ("kind", "code", "name", "net", "vat", "gross", "created_at")
+    fields = ("kind", "code", "name", "net", "vat", "gross", "created_at")
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = (
@@ -193,7 +206,7 @@ class OrderAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
-    inlines = (OrderConsentInline, OrderFeeInline, OrderLineInline,)
+    inlines = (OrderConsentInline, OrderDiscountInline, OrderFeeInline, OrderLineInline,)
 
     class Form(forms.ModelForm):
         shipping_method = forms.ChoiceField(required=True)
@@ -301,6 +314,34 @@ class OrderAdmin(admin.ModelAdmin):
         "generate_dpd_labels_a6",
         "generate_unisend_labels_10x15",
     )
+
+    def save_model(self, request: HttpRequest, obj: Order, form, change: bool) -> None:
+        from promotions.services import redeem_coupon_for_paid_order, release_coupon_for_order
+
+        prev_status = None
+        if change and obj.pk:
+            prev_status = (
+                Order.objects.filter(pk=obj.pk)
+                .values_list("status", flat=True)
+                .first()
+            )
+
+        super().save_model(request, obj, form, change)
+
+        # If admin manually marks order as PAID, record coupon redemption.
+        if prev_status != Order.Status.PAID and obj.status == Order.Status.PAID:
+            try:
+                redeem_coupon_for_paid_order(order_id=int(obj.id))
+            except Exception:
+                # Keep admin save resilient; payment/coupon finalization errors should not block edits.
+                pass
+
+        # If admin manually cancels an order, release coupon reservation.
+        if prev_status != Order.Status.CANCELLED and obj.status == Order.Status.CANCELLED:
+            try:
+                release_coupon_for_order(order_id=int(obj.id))
+            except Exception:
+                pass
 
     @admin.display(description="Fulfillment")
     def fulfillment_badge(self, obj: Order) -> str:

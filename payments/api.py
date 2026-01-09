@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from django.db import transaction
 from ninja import Router
 from ninja.errors import HttpError
@@ -9,6 +11,8 @@ from .services.neopay import decode_neopay_token, get_neopay_config
 
 
 router = Router(tags=["payments"])
+
+logger = logging.getLogger(__name__)
 
 
 @router.post("/neopay/callback")
@@ -38,7 +42,7 @@ def neopay_callback(request, payload: NeopayCallbackIn):
 
     from checkout.models import PaymentIntent
     from checkout.services import capture_inventory_for_order, release_inventory_for_order
-    from promotions.services import redeem_coupon_for_paid_order
+    from promotions.services import redeem_coupon_for_paid_order, release_coupon_for_order
 
     with transaction.atomic():
         for tx_id, info in transactions.items():
@@ -77,32 +81,34 @@ def neopay_callback(request, payload: NeopayCallbackIn):
 
             if status == "success":
                 pi.status = PaymentIntent.Status.SUCCEEDED
-                try:
-                    if getattr(pi, "order", None) is not None:
+                if getattr(pi, "order", None) is not None:
+                    try:
                         pi.order.status = pi.order.Status.PAID
                         pi.order.save(update_fields=["status", "updated_at"])
                         capture_inventory_for_order(order_id=pi.order.id)
                         redeem_coupon_for_paid_order(order_id=pi.order.id)
-                except Exception:
-                    pass
+                    except Exception:
+                        logger.exception("Failed to finalize PAID order (capture inventory / redeem coupon)", extra={"order_id": getattr(pi.order, "id", None), "tx_id": str(tx_id)})
             elif status in ["failed", "rejected", "error"]:
                 pi.status = PaymentIntent.Status.FAILED
                 try:
                     if getattr(pi, "order", None) is not None:
                         pi.order.status = pi.order.Status.CANCELLED
                         pi.order.save(update_fields=["status", "updated_at"])
+                        release_coupon_for_order(order_id=pi.order.id)
                         release_inventory_for_order(order_id=pi.order.id)
                 except Exception:
-                    pass
+                    logger.exception("Failed to cancel failed order and release inventory", extra={"order_id": getattr(getattr(pi, "order", None), "id", None), "tx_id": str(tx_id)})
             elif status in ["canceled", "cancelled"]:
                 pi.status = PaymentIntent.Status.CANCELLED
                 try:
                     if getattr(pi, "order", None) is not None:
                         pi.order.status = pi.order.Status.CANCELLED
                         pi.order.save(update_fields=["status", "updated_at"])
+                        release_coupon_for_order(order_id=pi.order.id)
                         release_inventory_for_order(order_id=pi.order.id)
                 except Exception:
-                    pass
+                    logger.exception("Failed to cancel cancelled order and release inventory", extra={"order_id": getattr(getattr(pi, "order", None), "id", None), "tx_id": str(tx_id)})
             elif status in [
                 "signed",
                 "pending",
