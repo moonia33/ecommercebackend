@@ -352,6 +352,8 @@ def _variant_money(*, variant: Variant, country_code: str, qty: int) -> tuple[Mo
 
 
 def _effective_offer_unit_net(*, list_unit_net: Decimal, offer: InventoryItem) -> Decimal:
+    if bool(getattr(offer, "never_discount", False)):
+        return Decimal(list_unit_net)
     if offer.offer_price_override_eur is not None:
         return Decimal(offer.offer_price_override_eur)
     if offer.offer_discount_percent is not None:
@@ -720,17 +722,22 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         for it in items:
             _unit, line_total, _vat_rate = _cart_item_money(item=it, country_code=country_code)
 
+            if it.offer and bool(getattr(it.offer, "never_discount", False)):
+                continue
+
             is_discounted_offer = bool(
                 it.offer_id
                 and it.offer
                 and (
-                    it.offer.offer_price_override_eur is not None
-                    or it.offer.offer_discount_percent is not None
+                    (not bool(getattr(it.offer, "never_discount", False)))
+                    and (
+                        it.offer.offer_price_override_eur is not None
+                        or it.offer.offer_discount_percent is not None
+                    )
                 )
             )
             allow_stack_for_line = bool(
                 coupon.apply_on_discounted_items
-                or (it.offer and bool(getattr(it.offer, "allow_additional_promotions", False)))
             )
             if is_discounted_offer and not allow_stack_for_line:
                 continue

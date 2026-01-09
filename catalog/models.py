@@ -692,6 +692,7 @@ class InventoryItem(models.Model):
         blank=True,
     )
     allow_additional_promotions = models.BooleanField(default=False)
+    never_discount = models.BooleanField(default=False)
 
     updated_at = models.DateTimeField(auto_now=True)
 

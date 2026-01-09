@@ -40,6 +40,8 @@ def _money_out(*, currency: str, unit_net: Decimal, vat_rate: Decimal) -> MoneyO
 
 
 def _effective_offer_unit_net(*, list_unit_net: Decimal, offer: InventoryItem) -> Decimal:
+    if bool(getattr(offer, "never_discount", False)):
+        return Decimal(list_unit_net)
     if offer.offer_price_override_eur is not None:
         return Decimal(offer.offer_price_override_eur)
     if offer.offer_discount_percent is not None:

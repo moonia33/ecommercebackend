@@ -525,13 +525,19 @@ class InventoryItemAdmin(admin.ModelAdmin):
     list_display = (
         "variant",
         "warehouse",
+        "offer_visibility",
+        "condition_grade",
+        "offer_priority",
+        "never_discount",
+        "offer_price_override_eur",
+        "offer_discount_percent",
         "qty_on_hand",
         "qty_reserved",
         "qty_available",
         "cost_eur",
         "updated_at",
     )
-    list_filter = ("warehouse",)
+    list_filter = ("warehouse", "offer_visibility", "condition_grade", "never_discount")
     search_fields = (
         "variant__sku",
         "variant__product__sku",
