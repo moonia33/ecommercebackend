@@ -45,6 +45,23 @@ def _backfill_inventory(apps, schema_editor):
         InventoryItem.objects.bulk_create(to_create, ignore_conflicts=True)
 
 
+def _ensure_default_variant(apps, schema_editor):
+    Product = apps.get_model("catalog", "Product")
+    Variant = apps.get_model("catalog", "Variant")
+
+    for p in Product.objects.all().iterator():
+        if Variant.objects.filter(product_id=p.id).exists():
+            continue
+        Variant.objects.create(
+            product_id=p.id,
+            sku=p.sku,
+            barcode="",
+            name="",
+            price_eur=int(getattr(p, "price_eur", 0) or 0),
+            is_active=p.is_active,
+        )
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -55,6 +72,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.RunPython(_ensure_default_variant, migrations.RunPython.noop),
         migrations.RunPython(_backfill_inventory, migrations.RunPython.noop),
         migrations.RemoveField(
             model_name="product",

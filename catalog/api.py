@@ -136,7 +136,7 @@ def products(request, country_code: str = "LT"):
 
     out: list[ProductListOut] = []
     for p in qs:
-        net = p._min_variant_price if p._min_variant_price is not None else p.price_eur
+        net = p._min_variant_price if p._min_variant_price is not None else 0
         rate = vat_rate_for(p)
 
         imgs = list(p.images.all())

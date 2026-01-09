@@ -375,7 +375,6 @@ class ProductAdmin(admin.ModelAdmin):
         ("Klasifikacija", {
          "fields": ("brand", "category", "group", "tax_class")}),
         ("Turinys", {"fields": ("description",)}),
-        ("Kainodara / sandėlis", {"fields": ("price_eur",)}),
         ("SEO", {"fields": ("seo_title", "seo_description", "seo_keywords")}),
         ("Meta", {"fields": ("created_at", "updated_at")}),
     )

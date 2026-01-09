@@ -14,7 +14,7 @@ def seed_default_variants(apps, schema_editor):
             sku=product.sku,
             barcode="",
             name="",
-            price_eur=product.price_eur,
+            price_eur=getattr(product, "price_eur", 0) or 0,
             is_active=product.is_active,
         )
 

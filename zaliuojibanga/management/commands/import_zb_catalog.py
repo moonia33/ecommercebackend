@@ -401,7 +401,6 @@ class Command(BaseCommand):
                                 brand=brand,
                                 category=category,
                                 tax_class=tax_class,
-                                price_eur=price_net,
                                 is_active=True,
                                 seo_description=seo_desc,
                             )
