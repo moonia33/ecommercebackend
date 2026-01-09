@@ -128,7 +128,10 @@ class OrderLineOut(Schema):
     name: str
     qty: int
     unit_price: MoneyOut
+    compare_at_unit_price: MoneyOut | None = None
+    discount_percent: int | None = None
     line_total: MoneyOut
+    compare_at_line_total: MoneyOut | None = None
 
 
 class OrderOut(Schema):

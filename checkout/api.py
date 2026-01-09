@@ -1273,8 +1273,51 @@ def list_orders(request, limit: int = 20):
                             vat_rate=ln.vat_rate, vat=ln.unit_vat, gross=ln.unit_gross)
             total = MoneyOut(currency=o.currency, net=ln.total_net,
                              vat_rate=ln.vat_rate, vat=ln.total_vat, gross=ln.total_gross)
-            lines_out.append(OrderLineOut(
-                id=ln.id, sku=ln.sku, name=ln.name, qty=ln.qty, unit_price=unit, line_total=total))
+
+            compare_at_unit = None
+            compare_at_total = None
+            disc_pct = None
+            try:
+                list_unit_net = Decimal(getattr(getattr(ln, "variant", None), "price_eur", 0) or 0)
+                base_unit_net = (
+                    _effective_offer_unit_net(list_unit_net=list_unit_net, offer=ln.offer)
+                    if getattr(ln, "offer_id", None)
+                    else list_unit_net
+                )
+                disc_pct = _discount_percent(list_unit_net=base_unit_net, sale_unit_net=ln.unit_net)
+                if disc_pct is not None:
+                    base_u = money_from_net(currency=o.currency, unit_net=base_unit_net, vat_rate=ln.vat_rate, qty=1)
+                    base_t = money_from_net(currency=o.currency, unit_net=base_unit_net, vat_rate=ln.vat_rate, qty=int(ln.qty))
+                    compare_at_unit = MoneyOut(
+                        currency=base_u.currency,
+                        net=base_u.net,
+                        vat_rate=base_u.vat_rate,
+                        vat=base_u.vat,
+                        gross=base_u.gross,
+                    )
+                    compare_at_total = MoneyOut(
+                        currency=base_t.currency,
+                        net=base_t.net,
+                        vat_rate=base_t.vat_rate,
+                        vat=base_t.vat,
+                        gross=base_t.gross,
+                    )
+            except Exception:
+                pass
+
+            lines_out.append(
+                OrderLineOut(
+                    id=ln.id,
+                    sku=ln.sku,
+                    name=ln.name,
+                    qty=ln.qty,
+                    unit_price=unit,
+                    compare_at_unit_price=compare_at_unit,
+                    discount_percent=disc_pct,
+                    line_total=total,
+                    compare_at_line_total=compare_at_total,
+                )
+            )
 
         items_total = MoneyOut(currency=o.currency, net=o.items_net, vat_rate=Decimal(
             "0"), vat=o.items_vat, gross=o.items_gross)
