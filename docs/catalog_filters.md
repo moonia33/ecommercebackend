@@ -35,8 +35,23 @@ Query:
 - `group_code` (optional) — `ProductGroup.code`
 - `feature` (optional) — „pair list“ formatas (žr. žemiau)
 - `option` (optional) — „pair list“ formatas (žr. žemiau)
+- `sort` (optional) — rikiavimas (žr. žemiau)
 - `page` (optional, default 1)
 - `page_size` (optional, default 20; max 100)
+
+#### `sort` formatas
+
+Palaikomos reikšmės:
+
+- `price` / `-price` — pagal kainą
+- `created` / `-created` (alias: `created_at` / `-created_at`) — pagal `Product.created_at`
+- `discounted` / `-discounted` — pagal tai, ar produktas turi aktyvų offer su mažesne kaina nei list price
+- `best_selling` / `-best_selling` — pagal parduotą kiekį (sum(qty)) per `OrderLine`, skaičiuojant tik `Order.status=PAID`
+
+Pastabos:
+
+- `price` rikiavimas skaičiuojamas pagal DB reprezentacinę kainą (`min(offer_price)` arba `min(variant_price)`), nes promo pritaikymas vyksta Python sluoksnyje vėliau.
+- `best_selling` yra agregacija per užsakymų eilutes; dideliuose kataloguose gali būti brangesnis už kitus sortus.
 
 #### `feature` formatas
 
@@ -53,6 +68,8 @@ Reikšmė atitinka `FeatureValue.value`.
 - `option=size:m,color:black`
 
 Reikšmė atitinka `OptionValue.code`.
+
+Pastaba: `option_value_code` nėra garantuotai CSS spalva (pvz. `black` gali būti slug'as). UI turi remtis `OptionType.display_type`/`swatch_type` (žr. žemiau), o ne bandyti interpretuoti kodą.
 
 ### Pavyzdžiai
 
@@ -84,6 +101,8 @@ Priima tuos pačius query parametrus kaip ir produktų listingas:
 Atsakymas (`CatalogFacetsOut`) apima:
 
 - `categories` — jei pasirinkta `category_slug`, grąžina tik tos kategorijos dukterines kategorijas, kurios turi produktų šiame scope; jei kategorija nepasirinkta, grąžina tik top-level kategorijas (parent null), kurios turi produktų.
+
+Svarbu: „turi produktų“ reiškia, kad dukterinė kategorija įtraukiama net jei produktai yra ne tiesiogiai joje, o jos gilesniuose descendants (grandchildren ir t.t.).
 - `brands` — brandai, kurie egzistuoja šiame scope
 - `product_groups` — product groupai, kurie egzistuoja šiame scope
 - `features` — tik filterable features, kurios naudojamos šiame scope, su tik tomis value reikšmėmis, kurios realiai pasitaiko
@@ -95,6 +114,32 @@ Papildomai UI'ui:
 - `option_types[].swatch_type` — jei `display_type=swatch`, nurodo kaip interpretuoti swatch'ą (pvz. `name`)
 
 Šie laukai yra DB-driven (iš `OptionType.display_type` ir `OptionType.swatch_type`). Šiuo metu default visiems esamiems option tipams: `display_type=radio`.
+
+### OptionType UI metaduomenys (DB-driven)
+
+`OptionType` turi UI metaduomenis, kurie grąžinami tiek per `GET /catalog/option-types`, tiek per `GET /catalog/products/facets`:
+
+- `display_type`:
+  - `select` — dropdown
+  - `radio` — radio buttons (tinka size/material ir pan.)
+  - `swatch` — swatch/grid (dažniausiai spalvoms)
+- `swatch_type` (naudojama tik kai `display_type=swatch`):
+  - `hex` — `OptionValue.code` arba atskiras laukas turi būti hex (jei tokį naudosim ateityje)
+  - `name` — rodyti `OptionValue.label` kaip tekstinį swatch (pvz. „Juoda“)
+  - `image` — swatch paveikslėliai (jei tokį lauką pridėsim ateityje)
+
+Rekomendacija:
+
+- spalvoms: `display_type=swatch`, `swatch_type=name` (kol neturim hex/image)
+- dydžiams: `display_type=radio`
+
+### Admin (kur pildyti)
+
+Admin'e:
+
+- `Catalog -> Option types`:
+  - nustatyk `display_type` ir (jei reikia) `swatch_type`
+  - `Option values` (inline) yra filtro reikšmės (`code` + `label`)
 
 Pavyzdys:
 

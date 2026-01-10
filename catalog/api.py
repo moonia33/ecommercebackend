@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import Case, Count, DecimalField, ExpressionWrapper, F, Min, Q, Value, When
+from django.db.models import Case, Count, DecimalField, ExpressionWrapper, F, IntegerField, Min, Q, Sum, Value, When
+from django.db.models.functions import Coalesce
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
@@ -256,6 +257,7 @@ def products(
     group_code: str | None = None,
     feature: str | None = None,
     option: str | None = None,
+    sort: str | None = None,
 ):
     country_code = (country_code or "").strip().upper()
     if len(country_code) != 2:
@@ -311,8 +313,54 @@ def products(
         .prefetch_related("images")
         .annotate(_min_variant_price=min_price_expr)
         .annotate(_min_offer_price=min_offer_price_expr)
-        .order_by("name", "id")
     )
+
+    # Sorting
+    sort_v = (sort or "").strip().lower()
+    # NOTE: list price calculations and promo adjustments are applied in Python later.
+    # Therefore, price-based sorting uses DB representative base price annotations.
+    if sort_v in {"price", "-price"}:
+        qs = qs.annotate(_sort_price=Coalesce("_min_offer_price", "_min_variant_price"))
+        qs = qs.order_by("_sort_price", "name", "id") if sort_v == "price" else qs.order_by("-_sort_price", "name", "id")
+    elif sort_v in {"created", "created_at", "-created", "-created_at"}:
+        if sort_v.startswith("-"):
+            qs = qs.order_by("-created_at", "-id")
+        else:
+            qs = qs.order_by("created_at", "id")
+    elif sort_v in {"discounted", "-discounted"}:
+        qs = qs.annotate(
+            _is_discounted=Case(
+                When(_min_offer_price__isnull=False, _min_offer_price__lt=F("_min_variant_price"), then=Value(1)),
+                default=Value(0),
+                output_field=IntegerField(),
+            )
+        )
+        # If sort=discounted, show discounted first; if sort=-discounted, show non-discounted first.
+        qs = (
+            qs.order_by("-_is_discounted", "name", "id")
+            if sort_v == "discounted"
+            else qs.order_by("_is_discounted", "name", "id")
+        )
+    elif sort_v in {"best_selling", "-best_selling"}:
+        from checkout.models import Order
+
+        qs = qs.annotate(
+            _sold_qty=Coalesce(
+                Sum(
+                    "variants__order_lines__qty",
+                    filter=Q(variants__order_lines__order__status=Order.Status.PAID),
+                    output_field=IntegerField(),
+                ),
+                Value(0),
+            )
+        )
+        qs = (
+            qs.order_by("-_sold_qty", "name", "id")
+            if sort_v == "best_selling"
+            else qs.order_by("_sold_qty", "name", "id")
+        )
+    else:
+        qs = qs.order_by("name", "id")
 
     if q:
         qv = q.strip()
@@ -669,6 +717,7 @@ def category_products(
     group_code: str | None = None,
     feature: str | None = None,
     option: str | None = None,
+    sort: str | None = None,
 ):
     return products(
         request,
@@ -680,6 +729,7 @@ def category_products(
         group_code=group_code,
         feature=feature,
         option=option,
+        sort=sort,
     )
 
 
@@ -695,6 +745,7 @@ def brand_products(
     group_code: str | None = None,
     feature: str | None = None,
     option: str | None = None,
+    sort: str | None = None,
 ):
     return products(
         request,
@@ -706,6 +757,7 @@ def brand_products(
         group_code=group_code,
         feature=feature,
         option=option,
+        sort=sort,
     )
 
 
@@ -721,6 +773,7 @@ def product_group_products(
     brand_slug: str | None = None,
     feature: str | None = None,
     option: str | None = None,
+    sort: str | None = None,
 ):
     return products(
         request,
@@ -732,6 +785,7 @@ def product_group_products(
         group_code=code,
         feature=feature,
         option=option,
+        sort=sort,
     )
 
 
