@@ -28,6 +28,7 @@ from .models import (
     VariantOptionValue,
     Warehouse,
     InventoryItem,
+    BackInStockSubscription,
 )
 
 
@@ -487,13 +488,14 @@ class VariantAdmin(admin.ModelAdmin):
     def option_values_display(self, obj: Variant) -> str:
         rows = list(
             obj.option_values.select_related(
-                "option_type", "option_value").all()
+                "option_type",
+                "option_value",
+            ).all()
         )
-        rows.sort(key=lambda r: (r.option_type.sort_order, r.option_type.code))
-        return ", ".join(
-            f"{r.option_type.name or r.option_type.code}: {r.option_value.label}"
-            for r in rows
-        )
+        parts = []
+        for r in rows:
+            parts.append(f"{r.option_type.code}:{r.option_value.label}")
+        return ", ".join(parts)
 
     @admin.display(description="Stock (available)")
     def stock_available(self, obj: Variant) -> int:
@@ -557,3 +559,11 @@ class ProductGroupAdmin(admin.ModelAdmin):
     list_display = ("code", "name", "is_active")
     list_filter = ("is_active",)
     search_fields = ("code", "name")
+
+
+@admin.register(BackInStockSubscription)
+class BackInStockSubscriptionAdmin(admin.ModelAdmin):
+    list_display = ("email", "channel", "product", "variant", "is_active", "created_at", "notified_at")
+    list_filter = ("channel", "is_active")
+    search_fields = ("email", "product__sku", "product__name", "variant__sku")
+    autocomplete_fields = ("product", "variant")

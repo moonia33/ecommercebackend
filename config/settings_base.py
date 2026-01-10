@@ -135,7 +135,7 @@ INSTALLED_APPS = [
     "api",
     "accounts",
     "notifications",
-    "catalog",
+    "catalog.apps.CatalogConfig",
     "zaliuojibanga",
     "shipping",
     "payments",

@@ -4,6 +4,8 @@ from decimal import Decimal
 
 from django.db.models import Case, Count, DecimalField, ExpressionWrapper, F, IntegerField, Min, Q, Sum, Value, When
 from django.db.models.functions import Coalesce
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
@@ -11,6 +13,8 @@ from ninja.pagination import PageNumberPagination, paginate
 from pricing.services import compute_vat, get_vat_rate
 
 from .api_schemas import (
+    BackInStockSubscribeIn,
+    BackInStockSubscribeOut,
     BrandOut,
     BrandRefOut,
     CatalogFacetsOut,
@@ -28,6 +32,7 @@ from .api_schemas import (
     VariantOut,
 )
 from .models import (
+    BackInStockSubscription,
     Brand,
     Category,
     Feature,
@@ -258,6 +263,7 @@ def products(
     feature: str | None = None,
     option: str | None = None,
     sort: str | None = None,
+    in_stock_only: bool = False,
 ):
     country_code = (country_code or "").strip().upper()
     if len(country_code) != 2:
@@ -315,18 +321,33 @@ def products(
         .annotate(_min_offer_price=min_offer_price_expr)
     )
 
+    qs = qs.annotate(
+        _has_stock=Case(
+            When(_min_offer_price__isnull=False, then=Value(1)),
+            default=Value(0),
+            output_field=IntegerField(),
+        )
+    )
+
+    if in_stock_only:
+        qs = qs.filter(_has_stock=1)
+
     # Sorting
     sort_v = (sort or "").strip().lower()
     # NOTE: list price calculations and promo adjustments are applied in Python later.
     # Therefore, price-based sorting uses DB representative base price annotations.
     if sort_v in {"price", "-price"}:
         qs = qs.annotate(_sort_price=Coalesce("_min_offer_price", "_min_variant_price"))
-        qs = qs.order_by("_sort_price", "name", "id") if sort_v == "price" else qs.order_by("-_sort_price", "name", "id")
+        qs = (
+            qs.order_by("-_has_stock", "_sort_price", "name", "id")
+            if sort_v == "price"
+            else qs.order_by("-_has_stock", "-_sort_price", "name", "id")
+        )
     elif sort_v in {"created", "created_at", "-created", "-created_at"}:
         if sort_v.startswith("-"):
-            qs = qs.order_by("-created_at", "-id")
+            qs = qs.order_by("-_has_stock", "-created_at", "-id")
         else:
-            qs = qs.order_by("created_at", "id")
+            qs = qs.order_by("-_has_stock", "created_at", "id")
     elif sort_v in {"discounted", "-discounted"}:
         qs = qs.annotate(
             _is_discounted=Case(
@@ -337,9 +358,9 @@ def products(
         )
         # If sort=discounted, show discounted first; if sort=-discounted, show non-discounted first.
         qs = (
-            qs.order_by("-_is_discounted", "name", "id")
+            qs.order_by("-_has_stock", "-_is_discounted", "name", "id")
             if sort_v == "discounted"
-            else qs.order_by("_is_discounted", "name", "id")
+            else qs.order_by("-_has_stock", "_is_discounted", "name", "id")
         )
     elif sort_v in {"best_selling", "-best_selling"}:
         from checkout.models import Order
@@ -355,12 +376,12 @@ def products(
             )
         )
         qs = (
-            qs.order_by("-_sold_qty", "name", "id")
+            qs.order_by("-_has_stock", "-_sold_qty", "name", "id")
             if sort_v == "best_selling"
-            else qs.order_by("_sold_qty", "name", "id")
+            else qs.order_by("-_has_stock", "_sold_qty", "name", "id")
         )
     else:
-        qs = qs.order_by("name", "id")
+        qs = qs.order_by("-_has_stock", "name", "id")
 
     if q:
         qv = q.strip()
@@ -718,6 +739,7 @@ def category_products(
     feature: str | None = None,
     option: str | None = None,
     sort: str | None = None,
+    in_stock_only: bool = False,
 ):
     return products(
         request,
@@ -730,6 +752,7 @@ def category_products(
         feature=feature,
         option=option,
         sort=sort,
+        in_stock_only=in_stock_only,
     )
 
 
@@ -746,6 +769,7 @@ def brand_products(
     feature: str | None = None,
     option: str | None = None,
     sort: str | None = None,
+    in_stock_only: bool = False,
 ):
     return products(
         request,
@@ -758,6 +782,7 @@ def brand_products(
         feature=feature,
         option=option,
         sort=sort,
+        in_stock_only=in_stock_only,
     )
 
 
@@ -774,6 +799,7 @@ def product_group_products(
     feature: str | None = None,
     option: str | None = None,
     sort: str | None = None,
+    in_stock_only: bool = False,
 ):
     return products(
         request,
@@ -786,7 +812,55 @@ def product_group_products(
         feature=feature,
         option=option,
         sort=sort,
+        in_stock_only=in_stock_only,
     )
+
+
+@router.post("/back-in-stock/subscribe", response=BackInStockSubscribeOut)
+def back_in_stock_subscribe(request, payload: BackInStockSubscribeIn):
+    email = (payload.email or "").strip().lower()
+    try:
+        validate_email(email)
+    except ValidationError:
+        raise HttpError(400, "Invalid email")
+
+    channel = (getattr(payload, "channel", None) or "normal").strip().lower()
+    if channel not in {"normal", "outlet"}:
+        raise HttpError(400, "Invalid channel")
+
+    product = None
+    variant = None
+
+    if payload.variant_id:
+        variant = (
+            Variant.objects.filter(id=int(payload.variant_id))
+            .select_related("product")
+            .first()
+        )
+        if not variant:
+            raise HttpError(404, "Variant not found")
+        product = variant.product
+
+    if payload.product_id:
+        product = Product.objects.filter(id=int(payload.product_id)).first()
+        if not product:
+            raise HttpError(404, "Product not found")
+
+    if not product and not variant:
+        raise HttpError(400, "product_id or variant_id is required")
+
+    obj, created = BackInStockSubscription.objects.get_or_create(
+        email=email,
+        product=product,
+        variant=variant,
+        channel=channel,
+        defaults={"is_active": True},
+    )
+    if not created and not obj.is_active:
+        obj.is_active = True
+        obj.save(update_fields=["is_active"])
+
+    return {"status": "ok"}
 
 
 @router.get("/products/{slug}", response=ProductDetailOut)
@@ -804,6 +878,8 @@ def product_detail(request, slug: str, country_code: str = "LT", channel: str = 
         .select_related("brand", "category", "tax_class")
         .prefetch_related(
             "images",
+            "feature_values__feature",
+            "feature_values__feature_value",
             "variants",
             "variants__option_values__option_type",
             "variants__option_values__option_value",
@@ -921,6 +997,27 @@ def product_detail(request, slug: str, country_code: str = "LT", channel: str = 
             }
         )
 
+    feature_rows = list(product.feature_values.select_related("feature", "feature_value").all())
+    feature_rows.sort(
+        key=lambda r: (
+            r.feature.sort_order,
+            r.feature.code,
+            r.feature_value.sort_order,
+            r.feature_value.value,
+            r.id,
+        )
+    )
+    features_out = [
+        {
+            "feature_id": r.feature_id,
+            "feature_code": r.feature.code,
+            "feature_name": r.feature.name,
+            "value_id": r.feature_value_id,
+            "value": r.feature_value.value,
+        }
+        for r in feature_rows
+    ]
+
     return {
         "id": product.id,
         "sku": product.sku,
@@ -956,5 +1053,6 @@ def product_detail(request, slug: str, country_code: str = "LT", channel: str = 
             for img in images
             if img.url
         ],
+        "features": features_out,
         "variants": variants,
     }

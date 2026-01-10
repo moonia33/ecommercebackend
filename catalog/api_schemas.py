@@ -97,6 +97,14 @@ class ProductListOut(Schema):
     discount_percent: int | None = None
 
 
+class ProductFeatureOut(Schema):
+    feature_id: int
+    feature_code: str
+    feature_name: str
+    value_id: int
+    value: str
+
+
 class ProductDetailOut(Schema):
     id: int
     sku: str
@@ -113,6 +121,7 @@ class ProductDetailOut(Schema):
     category: CategoryRefOut | None = None
 
     images: list[ProductImageOut]
+    features: list[ProductFeatureOut] = []
     variants: list[VariantOut]
 
 
@@ -160,3 +169,14 @@ class CatalogFacetsOut(Schema):
     product_groups: list[ProductGroupOut] = []
     features: list[FeatureOut] = []
     option_types: list[OptionTypeOut] = []
+
+
+class BackInStockSubscribeIn(Schema):
+    email: str
+    product_id: int | None = None
+    variant_id: int | None = None
+    channel: str = "normal"
+
+
+class BackInStockSubscribeOut(Schema):
+    status: str

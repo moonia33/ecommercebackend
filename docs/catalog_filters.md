@@ -36,6 +36,7 @@ Query:
 - `feature` (optional) — „pair list“ formatas (žr. žemiau)
 - `option` (optional) — „pair list“ formatas (žr. žemiau)
 - `sort` (optional) — rikiavimas (žr. žemiau)
+- `in_stock_only` (optional, default false) — jei `true`, grąžina tik prekes, kurios turi bent vieną offer su `qty_available>0` šiame `channel`
 - `page` (optional, default 1)
 - `page_size` (optional, default 20; max 100)
 
@@ -52,6 +53,15 @@ Pastabos:
 
 - `price` rikiavimas skaičiuojamas pagal DB reprezentacinę kainą (`min(offer_price)` arba `min(variant_price)`), nes promo pritaikymas vyksta Python sluoksnyje vėliau.
 - `best_selling` yra agregacija per užsakymų eilutes; dideliuose kataloguose gali būti brangesnis už kitus sortus.
+
+#### Stock elgsena (in-stock first)
+
+Nepriklausomai nuo `sort`, listingas visada rikiuoja taip:
+
+- pirma prekės, kurios turi bent vieną offer su `qty_available>0` pagal pasirinktą `channel`
+- po to likusios (out-of-stock)
+
+Jei norite out-of-stock visai nerodyti, naudokite `in_stock_only=true`.
 
 #### `feature` formatas
 
@@ -156,6 +166,21 @@ Pavyzdys:
 - `GET /api/v1/catalog/option-types`
 
 Pastaba: `option-types` taip pat grąžina `display_type` ir `swatch_type`, kad frontas galėtų teisingai atvaizduoti filtrus (pvz. spalvas).
+
+## Notify me (back-in-stock)
+
+### POST `/api/v1/catalog/back-in-stock/subscribe`
+
+Skirta registruoti vartotojo email, kad būtų galima pranešti, kai prekė/variantas vėl atsiras sandėlyje.
+
+Body:
+
+- `email` (required)
+- `product_id` (optional)
+- `variant_id` (optional)
+- `channel` (optional, default `normal`) — `normal` arba `outlet`
+
+Pastaba: privaloma paduoti bent vieną iš `product_id` arba `variant_id`.
 
 ## Fronto listing maršrutai (aliasai)
 
