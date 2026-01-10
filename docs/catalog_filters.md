@@ -89,6 +89,13 @@ Atsakymas (`CatalogFacetsOut`) apima:
 - `features` — tik filterable features, kurios naudojamos šiame scope, su tik tomis value reikšmėmis, kurios realiai pasitaiko
 - `option_types` — option type ašys šiame scope, su tik tomis value reikšmėmis, kurios realiai pasitaiko per variantus
 
+Papildomai UI'ui:
+
+- `option_types[].display_type` — rekomenduojamas atvaizdavimo tipas (`select` | `radio` | `swatch`)
+- `option_types[].swatch_type` — jei `display_type=swatch`, nurodo kaip interpretuoti swatch'ą (pvz. `name`)
+
+Šie laukai yra DB-driven (iš `OptionType.display_type` ir `OptionType.swatch_type`). Šiuo metu default visiems esamiems option tipams: `display_type=radio`.
+
 Pavyzdys:
 
 - `/api/v1/catalog/products/facets?country_code=LT&category_slug=shoes&brand_slug=nike`
@@ -102,6 +109,8 @@ Pavyzdys:
 - `GET /api/v1/catalog/product-groups`
 - `GET /api/v1/catalog/features`
 - `GET /api/v1/catalog/option-types`
+
+Pastaba: `option-types` taip pat grąžina `display_type` ir `swatch_type`, kad frontas galėtų teisingai atvaizduoti filtrus (pvz. spalvas).
 
 ## Fronto listing maršrutai (aliasai)
 

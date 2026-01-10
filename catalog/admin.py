@@ -422,7 +422,7 @@ class OptionValueInline(admin.TabularInline):
 
 @admin.register(OptionType)
 class OptionTypeAdmin(admin.ModelAdmin):
-    list_display = ("code", "name", "is_active")
+    list_display = ("code", "name", "display_type", "swatch_type", "is_active")
     list_filter = ("is_active",)
     search_fields = ("code", "name")
     ordering = ("sort_order", "code")

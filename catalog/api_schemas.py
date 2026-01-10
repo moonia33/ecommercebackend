@@ -149,6 +149,8 @@ class OptionTypeOut(Schema):
     id: int
     code: str
     name: str
+    display_type: str = "radio"
+    swatch_type: str | None = None
     values: list[OptionValueOut] = []
 
 

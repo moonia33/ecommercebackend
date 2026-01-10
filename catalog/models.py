@@ -515,10 +515,32 @@ class ProductFeatureValue(models.Model):
 
 
 class OptionType(models.Model):
+    class DisplayType(models.TextChoices):
+        SELECT = "select", "Select"
+        RADIO = "radio", "Radio"
+        SWATCH = "swatch", "Swatch"
+
+    class SwatchType(models.TextChoices):
+        HEX = "hex", "Hex"
+        NAME = "name", "Name"
+        IMAGE = "image", "Image"
+
     code = models.SlugField(max_length=100, unique=True)
     name = models.CharField(max_length=255)
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
+    display_type = models.CharField(
+        max_length=20,
+        choices=DisplayType.choices,
+        default=DisplayType.RADIO,
+    )
+    swatch_type = models.CharField(
+        max_length=20,
+        choices=SwatchType.choices,
+        null=True,
+        blank=True,
+        default=None,
+    )
 
     class Meta:
         ordering = ["sort_order", "code"]

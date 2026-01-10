@@ -236,6 +236,8 @@ def option_types(request):
                 "id": t.id,
                 "code": t.code,
                 "name": t.name,
+                "display_type": t.display_type,
+                "swatch_type": t.swatch_type,
                 "values": [{"id": v.id, "code": v.code, "label": v.label} for v in vals],
             }
         )
@@ -545,12 +547,18 @@ def product_facets(
     categories_out = []
     cat_ids = list(cat_qs.values_list("id", flat=True))
     if cat_ids:
-        counts = (
-            Product.objects.filter(is_active=True, category_id__in=cat_ids, id__in=product_ids)
-            .values("category_id")
-            .annotate(c=Count("id"))
+        # Category facet should include children even if products are in deeper descendants.
+        product_category_ids = set(
+            Product.objects.filter(is_active=True, id__in=product_ids)
+            .exclude(category_id__isnull=True)
+            .values_list("category_id", flat=True)
         )
-        allowed = {int(r["category_id"]) for r in counts if int(r["c"]) > 0}
+        allowed: set[int] = set()
+        for child_id in cat_ids:
+            desc_ids = set(_descendant_category_ids(root_id=int(child_id)))
+            if product_category_ids.intersection(desc_ids):
+                allowed.add(int(child_id))
+
         for c in cat_qs:
             if int(c.id) not in allowed:
                 continue
@@ -608,7 +616,7 @@ def product_facets(
         )
 
     option_type_ids = list(
-        ProductOptionType.objects.filter(product_id__in=product_ids)
+        VariantOptionValue.objects.filter(variant__product_id__in=product_ids)
         .values_list("option_type_id", flat=True)
         .distinct()
     )
@@ -631,6 +639,8 @@ def product_facets(
                 "id": t.id,
                 "code": t.code,
                 "name": t.name,
+                "display_type": t.display_type,
+                "swatch_type": t.swatch_type,
                 "values": [{"id": v.id, "code": v.code, "label": v.label} for v in vals],
             }
         )
