@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import Case, DecimalField, ExpressionWrapper, F, Min, Q, Value, When
+from django.db.models import Case, Count, DecimalField, ExpressionWrapper, F, Min, Q, Value, When
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
@@ -12,17 +12,33 @@ from pricing.services import compute_vat, get_vat_rate
 from .api_schemas import (
     BrandOut,
     BrandRefOut,
+    CatalogFacetsOut,
     CategoryOut,
     CategoryDetailOut,
     CategoryRefOut,
+    FeatureOut,
+    OptionTypeOut,
     MoneyOut,
     ProductDetailOut,
+    ProductGroupOut,
     ProductImageOut,
     ProductListOut,
     VariantOptionOut,
     VariantOut,
 )
-from .models import Brand, Category, InventoryItem, Product, Variant
+from .models import (
+    Brand,
+    Category,
+    Feature,
+    InventoryItem,
+    OptionType,
+    Product,
+    ProductFeatureValue,
+    ProductGroup,
+    ProductOptionType,
+    Variant,
+    VariantOptionValue,
+)
 from promotions.services import apply_promo_to_unit_net
 
 router = Router(tags=["catalog"])
@@ -66,6 +82,44 @@ def _discount_percent(*, list_unit_net: Decimal, sale_unit_net: Decimal) -> int 
 class ProductPagination(PageNumberPagination):
     page_size = 20
     max_page_size = 100
+
+
+def _parse_pairs(value: str | None) -> list[tuple[str, str]]:
+    if not value:
+        return []
+    out: list[tuple[str, str]] = []
+    for part in [p.strip() for p in value.split(",") if p.strip()]:
+        if ":" not in part:
+            raise HttpError(400, "Invalid pair format; expected code:value")
+        k, v = part.split(":", 1)
+        k = k.strip()
+        v = v.strip()
+        if not k or not v:
+            raise HttpError(400, "Invalid pair format; expected code:value")
+        out.append((k, v))
+    return out
+
+
+def _descendant_category_ids(*, root_id: int) -> list[int]:
+    rows = Category.objects.filter(is_active=True).values("id", "parent_id")
+    children: dict[int, list[int]] = {}
+    for r in rows:
+        pid = r["parent_id"]
+        if pid is None:
+            continue
+        children.setdefault(int(pid), []).append(int(r["id"]))
+
+    out: list[int] = []
+    stack = [int(root_id)]
+    seen: set[int] = set()
+    while stack:
+        cid = stack.pop()
+        if cid in seen:
+            continue
+        seen.add(cid)
+        out.append(cid)
+        stack.extend(children.get(cid, []))
+    return out
 
 
 @router.get("/categories", response=list[CategoryOut])
@@ -122,9 +176,85 @@ def brand_detail(request, slug: str):
     return {"id": b.id, "slug": b.slug, "name": b.name}
 
 
+@router.get("/product-groups", response=list[ProductGroupOut])
+def product_groups(request):
+    qs = ProductGroup.objects.filter(is_active=True).order_by("name")
+    return [
+        {
+            "id": g.id,
+            "code": g.code,
+            "name": g.name,
+            "description": g.description or "",
+        }
+        for g in qs
+    ]
+
+
+@router.get("/product-groups/{code}", response=ProductGroupOut)
+def product_group_detail(request, code: str):
+    g = ProductGroup.objects.filter(code=code, is_active=True).first()
+    if not g:
+        raise HttpError(404, "Product group not found")
+    return {"id": g.id, "code": g.code, "name": g.name, "description": g.description or ""}
+
+
+@router.get("/features", response=list[FeatureOut])
+def features(request):
+    qs = (
+        Feature.objects.filter(is_active=True, is_filterable=True)
+        .prefetch_related("values")
+        .order_by("sort_order", "code")
+    )
+    out: list[FeatureOut] = []
+    for f in qs:
+        vals = [v for v in f.values.all() if v.is_active]
+        vals.sort(key=lambda v: (v.sort_order, v.value, v.id))
+        out.append(
+            {
+                "id": f.id,
+                "code": f.code,
+                "name": f.name,
+                "values": [{"id": v.id, "value": v.value} for v in vals],
+            }
+        )
+    return out
+
+
+@router.get("/option-types", response=list[OptionTypeOut])
+def option_types(request):
+    qs = (
+        OptionType.objects.filter(is_active=True)
+        .prefetch_related("values")
+        .order_by("sort_order", "code")
+    )
+    out: list[OptionTypeOut] = []
+    for t in qs:
+        vals = [v for v in t.values.all() if v.is_active]
+        vals.sort(key=lambda v: (v.sort_order, v.label, v.id))
+        out.append(
+            {
+                "id": t.id,
+                "code": t.code,
+                "name": t.name,
+                "values": [{"id": v.id, "code": v.code, "label": v.label} for v in vals],
+            }
+        )
+    return out
+
+
 @router.get("/products", response=list[ProductListOut])
 @paginate(ProductPagination)
-def products(request, country_code: str = "LT", channel: str = "normal"):
+def products(
+    request,
+    country_code: str = "LT",
+    channel: str = "normal",
+    q: str | None = None,
+    category_slug: str | None = None,
+    brand_slug: str | None = None,
+    group_code: str | None = None,
+    feature: str | None = None,
+    option: str | None = None,
+):
     country_code = (country_code or "").strip().upper()
     if len(country_code) != 2:
         raise HttpError(400, "Invalid country_code")
@@ -181,6 +311,45 @@ def products(request, country_code: str = "LT", channel: str = "normal"):
         .annotate(_min_offer_price=min_offer_price_expr)
         .order_by("name", "id")
     )
+
+    if q:
+        qv = q.strip()
+        if qv:
+            qs = qs.filter(Q(name__icontains=qv) | Q(slug__icontains=qv) | Q(sku__icontains=qv))
+
+    if category_slug:
+        c = Category.objects.filter(slug=category_slug, is_active=True).first()
+        if not c:
+            raise HttpError(404, "Category not found")
+        ids = _descendant_category_ids(root_id=int(c.id))
+        qs = qs.filter(category_id__in=ids)
+
+    if brand_slug:
+        b = Brand.objects.filter(slug=brand_slug, is_active=True).first()
+        if not b:
+            raise HttpError(404, "Brand not found")
+        qs = qs.filter(brand_id=b.id)
+
+    if group_code:
+        g = ProductGroup.objects.filter(code=group_code, is_active=True).first()
+        if not g:
+            raise HttpError(404, "Product group not found")
+        qs = qs.filter(group_id=g.id)
+
+    for f_code, f_val in _parse_pairs(feature):
+        qs = qs.filter(
+            feature_values__feature__code=f_code,
+            feature_values__feature_value__value=f_val,
+        )
+
+    for o_type, o_val in _parse_pairs(option):
+        qs = qs.filter(
+            variants__option_values__option_type__code=o_type,
+            variants__option_values__option_value__code=o_val,
+        )
+
+    if feature or option:
+        qs = qs.distinct()
 
     if channel == "outlet":
         qs = qs.filter(_min_offer_price__isnull=False)
@@ -279,6 +448,281 @@ def products(request, country_code: str = "LT", channel: str = "normal"):
         )
 
     return out
+
+
+@router.get("/products/facets", response=CatalogFacetsOut)
+def product_facets(
+    request,
+    country_code: str = "LT",
+    channel: str = "normal",
+    q: str | None = None,
+    category_slug: str | None = None,
+    brand_slug: str | None = None,
+    group_code: str | None = None,
+    feature: str | None = None,
+    option: str | None = None,
+):
+    country_code = (country_code or "").strip().upper()
+    if len(country_code) != 2:
+        raise HttpError(400, "Invalid country_code")
+
+    channel = (channel or "normal").strip().lower()
+    if channel not in {"normal", "outlet"}:
+        raise HttpError(400, "Invalid channel")
+
+    visibility = (
+        InventoryItem.OfferVisibility.OUTLET
+        if channel == "outlet"
+        else InventoryItem.OfferVisibility.NORMAL
+    )
+
+    offer_filter = (
+        Q(variants__is_active=True)
+        & Q(variants__inventory_items__offer_visibility=visibility)
+        & Q(variants__inventory_items__qty_on_hand__gt=F("variants__inventory_items__qty_reserved"))
+    )
+    qs = Product.objects.filter(is_active=True).annotate(
+        _has_offer=Count("id", filter=offer_filter)
+    )
+    if channel == "outlet":
+        qs = qs.filter(_has_offer__gt=0)
+
+    if q:
+        qv = q.strip()
+        if qv:
+            qs = qs.filter(Q(name__icontains=qv) | Q(slug__icontains=qv) | Q(sku__icontains=qv))
+
+    selected_category: Category | None = None
+    if category_slug:
+        selected_category = Category.objects.filter(slug=category_slug, is_active=True).first()
+        if not selected_category:
+            raise HttpError(404, "Category not found")
+        ids = _descendant_category_ids(root_id=int(selected_category.id))
+        qs = qs.filter(category_id__in=ids)
+
+    if brand_slug:
+        b = Brand.objects.filter(slug=brand_slug, is_active=True).first()
+        if not b:
+            raise HttpError(404, "Brand not found")
+        qs = qs.filter(brand_id=b.id)
+
+    if group_code:
+        g = ProductGroup.objects.filter(code=group_code, is_active=True).first()
+        if not g:
+            raise HttpError(404, "Product group not found")
+        qs = qs.filter(group_id=g.id)
+
+    for f_code, f_val in _parse_pairs(feature):
+        qs = qs.filter(
+            feature_values__feature__code=f_code,
+            feature_values__feature_value__value=f_val,
+        )
+
+    for o_type, o_val in _parse_pairs(option):
+        qs = qs.filter(
+            variants__option_values__option_type__code=o_type,
+            variants__option_values__option_value__code=o_val,
+        )
+
+    if feature or option:
+        qs = qs.distinct()
+
+    product_ids = list(qs.values_list("id", flat=True))
+    if not product_ids:
+        return {
+            "categories": [],
+            "brands": [],
+            "product_groups": [],
+            "features": [],
+            "option_types": [],
+        }
+
+    if selected_category:
+        cat_qs = Category.objects.filter(is_active=True, parent_id=selected_category.id).order_by("name")
+    else:
+        cat_qs = Category.objects.filter(is_active=True, parent_id__isnull=True).order_by("name")
+
+    categories_out = []
+    cat_ids = list(cat_qs.values_list("id", flat=True))
+    if cat_ids:
+        counts = (
+            Product.objects.filter(is_active=True, category_id__in=cat_ids, id__in=product_ids)
+            .values("category_id")
+            .annotate(c=Count("id"))
+        )
+        allowed = {int(r["category_id"]) for r in counts if int(r["c"]) > 0}
+        for c in cat_qs:
+            if int(c.id) not in allowed:
+                continue
+            categories_out.append(
+                {
+                    "id": c.id,
+                    "slug": c.slug,
+                    "name": c.name,
+                    "parent_id": c.parent_id,
+                    "description": c.description or "",
+                    "hero_image_url": (c.hero_url or None),
+                    "menu_icon_url": (c.menu_icon_url_resolved or None),
+                    "seo_title": getattr(c, "seo_title", "") or "",
+                    "seo_description": getattr(c, "seo_description", "") or "",
+                    "seo_keywords": getattr(c, "seo_keywords", "") or "",
+                }
+            )
+
+    brands_qs = (
+        Brand.objects.filter(is_active=True, products__id__in=product_ids)
+        .distinct()
+        .order_by("name")
+    )
+    groups_qs = (
+        ProductGroup.objects.filter(is_active=True, products__id__in=product_ids)
+        .distinct()
+        .order_by("name")
+    )
+
+    feature_ids = list(
+        ProductFeatureValue.objects.filter(product_id__in=product_ids)
+        .values_list("feature_id", flat=True)
+        .distinct()
+    )
+    features_qs = (
+        Feature.objects.filter(is_active=True, is_filterable=True, id__in=feature_ids)
+        .prefetch_related("values")
+        .order_by("sort_order", "code")
+    )
+    features_out: list[FeatureOut] = []
+    for f in features_qs:
+        used_vals = set(
+            ProductFeatureValue.objects.filter(product_id__in=product_ids, feature_id=f.id)
+            .values_list("feature_value__value", flat=True)
+        )
+        vals = [v for v in f.values.all() if v.is_active and v.value in used_vals]
+        vals.sort(key=lambda v: (v.sort_order, v.value, v.id))
+        features_out.append(
+            {
+                "id": f.id,
+                "code": f.code,
+                "name": f.name,
+                "values": [{"id": v.id, "value": v.value} for v in vals],
+            }
+        )
+
+    option_type_ids = list(
+        ProductOptionType.objects.filter(product_id__in=product_ids)
+        .values_list("option_type_id", flat=True)
+        .distinct()
+    )
+    option_types_qs = (
+        OptionType.objects.filter(is_active=True, id__in=option_type_ids)
+        .prefetch_related("values")
+        .order_by("sort_order", "code")
+    )
+    option_types_out: list[OptionTypeOut] = []
+    for t in option_types_qs:
+        used_codes = set(
+            VariantOptionValue.objects.filter(variant__product_id__in=product_ids, option_type_id=t.id)
+            .values_list("option_value__code", flat=True)
+            .distinct()
+        )
+        vals = [v for v in t.values.all() if v.is_active and v.code in used_codes]
+        vals.sort(key=lambda v: (v.sort_order, v.label, v.id))
+        option_types_out.append(
+            {
+                "id": t.id,
+                "code": t.code,
+                "name": t.name,
+                "values": [{"id": v.id, "code": v.code, "label": v.label} for v in vals],
+            }
+        )
+
+    return {
+        "categories": categories_out,
+        "brands": [{"id": b.id, "slug": b.slug, "name": b.name} for b in brands_qs],
+        "product_groups": [
+            {"id": g.id, "code": g.code, "name": g.name, "description": g.description or ""}
+            for g in groups_qs
+        ],
+        "features": features_out,
+        "option_types": option_types_out,
+    }
+
+
+@router.get("/categories/{slug}/products", response=list[ProductListOut])
+@paginate(ProductPagination)
+def category_products(
+    request,
+    slug: str,
+    country_code: str = "LT",
+    channel: str = "normal",
+    q: str | None = None,
+    brand_slug: str | None = None,
+    group_code: str | None = None,
+    feature: str | None = None,
+    option: str | None = None,
+):
+    return products(
+        request,
+        country_code=country_code,
+        channel=channel,
+        q=q,
+        category_slug=slug,
+        brand_slug=brand_slug,
+        group_code=group_code,
+        feature=feature,
+        option=option,
+    )
+
+
+@router.get("/brands/{slug}/products", response=list[ProductListOut])
+@paginate(ProductPagination)
+def brand_products(
+    request,
+    slug: str,
+    country_code: str = "LT",
+    channel: str = "normal",
+    q: str | None = None,
+    category_slug: str | None = None,
+    group_code: str | None = None,
+    feature: str | None = None,
+    option: str | None = None,
+):
+    return products(
+        request,
+        country_code=country_code,
+        channel=channel,
+        q=q,
+        category_slug=category_slug,
+        brand_slug=slug,
+        group_code=group_code,
+        feature=feature,
+        option=option,
+    )
+
+
+@router.get("/product-groups/{code}/products", response=list[ProductListOut])
+@paginate(ProductPagination)
+def product_group_products(
+    request,
+    code: str,
+    country_code: str = "LT",
+    channel: str = "normal",
+    q: str | None = None,
+    category_slug: str | None = None,
+    brand_slug: str | None = None,
+    feature: str | None = None,
+    option: str | None = None,
+):
+    return products(
+        request,
+        country_code=country_code,
+        channel=channel,
+        q=q,
+        category_slug=category_slug,
+        brand_slug=brand_slug,
+        group_code=code,
+        feature=feature,
+        option=option,
+    )
 
 
 @router.get("/products/{slug}", response=ProductDetailOut)

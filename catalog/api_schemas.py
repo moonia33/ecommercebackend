@@ -118,3 +118,43 @@ class ProductDetailOut(Schema):
 
 class CategoryDetailOut(CategoryOut):
     pass
+
+
+class ProductGroupOut(Schema):
+    id: int
+    code: str
+    name: str
+    description: str = ""
+
+
+class FeatureValueOut(Schema):
+    id: int
+    value: str
+
+
+class FeatureOut(Schema):
+    id: int
+    code: str
+    name: str
+    values: list[FeatureValueOut] = []
+
+
+class OptionValueOut(Schema):
+    id: int
+    code: str
+    label: str
+
+
+class OptionTypeOut(Schema):
+    id: int
+    code: str
+    name: str
+    values: list[OptionValueOut] = []
+
+
+class CatalogFacetsOut(Schema):
+    categories: list[CategoryOut] = []
+    brands: list[BrandOut] = []
+    product_groups: list[ProductGroupOut] = []
+    features: list[FeatureOut] = []
+    option_types: list[OptionTypeOut] = []
