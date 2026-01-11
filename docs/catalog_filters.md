@@ -182,6 +182,29 @@ Body:
 
 Pastaba: privaloma paduoti bent vieną iš `product_id` arba `variant_id`.
 
+Response:
+
+- `{"status": "ok"}`
+
+Elgsena:
+
+- Prenumerata yra idempotentinė (pakartotinis subscribe su tais pačiais laukais nekuria dublikatų).
+- Jei prenumerata buvo išjungta (pvz. jau išsiųsta) ir vartotojas subscribina dar kartą, prenumerata vėl aktyvuojama.
+- Pranešimas siunčiamas automatiškai, kai konkretaus `variant` (arba bet kurio `product` varianto) `qty_available` pereina iš `0` į `>0`.
+- `channel` yra svarbus:
+  - `channel=normal` siunčia, kai atsiranda `InventoryItem.offer_visibility=NORMAL`
+  - `channel=outlet` siunčia, kai atsiranda `InventoryItem.offer_visibility=OUTLET`
+
+Pavyzdžiai:
+
+- Prenumeruoti visą produktą (bet kuris variantas):
+  - `POST /api/v1/catalog/back-in-stock/subscribe`
+  - body: `{"email":"a@b.com","product_id":79,"channel":"normal"}`
+- Prenumeruoti konkretų variantą:
+  - body: `{"email":"a@b.com","variant_id":80,"channel":"normal"}`
+
+Pastaba: email turinys siunčiamas pagal `notifications.EmailTemplate` su key `catalog_back_in_stock`.
+
 ## Fronto listing maršrutai (aliasai)
 
 Šie endpointai yra patogumui, kad frontas galėtų laikyti aiškų REST maršrutą, bet filtrai ir paginacija lieka identiški kaip `GET /products`:
@@ -194,3 +217,95 @@ Pastaba: privaloma paduoti bent vieną iš `product_id` arba `variant_id`.
   - `GET /api/v1/catalog/product-groups/{code}/products`
 
 Pastaba: alias endpointuose `slug/code` automatiškai map’inamas į `category_slug/brand_slug/group_code`.
+
+## Product detail papildomi laukai
+
+### GET `/api/v1/catalog/products/{slug}`
+
+Product detail atsakyme papildomai grąžinamas `features[]`:
+
+- `feature_id`
+- `feature_code`
+- `feature_name`
+- `value_id`
+- `value`
+
+Pavyzdys:
+
+```json
+{
+  "features": [
+    {
+      "feature_id": 1,
+      "feature_code": "composition",
+      "feature_name": "Sudėtis",
+      "value_id": 10,
+      "value": "cotton"
+    }
+  ]
+}
+```
+
+## Kainodara: offer nuolaidos ir cart perskirstymas (returned stock first)
+
+### Terminai
+
+- **List price**: bazinė varianto kaina (`Variant.price_eur`).
+- **Offer price**: sandėlio/offer lygmens kaina, kuri gali būti pakeista per `InventoryItem.offer_price_override_eur` arba `InventoryItem.offer_discount_percent`.
+- **Promo**: papildoma promo variklio nuolaida, kuri taikoma tik jei leidžiama (žr. `allow_additional_promotions`) ir jei offer nėra jau „discounted“ (nebent leidžiama).
+
+### Product detail: kaip rodyti nuolaidą
+
+`GET /api/v1/catalog/products/{slug}` (laukas `variants[]`):
+
+- `price` — galutinė kaina (offer + promo).
+- `compare_at_price` — list price (rodoma tik jei yra reali nuolaida).
+- `discount_percent` — procentinė nuolaida nuo list price iki `price` (rounded int, arba `null` jei nėra).
+- `offer_id` — kuris sandėlio offer šiuo metu laikomas „best offer“ (pagal prioritetą ir kainą).
+
+Frontend rekomendacija:
+
+- UI nuolaidos badge/strikethrough turi remtis `compare_at_price` ir `discount_percent` iš API.
+- UI neturi bandyti pati perskaičiuoti nuolaidos pagal admin laukus; backend apskaičiuoja galutinę kainą.
+
+### Cart: kodėl kaina „nesikeičia“ jei FE neatsinaujina iš API
+
+Cart API grąžina kainas jau apskaičiuotas (offer + promo). Jei FE po `add`/`update` tik lokaliai pasikeičia qty (neperkraunant cart state iš response), UI gali likti su sena kaina.
+
+Taisyklė:
+
+- Po **kiekvieno** `POST /api/v1/checkout/cart/items` ir `PATCH /api/v1/checkout/cart/items/{id}` FE turi atnaujinti visą cart state pagal response (arba bent jau atnaujinti konkretų item’ą su `unit_price`, `line_total`, `compare_at_price`, `discount_percent`).
+
+### Cart: automatinis qty „split“ per offer’ius
+
+Kai FE kviečia `POST /api/v1/checkout/cart/items` su `variant_id` ir **be** `offer_id`, backend elgiasi taip:
+
+- suranda visus `InventoryItem` (offers) su `qty_available>0` ir `offer_visibility=NORMAL`
+- surikiuoja juos pagal:
+  - `offer_priority` (desc)
+  - efektyvią offer kainą (asc)
+  - `id` (asc)
+- **pirmiausia** alokuoja qty į pirmą offer (pvz. grąžinimų sandėlį)
+- jei qty didesnis nei to offer likutis, likusi dalis alokuojama į kitus offer’ius
+- jei visų offer’ių neužtenka, likutis dedamas kaip cart item su `offer_id=null` (generic/supplier fulfillment)
+
+Tai reiškia:
+
+- vienas user veiksmas „įdėti qty=10“ gali sukurti **kelias** cart eilutes.
+- kainos gali skirtis tarp eilučių (pvz. returned offer su 50% nuolaida ir likusi dalis už pilną kainą).
+
+Frontend UI rekomendacijos:
+
+- rodyti cart eilutes kaip grąžina API (kiekviena eilutė turi savo `unit_price`/`line_total`).
+- jei norite UI rodyti „vieną produktą“, galima grupuoti pagal `variant_id`, bet tada reikia:
+  - sumuoti `qty`
+  - sumuoti `line_total`
+  - atskirai atvaizduoti sub-eilutes arba „nuo X €/vnt“ logiką (nes blended unit price gali klaidinti)
+
+### Jei FE nori įdėti į konkretų offer (force)
+
+Galima paduoti `offer_id` į `POST /api/v1/checkout/cart/items`.
+
+- Tokiu atveju backend kuria / didina **vieną** cart eilutę tam konkrečiam offer.
+- Tai naudinga, jei FE leidžia vartotojui pasirinkti konkrečią būklę/sandėlį (pvz. returned A vs NEW).
+

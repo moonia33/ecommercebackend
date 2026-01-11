@@ -105,6 +105,22 @@ class ProductFeatureOut(Schema):
     value: str
 
 
+class DeliveryWindowOut(Schema):
+    min_date: str
+    max_date: str
+    kind: str = "estimated"
+    rule_code: str = ""
+    source: str = ""
+
+
+class ContentBlockOut(Schema):
+    key: str
+    title: str = ""
+    placement: str
+    type: str
+    payload: dict
+
+
 class ProductDetailOut(Schema):
     id: int
     sku: str
@@ -122,6 +138,8 @@ class ProductDetailOut(Schema):
 
     images: list[ProductImageOut]
     features: list[ProductFeatureOut] = []
+    delivery_window: DeliveryWindowOut | None = None
+    content_blocks: list[ContentBlockOut] = []
     variants: list[VariantOut]
 
 

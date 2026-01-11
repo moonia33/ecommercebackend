@@ -13,6 +13,14 @@ class MoneyOut(Schema):
     gross: Decimal
 
 
+class DeliveryWindowOut(Schema):
+    min_date: str
+    max_date: str
+    kind: str = "estimated"
+    rule_code: str = ""
+    source: str = ""
+
+
 class CartItemOut(Schema):
     id: int
     variant_id: int
@@ -25,6 +33,7 @@ class CartItemOut(Schema):
     compare_at_price: MoneyOut | None = None
     discount_percent: int | None = None
     line_total: MoneyOut
+    delivery_window: DeliveryWindowOut | None = None
 
 
 class CartOut(Schema):
@@ -32,6 +41,7 @@ class CartOut(Schema):
     country_code: str
     items: list[CartItemOut]
     items_total: MoneyOut
+    delivery_window: DeliveryWindowOut | None = None
 
 
 class CartItemAddIn(Schema):
@@ -67,6 +77,8 @@ class CheckoutPreviewOut(Schema):
     shipping_method: str
 
     items: list[CartItemOut]
+
+    delivery_window: DeliveryWindowOut | None = None
 
     items_total: MoneyOut
     discount_total: MoneyOut
@@ -132,6 +144,7 @@ class OrderLineOut(Schema):
     discount_percent: int | None = None
     line_total: MoneyOut
     compare_at_line_total: MoneyOut | None = None
+    delivery_window: DeliveryWindowOut | None = None
 
 
 class OrderOut(Schema):
@@ -157,6 +170,8 @@ class OrderOut(Schema):
     neopay_bank_name: str = ""
 
     items: list[OrderLineOut]
+
+    delivery_window: DeliveryWindowOut | None = None
 
     items_total: MoneyOut
     discount_total: MoneyOut

@@ -34,3 +34,22 @@ class ToastUIMarkdownWidget(forms.Textarea):
         # Make sure admin picks up a reasonable width even without custom CSS.
         final_attrs.setdefault("style", "width: 100%;")
         super().__init__(attrs=final_attrs)
+
+
+class TableEditorWidget(forms.Textarea):
+    class Media:
+        css = {
+            "all": (
+                "https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css",
+            )
+        }
+        js = (
+            "https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js",
+            "catalog/admin/table_editor.js",
+        )
+
+    def __init__(self, attrs: dict | None = None):
+        final_attrs = dict(attrs or {})
+        final_attrs.setdefault("data-table-editor", "1")
+        final_attrs.setdefault("style", "width: 100%;")
+        super().__init__(attrs=final_attrs)

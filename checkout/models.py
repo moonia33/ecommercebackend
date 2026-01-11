@@ -149,6 +149,13 @@ class Order(models.Model):
     delivery_status = models.CharField(
         max_length=32, choices=DeliveryStatus.choices, default=DeliveryStatus.PENDING
     )
+
+    # Delivery ETA snapshot (order-level, aggregated)
+    delivery_min_date = models.DateField(null=True, blank=True)
+    delivery_max_date = models.DateField(null=True, blank=True)
+    delivery_eta_kind = models.CharField(max_length=20, blank=True, default="")
+    delivery_eta_rule_code = models.CharField(max_length=80, blank=True, default="")
+    delivery_eta_source = models.CharField(max_length=120, blank=True, default="")
     carrier_code = models.CharField(max_length=32, blank=True, default="")
     carrier_shipment_id = models.CharField(
         max_length=80, blank=True, default="")

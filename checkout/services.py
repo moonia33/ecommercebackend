@@ -314,6 +314,8 @@ def release_inventory_for_order(*, order_id: int) -> None:
     if not rows:
         return
 
+    now = timezone.now()
+
     inv_ids = [r.inventory_item_id for r in rows]
     inv_items = {
         i.id: i

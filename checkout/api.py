@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from datetime import date
 
 from django.conf import settings
 from django.db import models
@@ -15,6 +16,7 @@ from catalog.models import Category, InventoryItem, Variant
 from pricing.services import get_vat_rate
 from promotions.models import Coupon
 from promotions.services import apply_promo_to_unit_net
+from shipping.services import estimate_delivery_window
 
 from .models import Cart, CartItem, Order, OrderConsent, OrderDiscount, OrderFee, OrderLine, PaymentIntent
 from .schemas import (
@@ -47,6 +49,17 @@ from .services import (
 
 
 router = Router(tags=["checkout"])
+
+
+def _dw_value(dw, key: str):
+    try:
+        if dw is None:
+            return None
+        if hasattr(dw, "get"):
+            return dw.get(key)
+        return getattr(dw, key, None)
+    except Exception:
+        return None
 _auth = JWTAuth()
 
 
@@ -431,9 +444,9 @@ def _cart_item_money(
         currency="EUR", unit_net=unit_net, vat_rate=vat_rate, qty=int(item.qty))
 
     compare_at = None
-    disc_pct = _discount_percent(list_unit_net=base_unit_net, sale_unit_net=unit_net)
+    disc_pct = _discount_percent(list_unit_net=list_unit_net, sale_unit_net=unit_net)
     if disc_pct is not None:
-        base = money_from_net(currency="EUR", unit_net=base_unit_net, vat_rate=vat_rate, qty=1)
+        base = money_from_net(currency="EUR", unit_net=list_unit_net, vat_rate=vat_rate, qty=1)
         compare_at = MoneyOut(currency=base.currency, net=base.net, vat_rate=base.vat_rate, vat=base.vat, gross=base.gross)
 
     return (
@@ -451,8 +464,12 @@ def _serialize_cart_items(
     country_code: str,
     channel: str = "normal",
     customer_group_id: int | None = None,
-) -> tuple[list[CartItemOut], MoneyOut]:
+) -> tuple[list[CartItemOut], MoneyOut, dict | None]:
     out_items: list[CartItemOut] = []
+
+    agg_min = None
+    agg_max = None
+    agg_meta: dict | None = None
 
     total_net = Decimal("0.00")
     total_vat = Decimal("0.00")
@@ -489,8 +506,42 @@ def _serialize_cart_items(
                 compare_at_price=compare_at,
                 discount_percent=disc_pct,
                 line_total=line_total,
+                delivery_window=None,
             )
         )
+
+        # Per-item delivery window
+        dw = None
+        try:
+            product = v.product
+            dw = estimate_delivery_window(
+                now=timezone.now(),
+                country_code=country_code,
+                channel=channel,
+                warehouse_id=int(it.offer.warehouse_id) if getattr(it, "offer_id", None) and it.offer and it.offer.warehouse_id else None,
+                product_id=int(product.id) if product else None,
+                brand_id=int(product.brand_id) if product and product.brand_id else None,
+                category_id=int(product.category_id) if product and product.category_id else None,
+                product_group_id=int(getattr(product, "group_id", None)) if product and getattr(product, "group_id", None) else None,
+            )
+        except Exception:
+            dw = None
+
+        if dw is not None:
+            dw_out = {
+                "min_date": dw.min_date.isoformat(),
+                "max_date": dw.max_date.isoformat(),
+                "kind": dw.kind,
+                "rule_code": dw.rule_code,
+                "source": dw.source,
+            }
+            out_items[-1].delivery_window = dw_out
+
+            if agg_min is None or dw.min_date > agg_min:
+                agg_min = dw.min_date
+            if agg_max is None or dw.max_date > agg_max:
+                agg_max = dw.max_date
+            agg_meta = dw_out
 
     items_total = MoneyOut(
         currency="EUR",
@@ -499,14 +550,28 @@ def _serialize_cart_items(
         vat=total_vat,
         gross=total_gross,
     )
-    return out_items, items_total
+    agg_out = None
+    if agg_min is not None and agg_max is not None:
+        agg_out = {
+            "min_date": agg_min.isoformat(),
+            "max_date": agg_max.isoformat(),
+            "kind": (str((agg_meta or {}).get("kind") or "estimated")),
+            "rule_code": str((agg_meta or {}).get("rule_code") or ""),
+            "source": str((agg_meta or {}).get("source") or ""),
+        }
+
+    return out_items, items_total, agg_out
 
 
 @router.get("/cart", response=CartOut)
-def get_cart(request, country_code: str = "LT"):
+def get_cart(request, country_code: str = "LT", channel: str = "normal"):
     country_code = (country_code or "").strip().upper()
     if len(country_code) != 2:
         raise HttpError(400, "Invalid country_code")
+
+    channel = (channel or "normal").strip().lower()
+    if channel not in {"normal", "outlet"}:
+        raise HttpError(400, "Invalid channel")
 
     cart = _get_cart_for_request(request, create=False)
     if cart is None:
@@ -528,8 +593,17 @@ def get_cart(request, country_code: str = "LT"):
         .order_by("id")
     )
 
-    out_items, items_total = _serialize_cart_items(items=items, country_code=country_code)
-    return CartOut(country_code=country_code, items=out_items, items_total=items_total)
+    out_items, items_total, delivery_window = _serialize_cart_items(
+        items=items,
+        country_code=country_code,
+        channel=channel,
+    )
+    return CartOut(
+        country_code=country_code,
+        items=out_items,
+        items_total=items_total,
+        delivery_window=delivery_window,
+    )
 
 
 @router.post("/cart/items", response=CartOut)
@@ -559,6 +633,9 @@ def add_cart_item(request, payload: CartItemAddIn, country_code: str = "LT"):
         if not offer:
             raise HttpError(404, "Offer not found")
     else:
+        # Default behaviour: allocate qty across offers in priority order.
+        # This ensures e.g. returned stock (with special pricing) is sold first,
+        # but any remainder falls back to other warehouses/offers.
         candidates = list(
             InventoryItem.objects.filter(
                 variant_id=variant.id,
@@ -566,30 +643,87 @@ def add_cart_item(request, payload: CartItemAddIn, country_code: str = "LT"):
                 qty_on_hand__gt=models.F("qty_reserved"),
             ).order_by("id")
         )
-        if candidates:
-            candidates.sort(
-                key=lambda ii: (
-                    -int(ii.offer_priority or 0),
-                    _effective_offer_unit_net(list_unit_net=Decimal(variant.price_eur), offer=ii),
-                    int(ii.id),
-                )
+        candidates.sort(
+            key=lambda ii: (
+                -int(ii.offer_priority or 0),
+                _effective_offer_unit_net(list_unit_net=Decimal(variant.price_eur), offer=ii),
+                int(ii.id),
             )
-            offer = candidates[0]
+        )
 
     cart = _get_cart_for_request(request, create=True)
     if cart is None:
         raise HttpError(400, "Session is not available")
 
     with transaction.atomic():
+        # Variant-level cap: do not allow cart to exceed available inventory (all warehouses/offers).
+        existing_variant_qty = (
+            CartItem.objects.filter(cart=cart, variant_id=variant.id)
+            .aggregate(total=models.Sum("qty"))
+            .get("total")
+            or 0
+        )
+        variant_available = inventory_available_for_variant(variant_id=variant.id)
+        if int(existing_variant_qty) + int(qty) > int(variant_available):
+            raise HttpError(409, "Not enough stock")
+
+        # Explicit offer_id: keep existing semantics (single offer line).
         if offer is not None:
+            inv = InventoryItem.objects.select_for_update().filter(id=int(offer.id)).first()
+            if not inv:
+                raise HttpError(404, "Offer not found")
+
             item = CartItem.objects.filter(cart=cart, offer=offer).first()
+            desired_qty = int(qty) + (int(item.qty) if item else 0)
+            offer_available = max(0, int(inv.qty_on_hand) - int(inv.qty_reserved))
+            if desired_qty > offer_available:
+                raise HttpError(409, "Not enough stock")
+
+            if item:
+                item.qty = desired_qty
+                item.save(update_fields=["qty", "updated_at"])
+            else:
+                CartItem.objects.create(cart=cart, variant=variant, offer=offer, qty=int(qty))
         else:
-            item = CartItem.objects.filter(cart=cart, variant=variant, offer__isnull=True).first()
-        if item:
-            item.qty = item.qty + qty
-            item.save(update_fields=["qty", "updated_at"])
-        else:
-            CartItem.objects.create(cart=cart, variant=variant, offer=offer, qty=qty)
+            remaining = int(qty)
+
+            # Allocate across offer candidates (available only).
+            offer_ids = [int(c.id) for c in candidates]
+            existing_offer_qty = {
+                int(r["offer_id"]): int(r["total"] or 0)
+                for r in CartItem.objects.filter(cart=cart, offer_id__in=offer_ids)
+                .values("offer_id")
+                .annotate(total=models.Sum("qty"))
+            }
+
+            # Lock candidate inventory rows while allocating.
+            inv_locked = {
+                int(i.id): i
+                for i in InventoryItem.objects.select_for_update().filter(id__in=offer_ids)
+            }
+
+            for cand in candidates:
+                if remaining <= 0:
+                    break
+                inv = inv_locked.get(int(cand.id))
+                if not inv:
+                    continue
+                available = max(0, int(inv.qty_on_hand) - int(inv.qty_reserved))
+                available -= int(existing_offer_qty.get(int(cand.id), 0))
+                if available <= 0:
+                    continue
+
+                add_qty = min(available, remaining)
+                existing = CartItem.objects.filter(cart=cart, offer=cand).first()
+                if existing:
+                    existing.qty = int(existing.qty) + int(add_qty)
+                    existing.save(update_fields=["qty", "updated_at"])
+                else:
+                    CartItem.objects.create(cart=cart, variant=variant, offer=cand, qty=int(add_qty))
+                remaining -= int(add_qty)
+
+            if remaining > 0:
+                raise HttpError(409, "Not enough stock")
 
     return get_cart(request, country_code=country_code)
 
@@ -614,6 +748,27 @@ def update_cart_item(request, item_id: int, payload: CartItemUpdateIn, country_c
         if qty <= 0:
             item.delete()
         else:
+            # Variant-level cap (sum of all cart lines for this variant).
+            other_qty = (
+                CartItem.objects.filter(cart=cart, variant_id=item.variant_id)
+                .exclude(id=item.id)
+                .aggregate(total=models.Sum("qty"))
+                .get("total")
+                or 0
+            )
+            variant_available = inventory_available_for_variant(variant_id=item.variant_id)
+            if int(other_qty) + int(qty) > int(variant_available):
+                raise HttpError(409, "Not enough stock")
+
+            # Offer-level cap (if offer is selected, quantity can't exceed that offer's availability).
+            if getattr(item, "offer_id", None):
+                inv = InventoryItem.objects.select_for_update().filter(id=int(item.offer_id)).first()
+                if not inv:
+                    raise HttpError(409, "Not enough stock")
+                offer_available = max(0, int(inv.qty_on_hand) - int(inv.qty_reserved))
+                if int(qty) > int(offer_available):
+                    raise HttpError(409, "Not enough stock")
+
             item.qty = qty
             item.save(update_fields=["qty", "updated_at"])
 
@@ -774,7 +929,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
     primary = user.get_primary_customer_group() if user else None
     customer_group_id = int(primary.id) if primary else None
 
-    out_items, items_total = _serialize_cart_items(
+    out_items, items_total, delivery_window = _serialize_cart_items(
         items=items,
         country_code=country_code,
         channel=channel,
@@ -898,6 +1053,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         country_code=country_code,
         shipping_method=shipping_method,
         items=out_items,
+        delivery_window=delivery_window,
         items_total=items_total,
         discount_total=discount_total,
         shipping_total=shipping_total,
@@ -1010,6 +1166,33 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
     user_agent = (request.META.get("HTTP_USER_AGENT") or "").strip()
 
     with transaction.atomic():
+        dw = getattr(preview, "delivery_window", None)
+        dw_min = None
+        dw_max = None
+        dw_kind = ""
+        dw_rule = ""
+        dw_source = ""
+        try:
+            raw_min = _dw_value(dw, "min_date")
+            raw_max = _dw_value(dw, "max_date")
+            if isinstance(raw_min, date):
+                dw_min = raw_min
+            elif raw_min:
+                dw_min = date.fromisoformat(str(raw_min))
+            if isinstance(raw_max, date):
+                dw_max = raw_max
+            elif raw_max:
+                dw_max = date.fromisoformat(str(raw_max))
+            dw_kind = str(_dw_value(dw, "kind") or "")
+            dw_rule = str(_dw_value(dw, "rule_code") or "")
+            dw_source = str(_dw_value(dw, "source") or "")
+        except Exception:
+            dw_min = None
+            dw_max = None
+            dw_kind = ""
+            dw_rule = ""
+            dw_source = ""
+
         order = Order.objects.create(
             user=user,
             status=Order.Status.PENDING_PAYMENT,
@@ -1017,6 +1200,11 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             currency="EUR",
             country_code=country_code,
             shipping_method=shipping_method,
+            delivery_min_date=dw_min,
+            delivery_max_date=dw_max,
+            delivery_eta_kind=dw_kind,
+            delivery_eta_rule_code=dw_rule,
+            delivery_eta_source=dw_source,
             carrier_code=carrier_code,
             pickup_locker=pickup_locker,
             pickup_point_id=(
@@ -1268,6 +1456,9 @@ def list_orders(request, limit: int = 20):
             )
 
         lines_out: list[OrderLineOut] = []
+        agg_min = None
+        agg_max = None
+        agg_meta: dict | None = None
         for ln in o.lines.all():
             unit = MoneyOut(currency=o.currency, net=ln.unit_net,
                             vat_rate=ln.vat_rate, vat=ln.unit_vat, gross=ln.unit_gross)
@@ -1316,8 +1507,49 @@ def list_orders(request, limit: int = 20):
                     discount_percent=disc_pct,
                     line_total=total,
                     compare_at_line_total=compare_at_total,
+                    delivery_window=None,
                 )
             )
+
+            # Per-line delivery window
+            dw = None
+            try:
+                v = getattr(ln, "variant", None)
+                p = getattr(v, "product", None) if v is not None else None
+                line_channel = (
+                    "outlet"
+                    if getattr(ln, "offer_id", None)
+                    and ln.offer
+                    and getattr(ln.offer, "offer_visibility", None) == InventoryItem.OfferVisibility.OUTLET
+                    else "normal"
+                )
+                dw = estimate_delivery_window(
+                    now=timezone.now(),
+                    country_code=o.country_code,
+                    channel=line_channel,
+                    warehouse_id=int(ln.offer.warehouse_id) if getattr(ln, "offer_id", None) and ln.offer and ln.offer.warehouse_id else None,
+                    product_id=int(p.id) if p else None,
+                    brand_id=int(p.brand_id) if p and p.brand_id else None,
+                    category_id=int(p.category_id) if p and p.category_id else None,
+                    product_group_id=int(getattr(p, "group_id", None)) if p and getattr(p, "group_id", None) else None,
+                )
+            except Exception:
+                dw = None
+
+            if dw is not None:
+                dw_out = {
+                    "min_date": dw.min_date.isoformat(),
+                    "max_date": dw.max_date.isoformat(),
+                    "kind": dw.kind,
+                    "rule_code": dw.rule_code,
+                    "source": dw.source,
+                }
+                lines_out[-1].delivery_window = dw_out
+                if agg_min is None or dw.min_date > agg_min:
+                    agg_min = dw.min_date
+                if agg_max is None or dw.max_date > agg_max:
+                    agg_max = dw.max_date
+                agg_meta = dw_out
 
         items_total = MoneyOut(currency=o.currency, net=o.items_net, vat_rate=Decimal(
             "0"), vat=o.items_vat, gross=o.items_gross)
@@ -1337,6 +1569,25 @@ def list_orders(request, limit: int = 20):
 
         order_total = MoneyOut(currency=o.currency, net=o.total_net, vat_rate=Decimal(
             "0"), vat=o.total_vat, gross=o.total_gross)
+
+        delivery_window = None
+        if getattr(o, "delivery_min_date", None) and getattr(o, "delivery_max_date", None):
+            delivery_window = {
+                "min_date": o.delivery_min_date.isoformat(),
+                "max_date": o.delivery_max_date.isoformat(),
+                "kind": str(getattr(o, "delivery_eta_kind", "") or "estimated"),
+                "rule_code": str(getattr(o, "delivery_eta_rule_code", "") or ""),
+                "source": str(getattr(o, "delivery_eta_source", "") or ""),
+            }
+        elif agg_min is not None and agg_max is not None:
+            # Backward-compatible fallback if snapshot was not stored (older orders).
+            delivery_window = {
+                "min_date": agg_min.isoformat(),
+                "max_date": agg_max.isoformat(),
+                "kind": (str((agg_meta or {}).get("kind") or "estimated")),
+                "rule_code": str((agg_meta or {}).get("rule_code") or ""),
+                "source": str((agg_meta or {}).get("source") or ""),
+            }
 
         result.append(
             OrderOut(
@@ -1359,6 +1610,7 @@ def list_orders(request, limit: int = 20):
                 neopay_bank_bic=(pi.neopay_bank_bic if pi else ""),
                 neopay_bank_name=(pi.neopay_bank_name if pi else ""),
                 items=lines_out,
+                delivery_window=delivery_window,
                 items_total=items_total,
                 discount_total=discount_total,
                 shipping_total=shipping_total,
@@ -1386,13 +1638,55 @@ def get_order(request, order_id: int):
         raise HttpError(404, "Order not found")
 
     lines_out: list[OrderLineOut] = []
+    agg_min = None
+    agg_max = None
+    agg_meta: dict | None = None
     for ln in o.lines.all():
         unit = MoneyOut(currency=o.currency, net=ln.unit_net,
                         vat_rate=ln.vat_rate, vat=ln.unit_vat, gross=ln.unit_gross)
         total = MoneyOut(currency=o.currency, net=ln.total_net,
                          vat_rate=ln.vat_rate, vat=ln.total_vat, gross=ln.total_gross)
         lines_out.append(OrderLineOut(id=ln.id, sku=ln.sku, name=ln.name,
-                         qty=ln.qty, unit_price=unit, line_total=total))
+                         qty=ln.qty, unit_price=unit, line_total=total, delivery_window=None))
+
+        dw = None
+        try:
+            v = getattr(ln, "variant", None)
+            p = getattr(v, "product", None) if v is not None else None
+            line_channel = (
+                "outlet"
+                if getattr(ln, "offer_id", None)
+                and ln.offer
+                and getattr(ln.offer, "offer_visibility", None) == InventoryItem.OfferVisibility.OUTLET
+                else "normal"
+            )
+            dw = estimate_delivery_window(
+                now=timezone.now(),
+                country_code=o.country_code,
+                channel=line_channel,
+                warehouse_id=int(ln.offer.warehouse_id) if getattr(ln, "offer_id", None) and ln.offer and ln.offer.warehouse_id else None,
+                product_id=int(p.id) if p else None,
+                brand_id=int(p.brand_id) if p and p.brand_id else None,
+                category_id=int(p.category_id) if p and p.category_id else None,
+                product_group_id=int(getattr(p, "group_id", None)) if p and getattr(p, "group_id", None) else None,
+            )
+        except Exception:
+            dw = None
+
+        if dw is not None:
+            dw_out = {
+                "min_date": dw.min_date.isoformat(),
+                "max_date": dw.max_date.isoformat(),
+                "kind": dw.kind,
+                "rule_code": dw.rule_code,
+                "source": dw.source,
+            }
+            lines_out[-1].delivery_window = dw_out
+            if agg_min is None or dw.min_date > agg_min:
+                agg_min = dw.min_date
+            if agg_max is None or dw.max_date > agg_max:
+                agg_max = dw.max_date
+            agg_meta = dw_out
 
     items_total = MoneyOut(currency=o.currency, net=o.items_net, vat_rate=Decimal(
         "0"), vat=o.items_vat, gross=o.items_gross)
@@ -1441,6 +1735,24 @@ def get_order(request, order_id: int):
     if pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER:
         payment_instructions = _bank_transfer_instructions_for(order_id=o.id, country_code=o.country_code)
 
+    delivery_window = None
+    if getattr(o, "delivery_min_date", None) and getattr(o, "delivery_max_date", None):
+        delivery_window = {
+            "min_date": o.delivery_min_date.isoformat(),
+            "max_date": o.delivery_max_date.isoformat(),
+            "kind": str(getattr(o, "delivery_eta_kind", "") or "estimated"),
+            "rule_code": str(getattr(o, "delivery_eta_rule_code", "") or ""),
+            "source": str(getattr(o, "delivery_eta_source", "") or ""),
+        }
+    elif agg_min is not None and agg_max is not None:
+        delivery_window = {
+            "min_date": agg_min.isoformat(),
+            "max_date": agg_max.isoformat(),
+            "kind": (str((agg_meta or {}).get("kind") or "estimated")),
+            "rule_code": str((agg_meta or {}).get("rule_code") or ""),
+            "source": str((agg_meta or {}).get("source") or ""),
+        }
+
     return OrderOut(
         id=o.id,
         status=o.status,
@@ -1461,6 +1773,7 @@ def get_order(request, order_id: int):
         neopay_bank_bic=(pi.neopay_bank_bic if pi else ""),
         neopay_bank_name=(pi.neopay_bank_name if pi else ""),
         items=lines_out,
+        delivery_window=delivery_window,
         items_total=items_total,
         discount_total=discount_total,
         shipping_total=shipping_total,

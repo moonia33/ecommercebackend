@@ -5,6 +5,22 @@ from decimal import Decimal
 from django.db import models
 
 
+class Holiday(models.Model):
+    date = models.DateField()
+    country_code = models.CharField(max_length=2, default="LT")
+    name = models.CharField(max_length=255, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["country_code", "date"]
+        constraints = [
+            models.UniqueConstraint(fields=["country_code", "date"], name="uniq_holiday_country_date"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.country_code} {self.date}"
+
+
 class ShippingMethod(models.Model):
     code = models.SlugField(max_length=50, unique=True)
     name = models.CharField(max_length=200)
@@ -52,3 +68,84 @@ class ShippingRate(models.Model):
 
     def __str__(self) -> str:
         return f"{self.method.code} {self.country_code}: {self.net_eur} EUR net"
+
+
+class DeliveryRule(models.Model):
+    class Kind(models.TextChoices):
+        LEAD_TIME = "lead_time", "Lead time"
+        CYCLE = "cycle", "Cycle"
+
+    code = models.SlugField(max_length=100, unique=True)
+    name = models.CharField(max_length=255, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    priority = models.IntegerField(default=0)
+
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.LEAD_TIME)
+
+    valid_from = models.DateField(null=True, blank=True)
+    valid_to = models.DateField(null=True, blank=True)
+    timezone = models.CharField(max_length=64, default="Europe/Vilnius")
+
+    # Targeting
+    channel = models.CharField(max_length=20, blank=True, default="")
+    warehouse = models.ForeignKey(
+        "catalog.Warehouse",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="delivery_rules",
+    )
+    brand = models.ForeignKey(
+        "catalog.Brand",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="delivery_rules",
+    )
+    category = models.ForeignKey(
+        "catalog.Category",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="delivery_rules",
+    )
+    product_group = models.ForeignKey(
+        "catalog.ProductGroup",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="delivery_rules",
+    )
+    product = models.ForeignKey(
+        "catalog.Product",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="delivery_rules",
+    )
+
+    # Variant A: lead-time
+    processing_business_days_min = models.PositiveSmallIntegerField(default=0)
+    processing_business_days_max = models.PositiveSmallIntegerField(default=0)
+    shipping_business_days_min = models.PositiveSmallIntegerField(default=0)
+    shipping_business_days_max = models.PositiveSmallIntegerField(default=0)
+    cutoff_time = models.TimeField(null=True, blank=True)
+
+    # Variant B2: cycle-based dropship
+    order_window_start_weekday = models.PositiveSmallIntegerField(null=True, blank=True)
+    order_window_start_time = models.TimeField(null=True, blank=True)
+    order_window_end_weekday = models.PositiveSmallIntegerField(null=True, blank=True)
+    order_window_end_time = models.TimeField(null=True, blank=True)
+
+    supplier_inbound_business_days_min = models.PositiveSmallIntegerField(default=0)
+    supplier_inbound_business_days_max = models.PositiveSmallIntegerField(default=0)
+    warehouse_pack_business_days_min = models.PositiveSmallIntegerField(default=0)
+    warehouse_pack_business_days_max = models.PositiveSmallIntegerField(default=0)
+    carrier_business_days_min = models.PositiveSmallIntegerField(default=0)
+    carrier_business_days_max = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-priority", "code"]
+
+    def __str__(self) -> str:
+        return self.code

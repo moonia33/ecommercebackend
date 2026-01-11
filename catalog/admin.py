@@ -8,11 +8,14 @@ from django.db.models.functions import Coalesce
 from django.forms.models import BaseInlineFormSet
 
 
-from .widgets import ToastUIMarkdownWidget
+from .widgets import TableEditorWidget, ToastUIMarkdownWidget
 
 from .models import (
     Brand,
     Category,
+    ContentBlock,
+    ContentBlockTranslation,
+    ContentRule,
     Feature,
     FeatureValue,
     OptionType,
@@ -567,3 +570,86 @@ class BackInStockSubscriptionAdmin(admin.ModelAdmin):
     list_filter = ("channel", "is_active")
     search_fields = ("email", "product__sku", "product__name", "variant__sku")
     autocomplete_fields = ("product", "variant")
+
+
+class ContentBlockTranslationInline(admin.TabularInline):
+    model = ContentBlockTranslation
+    extra = 0
+
+    class Form(forms.ModelForm):
+        markdown = forms.CharField(
+            required=False,
+            widget=ToastUIMarkdownWidget(mode="wysiwyg", height="360px"),
+        )
+
+        payload = forms.JSONField(
+            required=False,
+            widget=TableEditorWidget(),
+        )
+
+        class Meta:
+            model = ContentBlockTranslation
+            fields = "__all__"
+
+    form = Form
+
+
+@admin.register(ContentBlock)
+class ContentBlockAdmin(admin.ModelAdmin):
+    list_display = ("key", "type", "placement", "priority", "is_active", "valid_from", "valid_to")
+    list_filter = ("is_active", "type", "placement")
+    search_fields = ("key",)
+
+    inlines = (ContentBlockTranslationInline,)
+
+    fieldsets = (
+        (None, {"fields": ("key", "type", "placement", "is_active", "priority")}),
+        ("Galiojimas", {"fields": ("valid_from", "valid_to")}),
+    )
+
+
+@admin.register(ContentRule)
+class ContentRuleAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "content_block",
+        "priority",
+        "is_active",
+        "is_exclusive",
+        "channel",
+        "brand",
+        "category",
+        "include_descendants",
+        "product_group",
+        "product",
+        "valid_from",
+        "valid_to",
+    )
+    list_filter = ("is_active", "is_exclusive", "channel", "brand")
+    search_fields = ("content_block__key",)
+    autocomplete_fields = ("content_block", "brand", "category", "product_group", "product")
+
+
+@admin.register(ContentBlockTranslation)
+class ContentBlockTranslationAdmin(admin.ModelAdmin):
+    list_display = ("content_block", "language_code", "title")
+    list_filter = ("language_code",)
+    search_fields = ("content_block__key", "title")
+    autocomplete_fields = ("content_block",)
+
+    class Form(forms.ModelForm):
+        markdown = forms.CharField(
+            required=False,
+            widget=ToastUIMarkdownWidget(mode="wysiwyg", height="520px"),
+        )
+        payload = forms.JSONField(
+            required=False,
+            widget=TableEditorWidget(),
+            help_text="Naudojama tik kai ContentBlock.type=table (redaguokite kaip lentelę).",
+        )
+
+        class Meta:
+            model = ContentBlockTranslation
+            fields = "__all__"
+
+    form = Form

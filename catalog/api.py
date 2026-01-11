@@ -6,12 +6,15 @@ from django.db.models import Case, Count, DecimalField, ExpressionWrapper, F, In
 from django.db.models.functions import Coalesce
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
+from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
 from pricing.services import compute_vat, get_vat_rate
+from shipping.services import estimate_delivery_window
 
+from .content_blocks import get_content_blocks_for_product
 from .api_schemas import (
     BackInStockSubscribeIn,
     BackInStockSubscribeOut,
@@ -444,11 +447,19 @@ def products(
 
     out: list[ProductListOut] = []
     for p in qs:
+        list_net = Decimal(p._min_variant_price if getattr(p, "_min_variant_price", None) is not None else 0)
         if getattr(p, "_min_offer_price", None) is not None:
             base_net = Decimal(p._min_offer_price)
         else:
-            base_net = Decimal(p._min_variant_price if p._min_variant_price is not None else 0)
+            base_net = Decimal(list_net)
         rate = vat_rate_for(p)
+
+        # Listing does not know the concrete selected offer row (and its allow_additional_promotions flag).
+        # To keep behaviour consistent with product detail and cart, we do NOT stack promo on top of an
+        # already discounted offer unless explicitly allowed. Here we approximate this by disabling stacking
+        # when the representative offer price is lower than the representative list price.
+        is_discounted_offer = bool(base_net and list_net and base_net < list_net)
+        allow_additional_promotions = not is_discounted_offer
 
         sale_net, _rule = apply_promo_to_unit_net(
             base_unit_net=base_net,
@@ -458,14 +469,14 @@ def products(
             product_id=p.id,
             variant_id=None,
             customer_group_id=None,
-            allow_additional_promotions=True,
-            is_discounted_offer=False,
+            allow_additional_promotions=allow_additional_promotions,
+            is_discounted_offer=is_discounted_offer,
         )
 
         compare_at_price = None
-        discount_percent = _discount_percent(list_unit_net=base_net, sale_unit_net=sale_net)
+        discount_percent = _discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
         if discount_percent is not None:
-            compare_at_price = _money_out(currency="EUR", unit_net=base_net, vat_rate=rate)
+            compare_at_price = _money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
 
         imgs = list(p.images.all())
         imgs.sort(key=lambda i: (i.sort_order, i.id))
@@ -864,7 +875,13 @@ def back_in_stock_subscribe(request, payload: BackInStockSubscribeIn):
 
 
 @router.get("/products/{slug}", response=ProductDetailOut)
-def product_detail(request, slug: str, country_code: str = "LT", channel: str = "normal"):
+def product_detail(
+    request,
+    slug: str,
+    country_code: str = "LT",
+    channel: str = "normal",
+    language_code: str | None = None,
+):
     country_code = (country_code or "").strip().upper()
     if len(country_code) != 2:
         raise HttpError(400, "Invalid country_code")
@@ -906,6 +923,8 @@ def product_detail(request, slug: str, country_code: str = "LT", channel: str = 
     variants_qs.sort(key=lambda v: (v.sku, v.id))
 
     variants: list[VariantOut] = []
+    delivery_window_out = None
+    best_delivery_min = None
     for v in variants_qs:
         inv_all = list(v.inventory_items.all())
 
@@ -929,6 +948,28 @@ def product_detail(request, slug: str, country_code: str = "LT", channel: str = 
                 )
             )
             best_offer = inv_available[0]
+
+        if best_offer and product is not None:
+            dw = estimate_delivery_window(
+                now=timezone.now(),
+                country_code=country_code,
+                channel=channel,
+                warehouse_id=int(best_offer.warehouse_id) if best_offer.warehouse_id else None,
+                product_id=int(product.id),
+                brand_id=int(product.brand_id) if product.brand_id else None,
+                category_id=int(product.category_id) if product.category_id else None,
+                product_group_id=int(product.group_id) if getattr(product, "group_id", None) else None,
+            )
+            if dw is not None:
+                if best_delivery_min is None or dw.min_date < best_delivery_min:
+                    best_delivery_min = dw.min_date
+                    delivery_window_out = {
+                        "min_date": dw.min_date.isoformat(),
+                        "max_date": dw.max_date.isoformat(),
+                        "kind": dw.kind,
+                        "rule_code": dw.rule_code,
+                        "source": dw.source,
+                    }
 
         list_unit_net = Decimal(v.price_eur)
         base_unit_net = (
@@ -958,8 +999,8 @@ def product_detail(request, slug: str, country_code: str = "LT", channel: str = 
             is_discounted_offer=is_discounted_offer,
         )
 
-        compare_base = base_unit_net
-        disc_pct = _discount_percent(list_unit_net=compare_base, sale_unit_net=sale_unit_net)
+        compare_base = list_unit_net
+        disc_pct = _discount_percent(list_unit_net=list_unit_net, sale_unit_net=sale_unit_net)
 
         options = list(v.option_values.select_related(
             "option_type", "option_value").all())
@@ -1018,6 +1059,17 @@ def product_detail(request, slug: str, country_code: str = "LT", channel: str = 
         for r in feature_rows
     ]
 
+    content_blocks = get_content_blocks_for_product(
+        product_id=int(product.id),
+        placement="product_detail",
+        channel=channel,
+        brand_id=int(product.brand_id) if product.brand_id else None,
+        category_id=int(product.category_id) if product.category_id else None,
+        product_group_id=int(product.group_id) if getattr(product, "group_id", None) else None,
+        language_code=language_code,
+        now=timezone.now().date(),
+    )
+
     return {
         "id": product.id,
         "sku": product.sku,
@@ -1054,5 +1106,16 @@ def product_detail(request, slug: str, country_code: str = "LT", channel: str = 
             if img.url
         ],
         "features": features_out,
+        "delivery_window": delivery_window_out,
+        "content_blocks": [
+            {
+                "key": b.key,
+                "title": b.title,
+                "placement": b.placement,
+                "type": b.type,
+                "payload": b.payload,
+            }
+            for b in content_blocks
+        ],
         "variants": variants,
     }

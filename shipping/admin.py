@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.contrib import admin
 
-from .models import ShippingMethod, ShippingRate
+from .models import DeliveryRule, Holiday, ShippingMethod, ShippingRate
 
 
 class ShippingRateInline(admin.TabularInline):
@@ -32,3 +32,20 @@ class ShippingRateAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "country_code", "method")
     search_fields = ("method__code", "method__name", "country_code")
     autocomplete_fields = ("method",)
+
+
+@admin.register(Holiday)
+class HolidayAdmin(admin.ModelAdmin):
+    list_display = ("country_code", "date", "name", "is_active")
+    list_filter = ("country_code", "is_active")
+    search_fields = ("name",)
+    ordering = ("country_code", "date")
+
+
+@admin.register(DeliveryRule)
+class DeliveryRuleAdmin(admin.ModelAdmin):
+    list_display = ("code", "kind", "priority", "channel", "warehouse", "is_active")
+    list_filter = ("is_active", "kind", "channel")
+    search_fields = ("code", "name")
+    autocomplete_fields = ("warehouse", "brand", "category", "product_group", "product")
+    ordering = ("-priority", "code")

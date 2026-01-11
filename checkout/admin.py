@@ -132,6 +132,7 @@ class OrderAdmin(admin.ModelAdmin):
         "user",
         "status",
         "delivery_status",
+        "delivery_eta",
         "fulfillment_badge",
         "shipping_method",
         "carrier_code",
@@ -154,6 +155,11 @@ class OrderAdmin(admin.ModelAdmin):
         "carrier_shipment_id",
         "shipping_label_generated_at",
         "shipping_label_pdf",
+        "delivery_min_date",
+        "delivery_max_date",
+        "delivery_eta_kind",
+        "delivery_eta_rule_code",
+        "delivery_eta_source",
         "items_net",
         "items_vat",
         "items_gross",
@@ -173,6 +179,11 @@ class OrderAdmin(admin.ModelAdmin):
         "supplier_reserved_at",
         "supplier_reference",
         "supplier_notes",
+        "delivery_min_date",
+        "delivery_max_date",
+        "delivery_eta_kind",
+        "delivery_eta_rule_code",
+        "delivery_eta_source",
         "carrier_code",
         "carrier_shipment_id",
         "tracking_number",
@@ -311,9 +322,86 @@ class OrderAdmin(admin.ModelAdmin):
         "mark_supplier_reservation_reserved",
         "mark_supplier_reservation_failed",
         "mark_supplier_reservation_cancelled",
+        "backfill_delivery_eta_snapshot",
         "generate_dpd_labels_a6",
         "generate_unisend_labels_10x15",
     )
+
+    @admin.action(description="Backfill: įrašyti Delivery ETA snapshot (agreguotas)")
+    def backfill_delivery_eta_snapshot(self, request: HttpRequest, queryset):
+        from catalog.models import InventoryItem
+        from shipping.services import estimate_delivery_window
+
+        updated = 0
+        orders = queryset.prefetch_related(
+            "lines",
+            "lines__variant",
+            "lines__variant__product",
+            "lines__offer",
+        )
+        for o in orders:
+            agg_min = None
+            agg_max = None
+            agg_meta = None
+            for ln in o.lines.all():
+                dw = None
+                try:
+                    v = getattr(ln, "variant", None)
+                    p = getattr(v, "product", None) if v is not None else None
+                    line_channel = (
+                        "outlet"
+                        if getattr(ln, "offer_id", None)
+                        and ln.offer
+                        and getattr(ln.offer, "offer_visibility", None) == InventoryItem.OfferVisibility.OUTLET
+                        else "normal"
+                    )
+                    dw = estimate_delivery_window(
+                        now=timezone.now(),
+                        country_code=o.country_code,
+                        channel=line_channel,
+                        warehouse_id=int(ln.offer.warehouse_id)
+                        if getattr(ln, "offer_id", None) and ln.offer and ln.offer.warehouse_id
+                        else None,
+                        product_id=int(p.id) if p else None,
+                        brand_id=int(p.brand_id) if p and p.brand_id else None,
+                        category_id=int(p.category_id) if p and p.category_id else None,
+                        product_group_id=int(getattr(p, "group_id", None))
+                        if p and getattr(p, "group_id", None)
+                        else None,
+                    )
+                except Exception:
+                    dw = None
+
+                if dw is None:
+                    continue
+
+                if agg_min is None or dw.min_date > agg_min:
+                    agg_min = dw.min_date
+                if agg_max is None or dw.max_date > agg_max:
+                    agg_max = dw.max_date
+                agg_meta = dw
+
+            if agg_min is None or agg_max is None:
+                continue
+
+            o.delivery_min_date = agg_min
+            o.delivery_max_date = agg_max
+            o.delivery_eta_kind = str(getattr(agg_meta, "kind", "") or "") if agg_meta else ""
+            o.delivery_eta_rule_code = str(getattr(agg_meta, "rule_code", "") or "") if agg_meta else ""
+            o.delivery_eta_source = str(getattr(agg_meta, "source", "") or "") if agg_meta else ""
+            o.save(
+                update_fields=[
+                    "delivery_min_date",
+                    "delivery_max_date",
+                    "delivery_eta_kind",
+                    "delivery_eta_rule_code",
+                    "delivery_eta_source",
+                    "updated_at",
+                ]
+            )
+            updated += 1
+
+        self.message_user(request, f"Atnaujinta užsakymų: {updated}")
 
     def save_model(self, request: HttpRequest, obj: Order, form, change: bool) -> None:
         from promotions.services import redeem_coupon_for_paid_order, release_coupon_for_order
@@ -356,6 +444,16 @@ class OrderAdmin(admin.ModelAdmin):
         if mode == Order.FulfillmentMode.MIXED:
             return f"MIXED / {st or '-'}"
         return f"{mode} / {st}"
+
+    @admin.display(description="ETA")
+    def delivery_eta(self, obj: Order) -> str:
+        mn = getattr(obj, "delivery_min_date", None)
+        mx = getattr(obj, "delivery_max_date", None)
+        if not mn or not mx:
+            return ""
+        if mn == mx:
+            return mn.isoformat()
+        return f"{mn.isoformat()}–{mx.isoformat()}"
 
     def _log_event(self, request: HttpRequest, *, order: Order, name: str, payload: dict):
         try:
