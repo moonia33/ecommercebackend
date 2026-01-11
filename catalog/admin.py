@@ -572,9 +572,15 @@ class BackInStockSubscriptionAdmin(admin.ModelAdmin):
     autocomplete_fields = ("product", "variant")
 
 
-class ContentBlockTranslationInline(admin.TabularInline):
+class ContentBlockTranslationInline(admin.StackedInline):
     model = ContentBlockTranslation
     extra = 0
+    show_change_link = True
+
+    fieldsets = (
+        (None, {"fields": ("language_code", "title")}),
+        ("Turinys", {"fields": ("markdown", "payload")}),
+    )
 
     class Form(forms.ModelForm):
         markdown = forms.CharField(

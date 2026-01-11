@@ -136,6 +136,8 @@ INSTALLED_APPS = [
     "accounts",
     "notifications",
     "catalog.apps.CatalogConfig",
+    "cms.apps.CmsConfig",
+    "homebuilder.apps.HomebuilderConfig",
     "zaliuojibanga",
     "shipping",
     "payments",
