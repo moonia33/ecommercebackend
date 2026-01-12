@@ -1,0 +1,170 @@
+Remarketing Developer Javascript API
+Home » Remarketing » Remarketing Developer Javascript API
+Posted by Admin
+
+
+Our API makes it easy for developers to simply and smoothly integrate with other apps.
+
+Loading Newsman Remarketing
+<!-- Newsman Remarketing -->
+<script type="text/javascript">
+var _nzm = _nzm || [];
+var _nzm_config = _nzm_config || [];
+(function() {
+    if (!_nzm.track) {
+        var a, methods, i;
+        a = function(f) {
+            return function() {
+                _nzm.push([f].concat(Array.prototype.slice.call(arguments, 0)));
+            }
+        };
+        methods = ["identify", "track", "run"];
+        for(i = 0; i < methods.length; i++) {
+            _nzm[methods[i]] = a(methods[i])
+        };
+        s = document.getElementsByTagName("script")[0];
+        var script_dom = document.createElement("script");
+        script_dom.async = true;
+        script_dom.id    = "nzm-tracker";
+        script_dom.setAttribute("data-site-id", "10200-1-000000000000000000000000-5b1fd5a903da5b81321b78e55507c78d");
+        script_dom.src = "https://retargeting.newsmanapp.com/js/retargeting/track.js";
+        s.parentNode.insertBefore(script_dom, s);
+    }
+})();
+</script>
+<!-- End Newsman Remarketing -->
+Replace “10200-1-000000000000000000000000-5b1fd5a903da5b81321b78e55507c78d” with your id from “Settings” >> “Remarketing” Newsman.app page.
+
+Disabling tracking for a website:
+_nzm_config['no_tracking'] = 1;
+Disable tracking for user/browser:
+_nzm.setTracking(0);
+Sets cookie of the form _nzm_tr_10100-54 with the value 0. It can be called in the logic of a “cookie banner”.
+
+Enable tracking for user/browser:
+_nzm.setTracking(1);
+Delete cookies of the form _nzm_tr_93783-8273. It can be called in the logic of a “cookie banner”.
+
+Identifying a user/customer
+_nzm.identify( { email: 'ion@company.com', first_name: 'John', last_name: 'Doe' } );
+or
+
+_nzm.identify( { email: 'ion@company.com'} );
+This usually happens after a user signs in your app.
+
+Checking if a user/customer is identified
+_nzm.get_tracking_id();
+Setting a custom variable for a Newsman Subscriber
+_nzm.run( 'user:setProp', { 'skill': 3000 } );
+Tracking a custom event, with/without callback
+function my_callback(param) {
+    console.log("This is a callback");
+}
+_nzm.track('good_luck', { luck_level: 10 }, 'my_callback');
+_nzm.track('good_luck', { luck_level: 10 });
+Opening / closing subscription modal form (if there are any)
+_nzm.run('modal:show');
+_nzm.run('modal:hide');
+Events
+on:scroll
+on:scroll.up
+on:scroll.down
+on:scroll.toTop
+on:scroll.toBottom
+on:scroll.to25
+on:scroll.to50
+on:scroll.to75
+on:unload
+on:seconds-passed
+
+_nzm.run('on:scroll.to50', function () { console.log('Scrolled to mid page') } );
+_nzm.run('on:seconds-passed', function () { console.log('It passed 5 seconds after page loaded') }, 5);
+Ecommerce Module
+The ecommerce module is highly similar to Google’s Enhanced Ecommerce . Thus, the fastest way to integrate Newsman Remarketing for ecommerce with your app is to clone the Google Enhanced Ecommerce integration if you already have one, modify the loading script and replace “ga(” with “_nzm.run(” within the code.
+
+The following sections will show you how to implement and measure the following activities:
+
+Loading Ecommerce Module
+Currency
+Product Impressions
+Product Detail Impressions
+Add to Cart
+Remove from Cart
+Purchases
+Loading Ecommerce Module
+_nzm.run( 'require', 'ec' );
+Specifying Local Currencies
+_nzm.run( 'set', 'currencyCode', 'RON );
+Measuring Product Impressions
+_nzm.run( 'require', 'ec' );
+_nzm.run( 'set', 'currencyCode', 'EUR' );
+_nzm.run( 'ec:addImpression', {
+  'id': '266',
+  'name': 'Spencer Cadet',
+  'category': 'Climbing Equipment',
+  'list': 'Product List',
+  'position': '1'
+} );
+_nzm.run( 'ec:addImpression', {
+  'id': '259',
+  'name': 'E.C.O. Yoga Mat',
+  'category': 'Climbing Equipment',
+  'list': 'Product List',
+  'position': '2'
+} );
+_nzm.run( 'send', 'pageview' );
+Measuring Views of Product Details
+_nzm.run( 'require', 'ec');
+_nzm.run( 'set', 'currencyCode', 'USD' );
+_nzm.run( 'ec:addProduct', {
+  'id': 'S-003',
+  'name': 'Elkton Jacket',
+  'category': 'Longsleeves/Men\'s Clothing/Other/Pants/T-shirts',
+  'price': '249',
+} );
+_nzm.run( 'ec:setAction', 'detail' );
+_nzm.run( 'send', 'pageview' );
+Adding a Product to a Shopping Cart
+_nzm.run( 'require', 'ec');
+_nzm.run( 'set', 'currencyCode', 'RON' );
+_nzm.run( 'ec:addProduct', {
+  'id': '035pp',
+  'name': 'Pantalonis Trouser',
+  'price': '44.11',
+  'brand': 'Pantalonis',
+  'category': 'Trousers',
+  'quantity': 1
+} );
+_nzm.run( 'ec:setAction', 'add' );
+_nzm.run( 'send', 'event', 'UX', 'click', 'add to cart' );
+Removing a Product from a Shopping Cart
+_nzm.run( 'require', 'ec');
+_nzm.run( 'set', 'currencyCode', 'RON' );
+_nzm.run( 'ec:addProduct', {
+  'id': '035pp',
+  'quantity': '1',
+} );
+_nzm.run( 'ec:setAction', 'remove' );
+_nzm.run( 'send', 'event', 'UX', 'click', 'remove from cart' );
+Measuring Purchases
+_nzm.run( 'require', 'ec');
+_nzm.run( 'set', 'currencyCode', 'RON' );
+_nzm.run( 'ec:addProduct', {
+  'id': 'T-03',
+  'name': 'Spencer Cadet',
+  'category': 'Climbing Equipment',
+  'price': '84.00',
+  'quantity': '1'
+} );
+_nzm.run( 'ec:setAction', 'purchase', {
+  'id': '758',
+  'affiliation': 'RetroMod',
+  'revenue': '84.00',
+  'tax': '0',
+  'shipping': '4.00'
+} );
+_nzm.run('send', 'pageview');
+Worth looking at:
+
+https://developers.google.com/analytics/devguides/collection/protocol/v1/devguide
+https://developers.google.com/analytics/devguides/collection/protocol/v1/parameters

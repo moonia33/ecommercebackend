@@ -18,6 +18,8 @@ from promotions.models import Coupon
 from promotions.services import apply_promo_to_unit_net
 from shipping.services import estimate_delivery_window
 
+from analytics.services import track_event
+
 from .models import Cart, CartItem, Order, OrderConsent, OrderDiscount, OrderFee, OrderLine, PaymentIntent
 from .schemas import (
     CartItemAddIn,
@@ -162,31 +164,26 @@ def _require_user(request):
     return user
 
 
-def _user_from_bearer_if_present(request):
-    # Cart endpoints must work without auth; but if Bearer token is present, use it.
+def _user_from_cookie_if_present(request):
+    # Cart endpoints must work without auth; but if access cookie is present, use it.
+
+    # Allow normal Django session auth if present
     try:
-        auth = request.headers.get("Authorization") or ""
+        u = getattr(request, "user", None)
+        if u is not None and getattr(u, "is_authenticated", False):
+            return u
     except Exception:
-        auth = ""
-
-    auth = (auth or "").strip()
-    if not auth.lower().startswith("bearer "):
-        # Also allow normal Django session auth if present
-        try:
-            u = getattr(request, "user", None)
-            if u is not None and getattr(u, "is_authenticated", False):
-                return u
-        except Exception:
-            return None
-        return None
-
-    token = auth.split(" ", 1)[1].strip()
-    if not token:
-        return None
+        pass
 
     try:
         from accounts.jwt_utils import decode_token
         from django.contrib.auth import get_user_model
+        from django.conf import settings
+
+        cookie_name = getattr(settings, "AUTH_COOKIE_ACCESS_NAME", "access_token")
+        token = (request.COOKIES.get(cookie_name) or "").strip()
+        if not token:
+            return None
 
         payload = decode_token(token)
         if payload.get("type") != "access":
@@ -201,7 +198,7 @@ def _user_from_bearer_if_present(request):
 
 
 def _get_cart_for_request(request, *, create: bool) -> Cart | None:
-    user = _user_from_bearer_if_present(request)
+    user = _user_from_cookie_if_present(request)
 
     session_key = ""
     if hasattr(request, "session"):
@@ -593,6 +590,21 @@ def get_cart(request, country_code: str = "LT", channel: str = "normal"):
         .order_by("id")
     )
 
+    if items:
+        try:
+            track_event(
+                request=request,
+                name="view_cart",
+                object_type="cart",
+                object_id=int(cart.id),
+                payload={"items_count": len(items)},
+                country_code=country_code,
+                channel=channel,
+                language_code="",
+            )
+        except Exception:
+            pass
+
     out_items, items_total, delivery_window = _serialize_cart_items(
         items=items,
         country_code=country_code,
@@ -725,6 +737,24 @@ def add_cart_item(request, payload: CartItemAddIn, country_code: str = "LT"):
             if remaining > 0:
                 raise HttpError(409, "Not enough stock")
 
+    try:
+        track_event(
+            request=request,
+            name="add_to_cart",
+            object_type="variant",
+            object_id=int(variant.id),
+            payload={
+                "qty": int(qty),
+                "product_id": int(getattr(getattr(variant, "product", None), "id", 0) or 0),
+                "product_slug": str(getattr(getattr(variant, "product", None), "slug", "") or ""),
+                "sku": str(getattr(variant, "sku", "") or ""),
+            },
+            country_code=country_code,
+            channel="normal",
+        )
+    except Exception:
+        pass
+
     return get_cart(request, country_code=country_code)
 
 
@@ -743,6 +773,8 @@ def update_cart_item(request, item_id: int, payload: CartItemUpdateIn, country_c
     )
     if not item:
         raise HttpError(404, "Cart item not found")
+
+    prev_qty = int(getattr(item, "qty", 0) or 0)
 
     with transaction.atomic():
         if qty <= 0:
@@ -772,6 +804,27 @@ def update_cart_item(request, item_id: int, payload: CartItemUpdateIn, country_c
             item.qty = qty
             item.save(update_fields=["qty", "updated_at"])
 
+    try:
+        name = "add_to_cart" if qty > prev_qty else "remove_from_cart"
+        delta = abs(int(qty) - int(prev_qty))
+        if delta > 0:
+            track_event(
+                request=request,
+                name=name,
+                object_type="variant",
+                object_id=int(item.variant_id),
+                payload={
+                    "qty": int(delta),
+                    "product_id": int(getattr(getattr(item.variant, "product", None), "id", 0) or 0),
+                    "product_slug": str(getattr(getattr(item.variant, "product", None), "slug", "") or ""),
+                    "sku": str(getattr(item.variant, "sku", "") or ""),
+                },
+                country_code=country_code,
+                channel="normal",
+            )
+    except Exception:
+        pass
+
     return get_cart(request, country_code=country_code)
 
 
@@ -781,9 +834,36 @@ def delete_cart_item(request, item_id: int, country_code: str = "LT"):
     if cart is None:
         raise HttpError(404, "Cart item not found")
 
-    deleted = CartItem.objects.filter(cart=cart, id=item_id).delete()[0]
+    item = (
+        CartItem.objects.select_related("variant", "variant__product")
+        .filter(cart=cart, id=item_id)
+        .first()
+    )
+    if not item:
+        raise HttpError(404, "Cart item not found")
+
+    prev_qty = int(getattr(item, "qty", 0) or 0)
+    deleted = item.delete()[0]
     if not deleted:
         raise HttpError(404, "Cart item not found")
+
+    try:
+        track_event(
+            request=request,
+            name="remove_from_cart",
+            object_type="variant",
+            object_id=int(item.variant_id),
+            payload={
+                "qty": int(prev_qty),
+                "product_id": int(getattr(getattr(item.variant, "product", None), "id", 0) or 0),
+                "product_slug": str(getattr(getattr(item.variant, "product", None), "slug", "") or ""),
+                "sku": str(getattr(item.variant, "sku", "") or ""),
+            },
+            country_code=country_code,
+            channel="normal",
+        )
+    except Exception:
+        pass
 
     return get_cart(request, country_code=country_code)
 
@@ -887,6 +967,20 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
     )
     if not items:
         raise HttpError(400, "Cart is empty")
+
+    try:
+        track_event(
+            request=request,
+            name="begin_checkout",
+            object_type="cart",
+            object_id=int(cart.id),
+            payload={"items_count": len(items)},
+            country_code=country_code,
+            channel=channel,
+            language_code="",
+        )
+    except Exception:
+        pass
 
     coupon = None
     if coupon_code:
@@ -1400,6 +1494,25 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         bank_transfer_instructions = _bank_transfer_instructions_for(
             order_id=order.id, country_code=order.country_code
         )
+
+    try:
+        track_event(
+            request=request,
+            name="purchase",
+            object_type="order",
+            object_id=int(order.id),
+            payload={
+                "currency": str(order.currency or "EUR"),
+                "value": str(order.total_gross),
+                "country_code": str(order.country_code or ""),
+                "shipping_method": str(order.shipping_method or ""),
+            },
+            country_code=str(order.country_code or ""),
+            channel=str(channel or ""),
+            outbox_providers=["newsman"],
+        )
+    except Exception:
+        pass
 
     return CheckoutConfirmOut(
         order_id=order.id,

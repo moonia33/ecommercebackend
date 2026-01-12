@@ -16,7 +16,7 @@ class LoginIn(Schema):
 
 
 class RefreshIn(Schema):
-    refresh: str
+    refresh: str | None = None
 
 
 class OTPRequestIn(Schema):
@@ -35,6 +35,10 @@ class TokenOut(Schema):
 
 class AccessOut(Schema):
     access: str
+
+
+class StatusOut(Schema):
+    status: str
 
 
 class CustomerGroupOut(Schema):

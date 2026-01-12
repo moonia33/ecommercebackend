@@ -8,6 +8,7 @@ from django.db import IntegrityError
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.utils import timezone
+from django.http import JsonResponse
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -17,7 +18,6 @@ from .auth import JWTAuth
 from .jwt_utils import issue_access_token, issue_refresh_token, decode_token
 from .models import ConsentType, EmailOTP, UserAddress, UserConsent
 from .schemas import (
-    AccessOut,
     AddressCreateIn,
     AddressOut,
     AddressUpdateIn,
@@ -29,12 +29,69 @@ from .schemas import (
     OTPVerifyIn,
     RefreshIn,
     RegisterIn,
-    TokenOut,
+    StatusOut,
 )
 
 router = Router(tags=["auth"])
 User = get_user_model()
 auth = JWTAuth()
+
+
+def _cookie_samesite() -> str:
+    v = (getattr(settings, "AUTH_COOKIE_SAMESITE", "lax") or "lax").lower()
+    if v == "strict":
+        return "Strict"
+    if v == "none":
+        return "None"
+    return "Lax"
+
+
+def _cookie_secure(request) -> bool:
+    # Prefer explicit override via settings. Otherwise, use actual request scheme.
+    explicit = getattr(settings, "AUTH_COOKIE_SECURE", None)
+    if explicit is True or explicit is False:
+        return bool(explicit)
+    try:
+        return bool(request.is_secure())
+    except Exception:
+        return False
+
+
+def _cookie_domain():
+    return getattr(settings, "AUTH_COOKIE_DOMAIN", None) or None
+
+
+def _set_auth_cookies(request, response: JsonResponse, *, access: str, refresh: str | None):
+    access_name = getattr(settings, "AUTH_COOKIE_ACCESS_NAME", "access_token")
+    refresh_name = getattr(settings, "AUTH_COOKIE_REFRESH_NAME", "refresh_token")
+
+    response.set_cookie(
+        access_name,
+        access,
+        httponly=True,
+        secure=_cookie_secure(request),
+        samesite=_cookie_samesite(),
+        domain=_cookie_domain(),
+        path="/",
+    )
+    if refresh is not None:
+        response.set_cookie(
+            refresh_name,
+            refresh,
+            httponly=True,
+            secure=_cookie_secure(request),
+            samesite=_cookie_samesite(),
+            domain=_cookie_domain(),
+            path="/",
+        )
+
+
+def _clear_auth_cookies(response: JsonResponse):
+    access_name = getattr(settings, "AUTH_COOKIE_ACCESS_NAME", "access_token")
+    refresh_name = getattr(settings, "AUTH_COOKIE_REFRESH_NAME", "refresh_token")
+
+    response.delete_cookie(access_name, path="/", domain=_cookie_domain())
+    response.delete_cookie(refresh_name, path="/", domain=_cookie_domain())
 
 
 def _generate_numeric_code(length: int) -> str:
@@ -88,7 +145,7 @@ def otp_request(request, payload: OTPRequestIn):
     return {"status": "ok"}
 
 
-@router.post("/otp/verify", response=TokenOut)
+@router.post("/otp/verify", response=StatusOut)
 def otp_verify(request, payload: OTPVerifyIn):
     email = payload.email.strip().lower()
     code = payload.code.strip()
@@ -122,13 +179,21 @@ def otp_verify(request, payload: OTPVerifyIn):
         user.set_unusable_password()
         user.save(update_fields=["password"])
 
-    return {
-        "access": issue_access_token(user_id=user.id),
-        "refresh": issue_refresh_token(user_id=user.id),
-    }
+    access = issue_access_token(user_id=user.id)
+    refresh = issue_refresh_token(user_id=user.id)
+    resp = JsonResponse({"status": "ok"})
+    _set_auth_cookies(request, resp, access=access, refresh=refresh)
+
+    try:
+        from analytics.services import merge_recently_viewed_from_visitor_to_user
+
+        merge_recently_viewed_from_visitor_to_user(request=request, user=user)
+    except Exception:
+        pass
+    return resp
 
 
-@router.post("/register", response=TokenOut)
+@router.post("/register", response=StatusOut)
 def register(request, payload: RegisterIn):
     try:
         user = User.objects.create_user(
@@ -140,29 +205,57 @@ def register(request, payload: RegisterIn):
     except IntegrityError:
         raise HttpError(400, "User with this email already exists")
 
-    return {
-        "access": issue_access_token(user_id=user.id),
-        "refresh": issue_refresh_token(user_id=user.id),
-    }
+    access = issue_access_token(user_id=user.id)
+    refresh = issue_refresh_token(user_id=user.id)
+    resp = JsonResponse({"status": "ok"})
+    _set_auth_cookies(request, resp, access=access, refresh=refresh)
+
+    try:
+        from analytics.services import merge_recently_viewed_from_visitor_to_user
+
+        merge_recently_viewed_from_visitor_to_user(request=request, user=user)
+    except Exception:
+        pass
+    return resp
 
 
-@router.post("/login", response=TokenOut)
+@router.post("/login", response=StatusOut)
 def login(request, payload: LoginIn):
     user = authenticate(request, username=payload.email,
                         password=payload.password)
     if user is None:
         raise HttpError(401, "Invalid credentials")
 
-    return {
-        "access": issue_access_token(user_id=user.id),
-        "refresh": issue_refresh_token(user_id=user.id),
-    }
+    access = issue_access_token(user_id=user.id)
+    refresh = issue_refresh_token(user_id=user.id)
+    resp = JsonResponse({"status": "ok"})
+    _set_auth_cookies(request, resp, access=access, refresh=refresh)
 
-
-@router.post("/refresh", response=AccessOut)
-def refresh(request, payload: RefreshIn):
     try:
-        data = decode_token(payload.refresh)
+        from analytics.services import merge_recently_viewed_from_visitor_to_user
+
+        merge_recently_viewed_from_visitor_to_user(request=request, user=user)
+    except Exception:
+        pass
+    return resp
+
+
+@router.post("/refresh", response=StatusOut)
+def refresh(request, payload: RefreshIn | None = None):
+    payload = payload or RefreshIn()
+    refresh_token = (payload.refresh or "").strip() if getattr(payload, "refresh", None) else ""
+    if not refresh_token:
+        try:
+            refresh_name = getattr(settings, "AUTH_COOKIE_REFRESH_NAME", "refresh_token")
+            refresh_token = (request.COOKIES.get(refresh_name) or "").strip()
+        except Exception:
+            refresh_token = ""
+
+    if not refresh_token:
+        raise HttpError(401, "Invalid refresh token")
+
+    try:
+        data = decode_token(refresh_token)
     except Exception:
         raise HttpError(401, "Invalid refresh token")
 
@@ -173,7 +266,17 @@ def refresh(request, payload: RefreshIn):
     if not user_id:
         raise HttpError(401, "Invalid refresh token")
 
-    return {"access": issue_access_token(user_id=int(user_id))}
+    access = issue_access_token(user_id=int(user_id))
+    resp = JsonResponse({"status": "ok"})
+    _set_auth_cookies(request, resp, access=access, refresh=None)
+    return resp
+
+
+@router.post("/logout", response=StatusOut)
+def logout(request):
+    resp = JsonResponse({"status": "ok"})
+    _clear_auth_cookies(resp)
+    return resp
 
 
 @router.get("/me", response=MeOut, auth=auth)

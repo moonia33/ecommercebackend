@@ -33,13 +33,41 @@ Patikra:
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/refresh`
-- `GET /api/v1/auth/me` (JWT required)
-- `PATCH /api/v1/auth/me` (JWT required) – atnaujina `first_name/last_name`
-- `PUT /api/v1/auth/consents` (JWT required)
-- `GET /api/v1/auth/addresses` (JWT required)
-- `POST /api/v1/auth/addresses` (JWT required)
-- `PATCH /api/v1/auth/addresses/{address_id}` (JWT required)
-- `DELETE /api/v1/auth/addresses/{address_id}` (JWT required)
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/me` (auth required; per HttpOnly cookies)
+- `PATCH /api/v1/auth/me` (auth required; per HttpOnly cookies) – atnaujina `first_name/last_name`
+- `PUT /api/v1/auth/consents` (auth required; per HttpOnly cookies)
+- `GET /api/v1/auth/addresses` (auth required; per HttpOnly cookies)
+- `POST /api/v1/auth/addresses` (auth required; per HttpOnly cookies)
+- `PATCH /api/v1/auth/addresses/{address_id}` (auth required; per HttpOnly cookies)
+- `DELETE /api/v1/auth/addresses/{address_id}` (auth required; per HttpOnly cookies)
+
+### HttpOnly Cookie auth (rekomenduojama web frontui)
+
+Backend'as naudoja **HttpOnly cookie auth**: `access_token` + `refresh_token`.
+
+Kai naudojamas cookie režimas:
+
+- `POST /auth/login`, `POST /auth/register`, `POST /auth/otp/verify`:
+  - grąžina `{ "status": "ok" }`,
+  - papildomai nustato `Set-Cookie` su `HttpOnly` tokenais.
+- `POST /auth/refresh`:
+  - `refresh` body yra optional (gali būti `null`/nepateiktas),
+  - jei body nepateiktas – refresh tokenas paimamas iš `refresh_token` cookie,
+  - atsakymas grąžina `{ "status": "ok" }` ir atnaujina `access_token` cookie.
+- `POST /auth/logout`: ištrina auth cookies.
+
+Frontui svarbu:
+
+- Visi request'ai turi būti su `credentials: 'include'` / `withCredentials: true`.
+- Tokiu atveju frontui nereikia laikyti `refresh_token` localStorage.
+
+Susiję `.env` raktai (cookie auth):
+
+- `AUTH_COOKIE_ACCESS_NAME` (default `access_token`)
+- `AUTH_COOKIE_REFRESH_NAME` (default `refresh_token`)
+- `AUTH_COOKIE_SAMESITE` (default `lax`; prod su `api.domenas.lt` rekomenduojama `none`)
+- `AUTH_COOKIE_DOMAIN` (default tuščias; prod su subdomain'ais rekomenduojama `.domenas.lt`)
 
 ### Email OTP (rekomenduojamas scenarijus)
 
@@ -223,8 +251,8 @@ Pavyzdys:
 
 Checkout endpointai yra po `/api/v1/checkout/...`.
 
-- **Cart** endpointai veikia ir be JWT (guest cart per Django session cookie). Jei siunti `Authorization: Bearer ...` – krepšelis bus pririštas prie userio.
-- **Checkout** (`/checkout/preview`, `/checkout/confirm`) ir **orders** endpointai – **reikalauja JWT**.
+- **Cart** endpointai veikia ir be auth (guest cart per Django session cookie). Jei browseryje yra `access_token` cookie – krepšelis bus pririštas prie userio ir guest krepšelis gali būti sujungiamas.
+- **Checkout** (`/checkout/preview`, `/checkout/confirm`) ir **orders** endpointai – **reikalauja auth** (per HttpOnly cookies).
 
 ### Cart
 
@@ -348,7 +376,7 @@ Periodikos pavyzdžiai:
 Susiję `.env` raktai:
 
 - `DPD_BASE_URL` (pvz. `https://esiunta.dpd.lt/api/v1`)
-- `DPD_TOKEN` (Bearer)
+- `DPD_TOKEN` (Bearer token DPD API)
 - `DPD_STATUS_LANG` (pvz. `lt`)
 
 ### DPD lipdukai (A6) iš admin

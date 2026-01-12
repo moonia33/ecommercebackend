@@ -15,6 +15,13 @@ env = environ.Env(
     JWT_ALGORITHM=(str, "HS256"),
     JWT_ACCESS_TTL_MINUTES=(int, 15),
     JWT_REFRESH_TTL_DAYS=(int, 30),
+
+    AUTH_COOKIE_ACCESS_NAME=(str, "access_token"),
+    AUTH_COOKIE_REFRESH_NAME=(str, "refresh_token"),
+    AUTH_COOKIE_SAMESITE=(str, "lax"),
+    AUTH_COOKIE_SECURE=(str, ""),
+    AUTH_COOKIE_DOMAIN=(str, ""),
+    RECENTLY_VIEWED_MAX=(int, 12),
     EMAIL_OTP_CODE_LENGTH=(int, 6),
     EMAIL_OTP_TTL_MINUTES=(int, 10),
     EMAIL_OTP_RESEND_COOLDOWN_SECONDS=(int, 30),
@@ -98,6 +105,19 @@ JWT_ALGORITHM = env("JWT_ALGORITHM")
 JWT_ACCESS_TTL_MINUTES = env.int("JWT_ACCESS_TTL_MINUTES")
 JWT_REFRESH_TTL_DAYS = env.int("JWT_REFRESH_TTL_DAYS")
 
+AUTH_COOKIE_ACCESS_NAME = env("AUTH_COOKIE_ACCESS_NAME")
+AUTH_COOKIE_REFRESH_NAME = env("AUTH_COOKIE_REFRESH_NAME")
+AUTH_COOKIE_SAMESITE = env("AUTH_COOKIE_SAMESITE", default="lax").lower()
+AUTH_COOKIE_SECURE_RAW = (env("AUTH_COOKIE_SECURE", default="") or "").strip().lower()
+AUTH_COOKIE_SECURE = None
+if AUTH_COOKIE_SECURE_RAW in {"true", "1", "yes"}:
+    AUTH_COOKIE_SECURE = True
+elif AUTH_COOKIE_SECURE_RAW in {"false", "0", "no"}:
+    AUTH_COOKIE_SECURE = False
+AUTH_COOKIE_DOMAIN = (env("AUTH_COOKIE_DOMAIN", default="") or "").strip() or None
+
+RECENTLY_VIEWED_MAX = env.int("RECENTLY_VIEWED_MAX", default=12)
+
 EMAIL_OTP_CODE_LENGTH = env.int("EMAIL_OTP_CODE_LENGTH")
 EMAIL_OTP_TTL_MINUTES = env.int("EMAIL_OTP_TTL_MINUTES")
 EMAIL_OTP_RESEND_COOLDOWN_SECONDS = env.int(
@@ -135,6 +155,7 @@ INSTALLED_APPS = [
     "api",
     "accounts",
     "notifications",
+    "analytics.apps.AnalyticsConfig",
     "catalog.apps.CatalogConfig",
     "cms.apps.CmsConfig",
     "homebuilder.apps.HomebuilderConfig",
