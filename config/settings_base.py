@@ -230,7 +230,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-LANGUAGE_CODE = env("LANGUAGE_CODE", default="lt")
+LANGUAGE_CODE = (env("LANGUAGE_CODE", default="lt") or "lt").split("-")[0].strip().lower()
 LANGUAGES = [
     ("lt", "Lithuanian"),
 ]
