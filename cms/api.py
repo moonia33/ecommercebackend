@@ -4,6 +4,8 @@ from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
 
+from api.i18n import get_request_language_code
+
 from .models import CmsPage, CmsPageTranslation
 from .schemas import CmsPageOut
 from .services import translation_fallback_chain
@@ -38,6 +40,9 @@ def _pick_best_translation(
 
 @router.get("/pages/{slug}", response=CmsPageOut)
 def cms_page_detail(request, slug: str, language_code: str | None = None):
+    if language_code is None:
+        language_code = get_request_language_code(request)
+
     page = CmsPage.objects.filter(slug=slug, is_active=True).only("id", "slug", "updated_at").first()
     if page is None:
         raise HttpError(404, "Page not found")

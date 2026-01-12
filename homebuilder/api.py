@@ -5,6 +5,8 @@ from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
 
+from api.i18n import get_request_language_code
+
 from catalog.home_services import get_products_by_slugs_for_grid, get_products_for_grid
 from catalog.models import Category
 
@@ -71,6 +73,9 @@ def home(
     channel: str = "normal",
     language_code: str | None = None,
 ):
+    if language_code is None:
+        language_code = get_request_language_code(request)
+
     cache_key = f"homebuilder:home:v1:cc:{(country_code or '').upper()}:ch:{(channel or '').lower()}:lang:{(language_code or '').lower()}"
     cached = cache.get(cache_key)
     if cached is not None:

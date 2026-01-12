@@ -150,9 +150,13 @@ class OrderLineOut(Schema):
 class OrderOut(Schema):
     id: int
     status: str
+    status_label: str = ""
     delivery_status: str
+    delivery_status_label: str = ""
     fulfillment_mode: str = ""
+    fulfillment_mode_label: str = ""
     supplier_reservation_status: str = ""
+    supplier_reservation_status_label: str = ""
     supplier_reserved_at: str = ""
     supplier_reference: str = ""
     currency: str
@@ -162,7 +166,9 @@ class OrderOut(Schema):
     tracking_number: str = ""
 
     payment_provider: str = ""
+    payment_provider_label: str = ""
     payment_status: str = ""
+    payment_status_label: str = ""
     payment_redirect_url: str = ""
     payment_instructions: str = ""
 

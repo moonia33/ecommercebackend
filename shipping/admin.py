@@ -2,11 +2,23 @@ from __future__ import annotations
 
 from django.contrib import admin
 
-from .models import DeliveryRule, Holiday, ShippingMethod, ShippingRate
+from .models import (
+    DeliveryRule,
+    Holiday,
+    ShippingCountry,
+    ShippingCountryTranslation,
+    ShippingMethod,
+    ShippingRate,
+)
 
 
 class ShippingRateInline(admin.TabularInline):
     model = ShippingRate
+    extra = 0
+
+
+class ShippingCountryTranslationInline(admin.TabularInline):
+    model = ShippingCountryTranslation
     extra = 0
 
 
@@ -32,6 +44,15 @@ class ShippingRateAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "country_code", "method")
     search_fields = ("method__code", "method__name", "country_code")
     autocomplete_fields = ("method",)
+
+
+@admin.register(ShippingCountry)
+class ShippingCountryAdmin(admin.ModelAdmin):
+    list_display = ("code", "is_active", "sort_order")
+    list_filter = ("is_active",)
+    search_fields = ("code",)
+    ordering = ("sort_order", "code")
+    inlines = (ShippingCountryTranslationInline,)
 
 
 @admin.register(Holiday)

@@ -5,6 +5,41 @@ from decimal import Decimal
 from django.db import models
 
 
+class ShippingCountry(models.Model):
+    code = models.CharField(max_length=2, unique=True)
+    is_active = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["sort_order", "code"]
+
+    def __str__(self) -> str:
+        return self.code
+
+
+class ShippingCountryTranslation(models.Model):
+    shipping_country = models.ForeignKey(
+        ShippingCountry,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=8)
+
+    name = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        unique_together = ("shipping_country", "language_code")
+        indexes = [
+            models.Index(fields=["shipping_country", "language_code"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.shipping_country.code} [{self.language_code}]"
+
+
 class Holiday(models.Model):
     date = models.DateField()
     country_code = models.CharField(max_length=2, default="LT")

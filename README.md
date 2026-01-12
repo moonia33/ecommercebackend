@@ -130,6 +130,22 @@ Kodas (pvz. užsakymo būsenos pranešimui vėliau): naudok [notifications/servi
 - Viskas turi būti valdoma per `.env` (dev/prod profiliai).
 - DB: PostgreSQL.
 
+### i18n / kalbos
+
+Default kalba yra `lt` (konfigūruojama per `.env` `LANGUAGE_CODE`).
+
+Kalba parenkama vieningu principu per visą API:
+
+- Jei yra `?lang=...` query param (konfigūruojama per `LANGUAGE_QUERY_PARAM`, default `lang`) – jis turi prioritetą.
+- Jei nėra `?lang=...`, kalba bandoma nustatyti iš `Accept-Language` headerio.
+- Jei nei vienas netinka – naudojamas `LANGUAGE_CODE`.
+
+Single-language mode:
+
+- Jei `LANGUAGES` turi tik vieną kalbą, `Accept-Language` ir `?lang` praktiškai nieko nekeičia (visada bus naudojamas default).
+
+Pastaba: `?lang` yra skirtas patogiam testavimui/preview, rekomenduojamas standartinis kelias – `Accept-Language`.
+
 ## Catalog (MVP)
 
 - Admin'e: `Catalog -> Categories/Brands/Products`
@@ -296,6 +312,16 @@ Pastaba: po `checkout/confirm` krepšelio item'ai išvalomi (krepšelis lieka tu
 ### Shipping
 
 - `GET /api/v1/checkout/shipping-methods?country_code=LT`
+- `GET /api/v1/shipping/countries`
+
+Rekomenduojama frontui:
+
+- Šalių sąrašui naudoti `/api/v1/shipping/countries` (grąžina pilnus pavadinimus pagal kalbą).
+- Tada pasirinkus šalį, užklausti `/api/v1/checkout/shipping-methods?country_code=..`.
+
+Admin workflow:
+
+- Šalys valdomos per admin: `Shipping -> Shipping countries` (ten pat galima suvesti vertimus per `translations`).
 
 Endpointas grąžina ir požymius frontui:
 
@@ -601,12 +627,18 @@ Pavyzdys: `GET /api/v1/checkout/orders/{order_id}` (sutrumpintas):
 {
   "id": 123,
   "status": "created",
+  "status_label": "Created",
   "delivery_status": "label_created",
+  "delivery_status_label": "Label created",
   "currency": "EUR",
   "country_code": "LT",
   "shipping_method": "lpexpress",
   "carrier_code": "lpexpress",
   "tracking_number": "LP123456789LT",
+  "payment_provider": "bank_transfer",
+  "payment_provider_label": "Bank transfer",
+  "payment_status": "pending",
+  "payment_status_label": "Pending",
   "items": [
     {
       "id": 1,
@@ -654,3 +686,9 @@ Admin'e (debug): `Checkout -> Carts / Orders / Payment intents`.
 - Klix (Citadelė) payment session + webhook (kai turėsime API dokumentaciją)
 - LPExpress/Unisend rates (kainodaros taisyklės) plėtra ir shipment statusų sinchronizavimas
 - Nuolaidos/kuponai ir paieška (Meilisearch)
+
+## Recently viewed (frontui)
+
+- Endpointas: `GET /api/v1/catalog/recently-viewed?country_code=LT&channel=normal&limit=12`
+- Reikalavimas: siųsti cookies (`credentials: 'include'` / `withCredentials: true`).
+- Detalės: `docs/analytics_events.md` (sekcija "Recently viewed").

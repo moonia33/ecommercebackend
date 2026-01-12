@@ -73,6 +73,52 @@ Yra 2 klasės eventų:
 - `begin_checkout` / `view_cart` – backend’e (ten kur yra endpointai)
 - `purchase` – backend’e (order create/paid)
 
+## "Recently viewed" (peržiūrėtos prekės)
+
+Tikslas: turėti stabilų, mažą sąrašą peržiūrėtų prekių, kurį galima rodyti UI (pvz. homepage blokas ar cart drawer) **neapkraunant** `AnalyticsEvent` žurnalo.
+
+### Kaip pildoma
+
+- Kai vartotojas atidaro produkto detalę, backend’as registruoja `product_view` eventą.
+- Tuo pačiu metu backend’as atnaujina `RecentlyViewedProduct` įrašą (upsert) ir pritaiko cap.
+
+### Cap (limit)
+
+- Maksimalus prekių skaičius yra ribojamas per setting’ą `RECENTLY_VIEWED_MAX`.
+- Default: `12`.
+- Cap taikomas atskirai:
+  - prisijungusiam user’iui
+  - anoniminiam visitor’iui pagal `vid` cookie
+
+### Anon → user merge
+
+- Kai anon vartotojas prisijungia (login/register/otp_verify), anon sąrašas pagal `vid` yra suliejamas į user’io sąrašą.
+- Po merge anon įrašai išvalomi.
+- Po merge vėl pritaikomas cap.
+
+### FE API contract
+
+Endpoint:
+
+- `GET /api/v1/catalog/recently-viewed?country_code=LT&channel=normal&limit=12`
+
+Query parametrai:
+
+- `country_code` (privalomas, 2 raidės, pvz. `LT`) – reikalingas kainodarai/VAT.
+- `channel` (privalomas) – `normal` arba `outlet`.
+- `limit` (optional) – jei nepaduotas, naudojamas `RECENTLY_VIEWED_MAX`.
+
+Auth / cookies:
+
+- Endpointas veikia ir anon, ir prisijungus.
+- FE turi siųsti cookies (cookie-only auth):
+  - `fetch(..., { credentials: 'include' })`
+  - arba axios `withCredentials: true`
+
+Response:
+
+- Grąžina `list[ProductListOut]` (tas pats formatas kaip `/api/v1/catalog/products`).
+
 ### Jei visgi reikia FE event endpoint’o
 
 Suderinsime endpointą (pavyzdys):
