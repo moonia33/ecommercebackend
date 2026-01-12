@@ -12,6 +12,7 @@ from django.http import JsonResponse
 from ninja import Router
 from ninja.errors import HttpError
 
+from api.i18n import get_request_language_code
 from notifications.services import send_templated_email
 
 from .auth import JWTAuth
@@ -125,10 +126,13 @@ def otp_request(request, payload: OTPRequestIn):
 
     code = _generate_numeric_code(length)
 
+    language_code = get_request_language_code(request)
+
     result = send_templated_email(
         template_key="auth_otp_code",
         to_email=email,
         context={"code": code, "ttl_minutes": ttl},
+        language_code=language_code,
     )
     if not result.ok:
         if getattr(settings, "DEBUG", False):

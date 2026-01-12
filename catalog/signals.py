@@ -60,6 +60,7 @@ def inventory_item_post_save(sender, instance: InventoryItem, created: bool, **k
                     "variant_sku": getattr(variant, "sku", "") if variant else "",
                     "channel": channel,
                 },
+                language_code=(getattr(sub, "language_code", "") or None),
             )
             if result.ok:
                 sub.notified_at = now

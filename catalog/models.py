@@ -724,6 +724,7 @@ class BackInStockSubscription(models.Model):
         choices=Channel.choices,
         default=Channel.NORMAL,
     )
+    language_code = models.CharField(max_length=8, blank=True, default="")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     notified_at = models.DateTimeField(null=True, blank=True)

@@ -8,6 +8,8 @@ from django.core.mail import EmailMultiAlternatives
 from django.template import Context, Engine, TemplateDoesNotExist
 from django.utils import timezone
 
+from api.i18n import get_default_language_code, normalize_language_code, translation_fallback_chain
+
 from .models import EmailTemplate, OutboundEmail
 
 
@@ -30,14 +32,30 @@ def send_templated_email(
     to_email: str,
     context: dict[str, Any] | None = None,
     from_email: str | None = None,
+    language_code: str | None = None,
 ) -> SendEmailResult:
     """Send an email based on a DB-stored template.
 
     Returns success flag + OutboundEmail log id.
     """
 
-    template = EmailTemplate.objects.filter(
-        key=template_key, is_active=True).first()
+    resolved_language_code = normalize_language_code(language_code) or get_default_language_code()
+    langs = translation_fallback_chain(resolved_language_code)
+    templates = list(
+        EmailTemplate.objects.filter(
+            key=template_key,
+            is_active=True,
+            language_code__in=langs,
+        )
+    )
+    order_index = {lang: i for i, lang in enumerate(langs)}
+    template = None
+    best_idx = 10_000
+    for t in templates:
+        idx = order_index.get(normalize_language_code(getattr(t, "language_code", "")), 10_000)
+        if idx < best_idx:
+            template = t
+            best_idx = idx
     if not template:
         outbound = OutboundEmail.objects.create(
             to_email=to_email,

@@ -13,6 +13,7 @@ from ninja import Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
+from api.i18n import get_request_language_code
 from pricing.services import compute_vat, get_vat_rate
 from shipping.services import estimate_delivery_window
 
@@ -1073,16 +1074,22 @@ def back_in_stock_subscribe(request, payload: BackInStockSubscribeIn):
     if not product and not variant:
         raise HttpError(400, "product_id or variant_id is required")
 
+    language_code = get_request_language_code(request)
+
     obj, created = BackInStockSubscription.objects.get_or_create(
         email=email,
         product=product,
         variant=variant,
         channel=channel,
-        defaults={"is_active": True},
+        defaults={"is_active": True, "language_code": language_code},
     )
     if not created and not obj.is_active:
         obj.is_active = True
         obj.save(update_fields=["is_active"])
+
+    if not created and (obj.language_code or "").strip().lower() != (language_code or "").strip().lower():
+        obj.language_code = language_code
+        obj.save(update_fields=["language_code"])
 
     return {"status": "ok"}
 

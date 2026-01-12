@@ -5,10 +5,10 @@ from .models import EmailTemplate, OutboundEmail
 
 @admin.register(EmailTemplate)
 class EmailTemplateAdmin(admin.ModelAdmin):
-    list_display = ("key", "name", "is_active", "updated_at")
+    list_display = ("key", "language_code", "name", "is_active", "updated_at")
     list_filter = ("is_active",)
     search_fields = ("key", "name", "subject")
-    ordering = ("key",)
+    ordering = ("key", "language_code")
 
 
 @admin.register(OutboundEmail)

@@ -117,7 +117,14 @@ Taip galima turėti B2B grupę su didmenine kainodara ir pvz. leisti tik vienkar
 - Admin'e: `Notifications -> Email templates` (kurti/redaguoti šablonus)
 - Siuntimo istorija: `Notifications -> Outbound emails` (tik peržiūra)
 
-Kodas (pvz. užsakymo būsenos pranešimui vėliau): naudok [notifications/services.py](notifications/services.py) funkciją `send_templated_email(template_key=..., to_email=..., context=...)`.
+Šablonai yra daugiakalbiai: `EmailTemplate` turi `language_code`, o unikalumas yra `(key, language_code)`.
+
+Siuntimas (pvz. užsakymo būsenos pranešimui vėliau): naudok [notifications/services.py](notifications/services.py) funkciją `send_templated_email(template_key=..., to_email=..., context=..., language_code=...)`.
+
+Kalbos parinkimas:
+
+- Jei `language_code` nepaduotas – naudojamas `LANGUAGE_CODE`.
+- Jei `language_code` paduotas – šablonas parenkamas per `translation_fallback_chain(language_code)`.
 
 ## Tikslai (MVP + plėtra)
 

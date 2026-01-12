@@ -2,7 +2,8 @@ from django.db import models
 
 
 class EmailTemplate(models.Model):
-    key = models.SlugField(max_length=100, unique=True)
+    key = models.SlugField(max_length=100)
+    language_code = models.CharField(max_length=8, default="lt")
     name = models.CharField(max_length=200, blank=True)
 
     subject = models.CharField(max_length=255)
@@ -14,6 +15,7 @@ class EmailTemplate(models.Model):
 
     class Meta:
         ordering = ["key"]
+        unique_together = ("key", "language_code")
 
     def __str__(self) -> str:
         return self.key
