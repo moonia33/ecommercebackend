@@ -258,3 +258,26 @@ class UserAddress(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user_id}:{self.country_code}:{self.city}"
+
+
+class UserPickupPoint(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="primary_pickup_point"
+    )
+
+    shipping_method_code = models.SlugField(max_length=50)
+    pickup_point_id = models.CharField(max_length=80)
+
+    pickup_point_name = models.CharField(max_length=255, blank=True, default="")
+    pickup_point_raw = models.JSONField(default=dict, blank=True)
+    country_code = models.CharField(max_length=2, blank=True, default="")
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "shipping_method_code"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id}:{self.shipping_method_code}:{self.pickup_point_id}"

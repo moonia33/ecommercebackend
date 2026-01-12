@@ -7,6 +7,7 @@ from .models import (
     User,
     UserAddress,
     UserConsent,
+    UserPickupPoint,
     UserPhone,
 )
 
@@ -19,6 +20,12 @@ class UserPhoneInline(admin.TabularInline):
 class UserAddressInline(admin.TabularInline):
     model = UserAddress
     extra = 0
+
+
+class UserPickupPointInline(admin.StackedInline):
+    model = UserPickupPoint
+    extra = 0
+    max_num = 1
 
 
 @admin.register(User)
@@ -57,7 +64,7 @@ class UserAdmin(DjangoUserAdmin):
 
     readonly_fields = ("last_login", "date_joined")
     filter_horizontal = ("groups", "user_permissions", "customer_groups")
-    inlines = (UserPhoneInline, UserAddressInline)
+    inlines = (UserPhoneInline, UserAddressInline, UserPickupPointInline)
 
 
 @admin.register(CustomerGroup)
@@ -91,6 +98,20 @@ class UserPhoneAdmin(admin.ModelAdmin):
     list_filter = ("is_primary", "is_verified")
     search_fields = ("user__email", "phone")
     ordering = ("-is_primary", "phone")
+
+
+@admin.register(UserPickupPoint)
+class UserPickupPointAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "shipping_method_code",
+        "pickup_point_id",
+        "country_code",
+        "updated_at",
+    )
+    list_filter = ("shipping_method_code", "country_code")
+    search_fields = ("user__email", "pickup_point_id", "pickup_point_name")
+    ordering = ("-updated_at",)
 
 
 @admin.register(UserAddress)

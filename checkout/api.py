@@ -276,6 +276,42 @@ def _country_code_from_address(addr: UserAddress) -> str:
     return cc
 
 
+def _resolve_pickup_dpd(*, pickup_point_id: str, country_code: str):
+    from dpd.models import DpdLocker
+
+    locker = DpdLocker.objects.filter(locker_id=pickup_point_id, is_active=True).first()
+    if not locker:
+        raise HttpError(400, "Invalid pickup_point_id")
+    if locker.country_code and country_code and locker.country_code.upper() != country_code:
+        raise HttpError(400, "pickup_point_id country mismatch")
+    return locker, None
+
+
+def _resolve_pickup_unisend(*, pickup_point_id: str, country_code: str):
+    from unisend.models import UnisendTerminal
+
+    terminal = UnisendTerminal.objects.filter(terminal_id=pickup_point_id, is_active=True).first()
+    if not terminal:
+        raise HttpError(400, "Invalid pickup_point_id")
+    if terminal.country_code and country_code and terminal.country_code.upper() != country_code:
+        raise HttpError(400, "pickup_point_id country mismatch")
+
+    snapshot = {
+        "pickup_point_id": str(terminal.terminal_id or "").strip(),
+        "pickup_point_name": str(terminal.name or "").strip(),
+        "pickup_point_raw": terminal.raw or {},
+    }
+
+    # For Unisend we don't have a dedicated FK on Order yet (pickup_locker points to dpd.DpdLocker).
+    return None, snapshot
+
+
+PICKUP_POINT_RESOLVERS = {
+    "dpd": _resolve_pickup_dpd,
+    "lpexpress": _resolve_pickup_unisend,
+}
+
+
 def _validate_and_resolve_pickup(*, shipping_method: str, pickup_point_id: str | None, country_code: str):
     from shipping.models import ShippingMethod
 
@@ -298,40 +334,31 @@ def _validate_and_resolve_pickup(*, shipping_method: str, pickup_point_id: str |
             400, "pickup_point_id is required for this shipping_method")
 
     carrier = (carrier_code or "").lower()
-    if carrier == "dpd":
-        from dpd.models import DpdLocker
+    resolver = PICKUP_POINT_RESOLVERS.get(carrier)
+    if not resolver:
+        raise HttpError(400, "pickup_point_id is not supported for this carrier")
 
-        locker = DpdLocker.objects.filter(
-            locker_id=pickup_point_id, is_active=True).first()
-        if not locker:
-            raise HttpError(400, "Invalid pickup_point_id")
+    locker, snapshot = resolver(pickup_point_id=pickup_point_id, country_code=country_code)
+    return carrier_code, locker, snapshot
 
-        if locker.country_code and country_code and locker.country_code.upper() != country_code:
-            raise HttpError(400, "pickup_point_id country mismatch")
 
-        return carrier_code, locker, None
+def _maybe_fill_pickup_point_id_from_user(*, user, shipping_method: str, pickup_point_id: str | None):
+    pickup_point_id = (pickup_point_id or "").strip() or None
+    if pickup_point_id:
+        return pickup_point_id
 
-    if carrier == "lpexpress":
-        from unisend.models import UnisendTerminal
+    try:
+        pref = getattr(user, "primary_pickup_point", None)
+    except Exception:
+        pref = None
+    if not pref:
+        return None
 
-        terminal = UnisendTerminal.objects.filter(
-            terminal_id=pickup_point_id, is_active=True).first()
-        if not terminal:
-            raise HttpError(400, "Invalid pickup_point_id")
+    if (getattr(pref, "shipping_method_code", "") or "").strip() != (shipping_method or "").strip():
+        return None
 
-        if terminal.country_code and country_code and terminal.country_code.upper() != country_code:
-            raise HttpError(400, "pickup_point_id country mismatch")
-
-        snapshot = {
-            "pickup_point_id": str(terminal.terminal_id or "").strip(),
-            "pickup_point_name": str(terminal.name or "").strip(),
-            "pickup_point_raw": terminal.raw or {},
-        }
-
-        # For Unisend we don't have a dedicated FK on Order yet (pickup_locker points to dpd.DpdLocker).
-        return carrier_code, None, snapshot
-
-    raise HttpError(400, "pickup_point_id is not supported for this carrier")
+    pid = (getattr(pref, "pickup_point_id", "") or "").strip() or None
+    return pid
 
 
 def _variant_money(*, variant: Variant, country_code: str, qty: int) -> tuple[MoneyOut, MoneyOut, Decimal]:
@@ -949,10 +976,16 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
 
     country_code = _country_code_from_address(addr)
 
+    pickup_point_id = _maybe_fill_pickup_point_id_from_user(
+        user=user,
+        shipping_method=shipping_method,
+        pickup_point_id=getattr(payload, "pickup_point_id", None),
+    )
+
     # Validate pickup-point selection early (even though we don't persist anything on preview).
     _validate_and_resolve_pickup(
         shipping_method=shipping_method,
-        pickup_point_id=getattr(payload, "pickup_point_id", None),
+        pickup_point_id=pickup_point_id,
         country_code=country_code,
     )
 
@@ -1167,8 +1200,11 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         raise HttpError(404, "Shipping address not found")
 
     shipping_method = (payload.shipping_method or "").strip() or "lpexpress"
-    pickup_point_id = (getattr(payload, "pickup_point_id",
-                       None) or "").strip() or None
+    pickup_point_id = _maybe_fill_pickup_point_id_from_user(
+        user=user,
+        shipping_method=shipping_method,
+        pickup_point_id=getattr(payload, "pickup_point_id", None),
+    )
 
     neopay_bank_bic = (getattr(payload, "neopay_bank_bic", None) or "").strip() or None
 

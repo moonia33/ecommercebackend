@@ -83,6 +83,14 @@ class AddressOut(Schema):
     is_default_billing: bool
 
 
+class PickupPointOut(Schema):
+    shipping_method_code: str
+    pickup_point_id: str
+    pickup_point_name: str
+    pickup_point_raw: dict
+    country_code: str
+
+
 class MeOut(Schema):
     email: str
     first_name: str
@@ -92,11 +100,18 @@ class MeOut(Schema):
     consents: list[ConsentOut]
     phones: list[PhoneOut]
     addresses: list[AddressOut]
+    primary_pickup_point: PickupPointOut | None = None
 
 
 class MeUpdateIn(Schema):
     first_name: str | None = None
     last_name: str | None = None
+    phone: str | None = None
+
+
+class PickupPointSetIn(Schema):
+    shipping_method_code: str
+    pickup_point_id: str
 
 
 class AddressCreateIn(Schema):

@@ -4,7 +4,7 @@ Django + Django Ninja e‑commerce backend API su PostgreSQL. Šiuo metu įgyven
 
 ## Statusas
 
-- Šiuo metu aktyviai vystomas checkout/shipping (DPD + Unisend/LPExpress), lipdukų generavimas ir tracking.
+- Šiuo metu aktyviai vystomas checkout/shipping (carrier plugin'ai), lipdukų generavimas ir tracking.
 
 ## Greitas startas (be Docker)
 
@@ -332,8 +332,13 @@ Admin workflow:
 
 Endpointas grąžina ir požymius frontui:
 
-- `carrier_code` (pvz. `dpd`, `lpexpress`)
+- `carrier_code` (carrier/integracijos raktas; pvz. `dpd`, `unisend`, `omniva`, `venipak` ir t.t.)
 - `requires_pickup_point` (bool) – jei `true`, frontas privalo paprašyti paštomato/pickup point pasirinkimo.
+
+i18n pastaba (label'ams):
+
+- Šiuo metu `ShippingMethod.name` yra DB tekstas (ne gettext), todėl frontas turėtų jį rodyti kaip yra.
+- Jei reikės pilno i18n shipping metodų label'ams, rekomenduojama pridėti `ShippingMethodTranslation` arba grąžinti `name_label` per gettext pagal `carrier_code`/`code`.
 
 Fronto validacija (rekomenduojama laikyti „privaloma“ UX lygyje):
 
@@ -341,34 +346,43 @@ Fronto validacija (rekomenduojama laikyti „privaloma“ UX lygyje):
 - Jei pasirinktas metodas turi `requires_pickup_point=true`, checkout'e privaloma:
   - parodyti paštomatų pasirinkimą,
   - neleisti tęsti, kol paštomatas nepasirinktas.
-- Paštomatų sąrašui naudoti `GET /api/v1/dpd/lockers?country_code=..&city=..` (žr. žemiau).
 
-Papildomai (Unisend / LPExpress):
+Paštomatų sąrašas nėra "core" checkout dalis – jis priklauso nuo carrier integracijos (app'o). Dabartiniai plugin'ai:
 
-- Paštomatų sąrašui naudoti `GET /api/v1/unisend/terminals?country_code=LT&city=Vilnius&search=...&limit=50`
-- Metodai:
-  - `lpexpress` (paštomatas / terminal) – `requires_pickup_point=true`
-  - `lpexpress_courier` (kurjeris) – `requires_pickup_point=false`
+- DPD: `GET /api/v1/dpd/lockers?country_code=..&city=..&search=...&limit=...`
+- Unisend: `GET /api/v1/unisend/terminals?country_code=..&city=..&search=...&limit=...`
 
-Pastaba: šiuo metu `checkout/preview` ir `checkout/confirm` turi default `shipping_method="lpexpress"`, todėl jei frontas jo visai nesiųs – backend'as laikys, kad pasirinktas `lpexpress`. Jei norite „kietos“ validacijos backende (400, kai nepriduotas pristatymas / nepriduotas paštomatas) – reikia praplėsti checkout payload'ą pickup point ID ir įjungti server-side patikras.
+Rekomendacija: frontas visada turi siųsti `shipping_method` (ir `pickup_point_id`, jei reikia) – backend'e gali būti palikti tik backward-compatible fallback'ai (nenaudoti kaip UX logikos).
 
-Planuojama (sekantis etapas): **DPD** su 2 pagrindinėm kryptim:
+### Primary paštomatas (user preference)
 
-- `dpd_locker` (paštomatai / pickup)
-- `dpd_courier` (kurjeris)
+Vartotojas gali turėti vieną "pagrindinį" paštomatą (primary pickup point). Tai pagreitina checkout'ą (ypač pakartotiniams pirkimams), nes kai pasirinktas pristatymo metodas turi `requires_pickup_point=true`, backend gali automatiškai panaudoti išsaugotą `pickup_point_id`.
+
+API:
+
+- `GET /api/v1/auth/me` – grąžina `primary_pickup_point` (jei nustatyta).
+- `PUT /api/v1/auth/pickup-point` body: `{ "shipping_method_code": "<shipping_method>", "pickup_point_id": "<pickup_point_id>" }`
+  - Validuoja, kad `shipping_method_code` egzistuoja ir reikalauja pickup point.
+  - Validuoja `pickup_point_id` pagal carrier integracijos DB cache (resolver pagal `ShippingMethod.carrier_code`).
+  - Išsaugo kaip primary.
+- `DELETE /api/v1/auth/pickup-point` – pašalina primary.
+
+Checkout elgsena:
+
+- Jei `checkout/preview` arba `checkout/confirm` kviečiami su `shipping_method` kuris reikalauja pickup point, bet `pickup_point_id` nepaduotas, backend bando jį paimti iš `primary_pickup_point` (tik jei sutampa `shipping_method_code`).
 
 Svarbūs principai, kad frontui ir adminui būtų aišku:
 
 - Užsakymas turės atskirą _pristatymo būseną_ (pvz. `label_created` → `shipped` → `delivered`) šalia mokėjimo būsenos.
 - Lipdukai generuojami iš admin (Order admin action), o siuntos numeris (tracking) pririšamas prie užsakymo, kad jį matytų pirkėjas.
-- Paštomato atveju: po pasirinkimo backend užpildo `Order.shipping_*` snapshot pagal DPD paštomato adresą.
+- Paštomato atveju: po pasirinkimo backend užpildo `Order.pickup_point_*` ir prireikus `Order.shipping_*` snapshot pagal pasirinkto pickup point adresą (resolver pagal `ShippingMethod.carrier_code`).
 - Kainodara bus valdoma per admin (paprasti tarifai). Vėliau galima plėsti į taisykles pagal svorį/dimensijas.
 - Tam, kad galėtume tiksliai nuspręsti ar prekės telpa į paštomatą, reikės produkto/varianto `weight` ir `dimensions` laukų.
 
-Susiję `.env` raktai:
+Susiję `.env` raktai (legacy / backward-compatible fallback):
 
-- `LPEXPRESS_SHIPPING_NET_EUR` (default `0.00`)
 - `DEFAULT_SHIPPING_TAX_CLASS_CODE` (default `standard`)
+- Kai kurie carrier'ai gali turėti laikinas fallback kainodaras per `.env` (pvz. pirmam paleidimui be DB). Rekomenduojama kainodarą visada valdyti per DB (`Shipping rates`).
 
 ### DPD (pradinis karkasas)
 
@@ -429,11 +443,11 @@ Rekomenduojama (patogiausia) – suvesti per admin (DB):
 
 ### Checkout preview / confirm
 
-- `POST /api/v1/checkout/checkout/preview` body: `{ "shipping_address_id": 1, "shipping_method": "lpexpress" }`
+- `POST /api/v1/checkout/checkout/preview` body: `{ "shipping_address_id": 1, "shipping_method": "<shipping_method>" }`
 
 Paštomatams (kai `requires_pickup_point=true`), frontas turi pridėti ir `pickup_point_id`:
 
-- `POST /api/v1/checkout/checkout/preview` body: `{ "shipping_address_id": 1, "shipping_method": "dpd_locker", "pickup_point_id": "LT90001" }`
+- `POST /api/v1/checkout/checkout/preview` body: `{ "shipping_address_id": 1, "shipping_method": "<shipping_method>", "pickup_point_id": "<pickup_point_id>" }`
 
 Mokesčiai (fees):
 
@@ -492,17 +506,17 @@ Pirkimo metu fiksuojamas **order-level sutikimas** (auditas): su kokia dokument�
 Confirm pavyzdys:
 
 - `POST /api/v1/checkout/checkout/confirm` body:
-  - `{ "shipping_address_id": 1, "shipping_method": "lpexpress", "payment_method": "klix", "consents": [{"kind":"terms","document_version":"v1"},{"kind":"privacy","document_version":"v1"}] }`
+  - `{ "shipping_address_id": 1, "shipping_method": "<shipping_method>", "payment_method": "klix", "consents": [{"kind":"terms","document_version":"v1"},{"kind":"privacy","document_version":"v1"}] }`
 
 Paprastam pavedimui (be redirect):
 
 - `POST /api/v1/checkout/checkout/confirm` body:
-  - `{ "shipping_address_id": 1, "shipping_method": "lpexpress", "payment_method": "bank_transfer", "consents": [{"kind":"terms","document_version":"v1"},{"kind":"privacy","document_version":"v1"}] }`
+  - `{ "shipping_address_id": 1, "shipping_method": "<shipping_method>", "payment_method": "bank_transfer", "consents": [{"kind":"terms","document_version":"v1"},{"kind":"privacy","document_version":"v1"}] }`
 
-Paštomatų atveju (pvz. DPD):
+Paštomatų atveju (kai reikia `pickup_point_id`):
 
 - `POST /api/v1/checkout/checkout/confirm` body:
-  - `{ "shipping_address_id": 1, "shipping_method": "dpd_locker", "pickup_point_id": "LT90001", "payment_method": "klix", "consents": [{"kind":"terms","document_version":"v1"},{"kind":"privacy","document_version":"v1"}] }`
+  - `{ "shipping_address_id": 1, "shipping_method": "<shipping_method>", "pickup_point_id": "<pickup_point_id>", "payment_method": "klix", "consents": [{"kind":"terms","document_version":"v1"},{"kind":"privacy","document_version":"v1"}] }`
 
 Jei frontas atsiunčia pasenusias versijas (pvz. useris ilgai laikė atidarytą checkout'ą), API grąžina `409` ir frontas turi persikrauti `GET /checkout/consents`.
 
@@ -613,7 +627,7 @@ Mokėjimo būdų sąrašas frontui:
 Frontui svarbu:
 
 - `tracking_number` – užpildomas po lipduko sugeneravimo (admin'e)
-- `carrier_code` – pvz. `dpd` arba `lpexpress`
+- `carrier_code` – carrier/integracijos kodas (pvz. `dpd`, `unisend`, `omniva` ir t.t.)
 - `delivery_status` – po sėkmingo lipduko sugeneravimo automatiškai nustatomas `label_created` (tiek single, tiek bulk)
 
 Mokėjimai frontui (per `orders` endpointus):
@@ -639,9 +653,9 @@ Pavyzdys: `GET /api/v1/checkout/orders/{order_id}` (sutrumpintas):
   "delivery_status_label": "Label created",
   "currency": "EUR",
   "country_code": "LT",
-  "shipping_method": "lpexpress",
-  "carrier_code": "lpexpress",
-  "tracking_number": "LP123456789LT",
+  "shipping_method": "<shipping_method>",
+  "carrier_code": "<carrier_code>",
+  "tracking_number": "<tracking_number>",
   "payment_provider": "bank_transfer",
   "payment_provider_label": "Bank transfer",
   "payment_status": "pending",
@@ -691,7 +705,7 @@ Admin'e (debug): `Checkout -> Carts / Orders / Payment intents`.
 ## Toliau
 
 - Klix (Citadelė) payment session + webhook (kai turėsime API dokumentaciją)
-- LPExpress/Unisend rates (kainodaros taisyklės) plėtra ir shipment statusų sinchronizavimas
+- Shipping rates (kainodaros taisyklės) plėtra ir shipment statusų sinchronizavimas
 - Nuolaidos/kuponai ir paieška (Meilisearch)
 
 ## Recently viewed (frontui)

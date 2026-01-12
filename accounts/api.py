@@ -17,7 +17,7 @@ from notifications.services import send_templated_email
 
 from .auth import JWTAuth
 from .jwt_utils import issue_access_token, issue_refresh_token, decode_token
-from .models import ConsentType, EmailOTP, UserAddress, UserConsent
+from .models import ConsentType, EmailOTP, UserAddress, UserConsent, UserPhone, UserPickupPoint
 from .schemas import (
     AddressCreateIn,
     AddressOut,
@@ -26,6 +26,7 @@ from .schemas import (
     ConsentUpdateIn,
     MeUpdateIn,
     MeOut,
+    PickupPointSetIn,
     OTPRequestIn,
     OTPVerifyIn,
     RefreshIn,
@@ -36,6 +37,81 @@ from .schemas import (
 router = Router(tags=["auth"])
 User = get_user_model()
 auth = JWTAuth()
+
+
+def _normalize_phone(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    for ch in [" ", "-", "(", ")"]:
+        s = s.replace(ch, "")
+
+    if s.startswith("+"):
+        return s
+
+    # LT convenience: 86xxxxxxx -> +3706xxxxxxx
+    if s.startswith("86") and len(s) == 9 and s.isdigit():
+        return "+370" + s[1:]
+
+    return s
+
+
+def _validate_e164(phone: str) -> bool:
+    # E.164: + followed by 8..15 digits (max length 16 with +)
+    if not phone or not phone.startswith("+"):
+        return False
+    digits = phone[1:]
+    if not digits.isdigit():
+        return False
+    if len(digits) < 8 or len(digits) > 15:
+        return False
+    if digits[0] == "0":
+        return False
+    return True
+
+
+def _serialize_pickup_point(obj: UserPickupPoint | None):
+    if not obj:
+        return None
+    return {
+        "shipping_method_code": obj.shipping_method_code,
+        "pickup_point_id": obj.pickup_point_id,
+        "pickup_point_name": obj.pickup_point_name,
+        "pickup_point_raw": obj.pickup_point_raw or {},
+        "country_code": obj.country_code,
+    }
+
+
+def _pickup_snapshot_from_dpd(*, pickup_point_id: str):
+    from dpd.models import DpdLocker
+
+    locker = DpdLocker.objects.filter(locker_id=pickup_point_id, is_active=True).first()
+    if not locker:
+        raise HttpError(400, "Invalid pickup_point_id")
+    return {
+        "pickup_point_name": str(locker.name or "").strip(),
+        "pickup_point_raw": locker.raw or {},
+        "country_code": str(locker.country_code or "").strip().upper(),
+    }
+
+
+def _pickup_snapshot_from_unisend(*, pickup_point_id: str):
+    from unisend.models import UnisendTerminal
+
+    t = UnisendTerminal.objects.filter(terminal_id=pickup_point_id, is_active=True).first()
+    if not t:
+        raise HttpError(400, "Invalid pickup_point_id")
+    return {
+        "pickup_point_name": str(t.name or "").strip(),
+        "pickup_point_raw": t.raw or {},
+        "country_code": str(t.country_code or "").strip().upper(),
+    }
+
+
+PICKUP_POINT_SNAPSHOT_RESOLVERS = {
+    "dpd": _pickup_snapshot_from_dpd,
+    "lpexpress": _pickup_snapshot_from_unisend,
+}
 
 
 def _cookie_samesite() -> str:
@@ -368,6 +444,12 @@ def me(request):
             }
         )
 
+    pickup_point = None
+    try:
+        pickup_point = getattr(user, "primary_pickup_point", None)
+    except Exception:
+        pickup_point = None
+
     return {
         "email": user.email,
         "first_name": user.first_name,
@@ -377,6 +459,7 @@ def me(request):
         "consents": consents_out,
         "phones": phones_out,
         "addresses": addresses_out,
+        "primary_pickup_point": _serialize_pickup_point(pickup_point),
     }
 
 
@@ -393,9 +476,82 @@ def update_me(request, payload: MeUpdateIn):
         user.last_name = (payload.last_name or "").strip()
         update_fields.append("last_name")
 
+    phone_raw = payload.phone
+    if phone_raw is not None:
+        phone = _normalize_phone(phone_raw)
+        if phone and not _validate_e164(phone):
+            raise HttpError(400, "Invalid phone (expected E.164, e.g. +3706...)")
+
+        with transaction.atomic():
+            if phone:
+                UserPhone.objects.filter(user=user, is_primary=True).update(is_primary=False)
+                obj, _ = UserPhone.objects.update_or_create(
+                    user=user,
+                    phone=phone,
+                    defaults={"is_primary": True},
+                )
+                if not obj.is_primary:
+                    obj.is_primary = True
+                    obj.save(update_fields=["is_primary"])
+            else:
+                UserPhone.objects.filter(user=user, is_primary=True).update(is_primary=False)
+
     if update_fields:
         user.save(update_fields=update_fields)
 
+    return me(request)
+
+
+def _resolve_pickup_point_snapshot(*, shipping_method_code: str, pickup_point_id: str):
+    from shipping.models import ShippingMethod
+
+    method = ShippingMethod.objects.filter(code=shipping_method_code, is_active=True).first()
+    if not method:
+        raise HttpError(400, "Invalid shipping_method_code")
+    if not bool(getattr(method, "requires_pickup_point", False)):
+        raise HttpError(400, "shipping_method_code does not require pickup point")
+
+    carrier_code = (getattr(method, "carrier_code", "") or "").strip().lower()
+    if not carrier_code:
+        raise HttpError(400, "shipping_method_code has no carrier_code")
+
+    resolver = PICKUP_POINT_SNAPSHOT_RESOLVERS.get(carrier_code)
+    if not resolver:
+        raise HttpError(400, "pickup points are not supported for this carrier_code")
+    return resolver(pickup_point_id=pickup_point_id)
+
+
+@router.put("/pickup-point", response=MeOut, auth=auth)
+def set_pickup_point(request, payload: PickupPointSetIn):
+    user = request.auth
+    shipping_method_code = (payload.shipping_method_code or "").strip()
+    pickup_point_id = (payload.pickup_point_id or "").strip()
+    if not shipping_method_code or not pickup_point_id:
+        raise HttpError(400, "shipping_method_code and pickup_point_id are required")
+
+    snap = _resolve_pickup_point_snapshot(
+        shipping_method_code=shipping_method_code,
+        pickup_point_id=pickup_point_id,
+    )
+
+    UserPickupPoint.objects.update_or_create(
+        user=user,
+        defaults={
+            "shipping_method_code": shipping_method_code,
+            "pickup_point_id": pickup_point_id,
+            "pickup_point_name": snap.get("pickup_point_name", ""),
+            "pickup_point_raw": snap.get("pickup_point_raw", {}) or {},
+            "country_code": snap.get("country_code", ""),
+        },
+    )
+
+    return me(request)
+
+
+@router.delete("/pickup-point", response=MeOut, auth=auth)
+def delete_pickup_point(request):
+    user = request.auth
+    UserPickupPoint.objects.filter(user=user).delete()
     return me(request)
 
 
