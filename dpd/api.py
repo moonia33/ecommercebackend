@@ -19,7 +19,7 @@ def list_lockers(
     search: str | None = None,
     locker_type: str | None = None,
     postal_code: str | None = None,
-    limit: int | None = 50,
+    limit: int | None = 1000,
 ):
     cc = (country_code or "").strip().upper()
     if len(cc) != 2:

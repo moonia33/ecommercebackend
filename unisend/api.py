@@ -16,9 +16,10 @@ def list_terminals(
     request,
     country_code: str = "LT",
     locality: str | None = None,
+    city: str | None = None,
     search: str | None = None,
     postal_code: str | None = None,
-    limit: int | None = 50,
+    limit: int | None = 1000,
 ):
     cc = (country_code or "").strip().upper()
     if len(cc) != 2:
@@ -29,8 +30,12 @@ def list_terminals(
 
     qs = UnisendTerminal.objects.filter(is_active=True, country_code=cc)
 
-    if locality:
-        qs = qs.filter(locality__iexact=str(locality).strip())
+    loc = locality
+    if not loc and city:
+        loc = city
+
+    if loc:
+        qs = qs.filter(locality__iexact=str(loc).strip())
     if postal_code:
         qs = qs.filter(postal_code__iexact=str(postal_code).strip())
     if search:
@@ -60,6 +65,7 @@ def list_terminals(
                 id=str(o.terminal_id or ""),
                 name=str(o.name or ""),
                 countryCode=str(o.country_code or ""),
+                city=str(o.locality or ""),
                 locality=str(o.locality or ""),
                 street=str((o.street or "").strip() or raw_addr),
                 postalCode=str(o.postal_code or ""),

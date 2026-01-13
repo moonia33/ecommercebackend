@@ -59,7 +59,7 @@ def get_shipping_net(*, shipping_method: str, country_code: str) -> Decimal:
         return Decimal(rate.net_eur)
 
     # Backward-compatible fallback for older setups.
-    if shipping_method == "lpexpress":
+    if shipping_method in {"lpexpress", "unisend_pickup"}:
         return Decimal(str(getattr(settings, "LPEXPRESS_SHIPPING_NET_EUR", "0.00")))
 
     raise ValueError("Unsupported shipping_method")

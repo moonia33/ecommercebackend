@@ -70,15 +70,28 @@ def _validate_e164(phone: str) -> bool:
     return True
 
 
-def _serialize_pickup_point(obj: UserPickupPoint | None):
+def _serialize_pickup_point(request, obj: UserPickupPoint | None):
     if not obj:
         return None
+
+    shipping_method_image_url = ""
+    try:
+        from shipping.models import ShippingMethod
+
+        m = ShippingMethod.objects.filter(code=obj.shipping_method_code, is_active=True).only("image").first()
+        img = getattr(m, "image", None) if m else None
+        if img and getattr(img, "url", None):
+            shipping_method_image_url = request.build_absolute_uri(img.url)
+    except Exception:
+        shipping_method_image_url = ""
+
     return {
         "shipping_method_code": obj.shipping_method_code,
         "pickup_point_id": obj.pickup_point_id,
         "pickup_point_name": obj.pickup_point_name,
         "pickup_point_raw": obj.pickup_point_raw or {},
         "country_code": obj.country_code,
+        "shipping_method_image_url": shipping_method_image_url,
     }
 
 
@@ -110,6 +123,7 @@ def _pickup_snapshot_from_unisend(*, pickup_point_id: str):
 
 PICKUP_POINT_SNAPSHOT_RESOLVERS = {
     "dpd": _pickup_snapshot_from_dpd,
+    "unisend": _pickup_snapshot_from_unisend,
     "lpexpress": _pickup_snapshot_from_unisend,
 }
 
@@ -261,7 +275,10 @@ def otp_verify(request, payload: OTPVerifyIn):
 
     access = issue_access_token(user_id=user.id)
     refresh = issue_refresh_token(user_id=user.id)
-    resp = JsonResponse({"status": "ok"})
+    body = {"status": "ok"}
+    if bool(getattr(settings, "AUTH_RETURN_ACCESS_IN_BODY", False)):
+        body["access"] = access
+    resp = JsonResponse(body)
     _set_auth_cookies(request, resp, access=access, refresh=refresh)
 
     try:
@@ -347,7 +364,10 @@ def refresh(request, payload: RefreshIn | None = None):
         raise HttpError(401, "Invalid refresh token")
 
     access = issue_access_token(user_id=int(user_id))
-    resp = JsonResponse({"status": "ok"})
+    body = {"status": "ok"}
+    if bool(getattr(settings, "AUTH_RETURN_ACCESS_IN_BODY", False)):
+        body["access"] = access
+    resp = JsonResponse(body)
     _set_auth_cookies(request, resp, access=access, refresh=None)
     return resp
 
@@ -459,13 +479,15 @@ def me(request):
         "consents": consents_out,
         "phones": phones_out,
         "addresses": addresses_out,
-        "primary_pickup_point": _serialize_pickup_point(pickup_point),
+        "primary_pickup_point": _serialize_pickup_point(request, pickup_point),
     }
 
 
 @router.patch("/me", response=MeOut, auth=auth)
-def update_me(request, payload: MeUpdateIn):
+def update_me(request, payload: MeUpdateIn | None = None):
     user = request.auth
+
+    payload = payload or MeUpdateIn()
 
     update_fields: list[str] = []
 

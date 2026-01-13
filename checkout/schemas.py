@@ -59,12 +59,14 @@ class ShippingMethodOut(Schema):
     name: str
     carrier_code: str = ""
     requires_pickup_point: bool = False
+    image_url: str = ""
+    pickup_points_url: str = ""
     price: MoneyOut
 
 
 class CheckoutPreviewIn(Schema):
     shipping_address_id: int
-    shipping_method: str = "lpexpress"
+    shipping_method: str = "unisend_pickup"
     pickup_point_id: str | None = None
     payment_method: str = "klix"
     channel: str = "normal"
@@ -109,7 +111,7 @@ class ConsentDefinitionOut(Schema):
 
 class CheckoutConfirmIn(Schema):
     shipping_address_id: int
-    shipping_method: str = "lpexpress"
+    shipping_method: str = "unisend_pickup"
     pickup_point_id: str | None = None
     payment_method: str = "klix"
     neopay_bank_bic: str | None = None
@@ -124,6 +126,16 @@ class CheckoutConfirmOut(Schema):
     payment_status: str
     redirect_url: str = ""
     payment_instructions: str = ""
+
+
+class ApplyPickupPointIn(Schema):
+    shipping_method: str
+    pickup_point_id: str
+    set_as_primary_pickup_point: bool = True
+
+
+class ApplyPickupPointOut(Schema):
+    shipping_address_id: int
 
 
 class PaymentMethodOut(Schema):

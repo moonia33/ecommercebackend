@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from django.db.models import Case, IntegerField, Q, Value, When
 from django.utils import timezone
@@ -96,7 +97,24 @@ def _select_delivery_rule(
         + Case(When(warehouse__isnull=False, then=Value(1)), default=Value(0), output_field=IntegerField())
     )
 
-    return qs.annotate(_spec=specificity).order_by("-priority", "-_spec", "code").first()
+    # Prefer cycle-based rules when available; otherwise fall back to lead-time.
+    # Only treat a CYCLE rule as preferred if it has required fields set.
+    kind_preference = Case(
+        When(
+            kind=DeliveryRule.Kind.CYCLE,
+            order_window_end_weekday__isnull=False,
+            order_window_end_time__isnull=False,
+            then=Value(1),
+        ),
+        default=Value(0),
+        output_field=IntegerField(),
+    )
+
+    return (
+        qs.annotate(_spec=specificity, _kind_pref=kind_preference)
+        .order_by("-_kind_pref", "-priority", "-_spec", "code")
+        .first()
+    )
 
 
 def estimate_delivery_window(
@@ -137,9 +155,15 @@ def estimate_delivery_window(
             return None
 
         try:
-            # Use now tz; rule.timezone is stored for future extension.
+            # Cycle-based rules are timezone-sensitive; interpret weekday/time in rule.timezone.
+            try:
+                rule_tz = ZoneInfo(str(rule.timezone or "Europe/Vilnius"))
+            except Exception:
+                rule_tz = now_dt.tzinfo
+
+            now_local = now_dt.astimezone(rule_tz) if rule_tz else now_dt
             cycle_end_at = _next_weekday_time(
-                now=now_dt,
+                now=now_local,
                 weekday=int(rule.order_window_end_weekday),
                 at_time=rule.order_window_end_time,
             )

@@ -28,6 +28,7 @@ class ShippingMethodAdmin(admin.ModelAdmin):
         "code",
         "name",
         "carrier_code",
+        "image",
         "requires_pickup_point",
         "is_active",
         "sort_order",

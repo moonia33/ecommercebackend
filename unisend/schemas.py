@@ -8,6 +8,7 @@ class TerminalOut(Schema):
     name: str = ""
 
     countryCode: str = ""
+    city: str = ""
     locality: str = ""
     street: str = ""
     postalCode: str = ""

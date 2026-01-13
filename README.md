@@ -132,6 +132,8 @@ Kalbos parinkimas:
 - Klientų paskyros (email OTP) ir konfigūruojamas guest checkout.
 - Paieška per Meilisearch (atskiras Docker servisas) su fallback į DB paiešką.
 
+Greito checkout (wizard) rekomenduojamas FE flow: `docs/fast_checkout.md`.
+
 ## Konfigūracija
 
 - Viskas turi būti valdoma per `.env` (dev/prod profiliai).

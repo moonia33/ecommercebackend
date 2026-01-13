@@ -64,6 +64,7 @@ class ShippingMethod(models.Model):
     carrier_code = models.CharField(max_length=32, blank=True, default="")
 
     requires_pickup_point = models.BooleanField(default=False)
+    image = models.ImageField(upload_to="shipping_methods/%Y/%m/", null=True, blank=True)
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
 

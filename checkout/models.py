@@ -143,7 +143,7 @@ class Order(models.Model):
     items_gross = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal("0.00"))
 
-    shipping_method = models.CharField(max_length=50, default="lpexpress")
+    shipping_method = models.CharField(max_length=50, default="unisend_pickup")
 
     # Delivery / carrier
     delivery_status = models.CharField(

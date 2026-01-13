@@ -6,7 +6,7 @@ from django.db import transaction
 from ninja import Router
 from ninja.errors import HttpError
 
-from .schemas import NeopayBankOut, NeopayCallbackIn
+from .schemas import NeopayBankOut, NeopayCallbackIn, NeopayCountryOut
 from .services.neopay import decode_neopay_token, get_neopay_config
 
 
@@ -241,6 +241,8 @@ def neopay_banks(request, country_code: str = "LT"):
                 services = [services]
             if not isinstance(services, list):
                 services = []
+            logo_url = (b.get("logo") or b.get("logoUrl") or "").strip() if isinstance(b.get("logo") or b.get("logoUrl") or "", str) else ""
+            is_operating = bool(b.get("isOperating")) if "isOperating" in b else True
             if bic:
                 result.append(
                     NeopayBankOut(
@@ -248,7 +250,152 @@ def neopay_banks(request, country_code: str = "LT"):
                         bic=bic,
                         name=name or bic,
                         service_types=[str(x) for x in services if str(x).strip()],
+                        logo_url=logo_url,
+                        is_operating=is_operating,
                     )
                 )
 
     return result
+
+
+@router.get("/neopay/countries", response=list[NeopayCountryOut])
+def neopay_countries(request, country_code: str | None = None):
+    cfg = get_neopay_config()
+    if not cfg:
+        raise HttpError(400, "Neopay config is not set")
+
+    if not cfg.enable_bank_preselect:
+        return []
+
+    import requests
+
+    base = (cfg.banks_api_base_url or "https://psd2.neopay.lt/api").rstrip("/")
+    candidates = [
+        f"{base}/countries/{cfg.project_id}",
+        f"{base}/countries/{cfg.project_id}/",
+        # Fallback: some environments expose only the generic countries list.
+        f"{base}/countries",
+        f"{base}/countries/",
+    ]
+    if base.endswith("/api"):
+        root = base[: -len("/api")]
+        candidates.append(f"{root}/api/countries/{cfg.project_id}")
+        candidates.append(f"{root}/api/countries/{cfg.project_id}/")
+
+    last_response = None
+    last_exc: Exception | None = None
+
+    for url in candidates:
+        try:
+            r = requests.get(
+                url,
+                timeout=20,
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "inultimo-backend/1.0",
+                },
+            )
+        except requests.RequestException as e:
+            last_exc = e
+            continue
+
+        last_response = r
+        if r.status_code == 404:
+            continue
+        if r.status_code >= 400:
+            body = (r.text or "").strip().replace("\n", " ")
+            if len(body) > 300:
+                body = body[:300] + "..."
+            raise HttpError(502, f"Neopay banks api failed: {r.status_code} url={url} body={body}")
+
+        data = r.json()
+        break
+    else:
+        if last_exc is not None:
+            raise HttpError(502, f"Neopay banks api request failed: {type(last_exc).__name__}")
+        if last_response is not None:
+            body = (last_response.text or "").strip().replace("\n", " ")
+            if len(body) > 300:
+                body = body[:300] + "..."
+            raise HttpError(
+                502,
+                f"Neopay banks api failed: {last_response.status_code} url={candidates[-1]} body={body}",
+            )
+        raise HttpError(502, "Neopay banks api failed: no response")
+
+    if isinstance(data, list):
+        countries = data
+    elif isinstance(data, dict):
+        countries = data.get("countries") or []
+        # Some shapes might be keyed by country code.
+        if not countries and country_code:
+            cc = (country_code or "").strip().upper()
+            if cc and cc in data and isinstance(data.get(cc), dict):
+                countries = [{"code": cc, **data.get(cc)}]
+    else:
+        countries = []
+
+    cc_filter = (country_code or "").strip().upper() if country_code else ""
+
+    out: list[NeopayCountryOut] = []
+    for c in countries:
+        if not isinstance(c, dict):
+            continue
+        code = (c.get("code") or c.get("country") or c.get("countryCode") or "").strip().upper()
+        if cc_filter and code != cc_filter:
+            continue
+        name = (c.get("name") or c.get("countryName") or "").strip()
+        currency = (c.get("currency") or "").strip()
+        default_language = (c.get("defaultLanguage") or c.get("defaultLocale") or "").strip().upper()
+        languages = c.get("languages") or []
+        if isinstance(languages, str):
+            languages = [languages]
+        if not isinstance(languages, list):
+            languages = []
+        rules = c.get("rules") or {}
+        if not isinstance(rules, dict):
+            rules = {}
+
+        banks = c.get("aspsps") or c.get("banks") or []
+        if not isinstance(banks, list):
+            banks = []
+
+        banks_out: list[NeopayBankOut] = []
+        for b in banks:
+            if not isinstance(b, dict):
+                continue
+            bic = (b.get("bic") or b.get("BIC") or "").strip()
+            bname = (b.get("name") or b.get("bankName") or "").strip()
+            services = b.get("services") or b.get("serviceTypes") or []
+            if isinstance(services, str):
+                services = [services]
+            if not isinstance(services, list):
+                services = []
+            logo_url = (b.get("logo") or b.get("logoUrl") or "").strip() if isinstance(b.get("logo") or b.get("logoUrl") or "", str) else ""
+            is_operating = bool(b.get("isOperating")) if "isOperating" in b else True
+            if not bic:
+                continue
+            banks_out.append(
+                NeopayBankOut(
+                    country_code=code or cc_filter or "",
+                    bic=bic,
+                    name=bname or bic,
+                    service_types=[str(x) for x in services if str(x).strip()],
+                    logo_url=logo_url,
+                    is_operating=is_operating,
+                )
+            )
+
+        out.append(
+            NeopayCountryOut(
+                code=code,
+                name=name,
+                currency=currency,
+                default_language=default_language,
+                languages=[str(x).strip().upper() for x in languages if str(x).strip()],
+                rules={str(k).strip().upper(): str(v) for k, v in rules.items() if str(k).strip() and str(v).strip()},
+                aspsps=banks_out,
+            )
+        )
+
+    return out

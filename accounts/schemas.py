@@ -39,6 +39,7 @@ class AccessOut(Schema):
 
 class StatusOut(Schema):
     status: str
+    access: str | None = None
 
 
 class CustomerGroupOut(Schema):
@@ -89,6 +90,7 @@ class PickupPointOut(Schema):
     pickup_point_name: str
     pickup_point_raw: dict
     country_code: str
+    shipping_method_image_url: str = ""
 
 
 class MeOut(Schema):

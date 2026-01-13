@@ -11,7 +11,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.auth import JWTAuth
-from accounts.models import UserAddress
+from accounts.models import UserAddress, UserPhone, UserPickupPoint
 from catalog.models import Category, InventoryItem, Variant
 from pricing.services import get_vat_rate
 from promotions.models import Coupon
@@ -31,6 +31,8 @@ from .schemas import (
     CheckoutConfirmOut,
     CheckoutPreviewIn,
     CheckoutPreviewOut,
+    ApplyPickupPointIn,
+    ApplyPickupPointOut,
     MoneyOut,
     OrderOut,
     OrderLineOut,
@@ -63,6 +65,197 @@ def _dw_value(dw, key: str):
     except Exception:
         return None
 _auth = JWTAuth()
+
+
+def _primary_phone_for_user(user) -> str:
+    p = UserPhone.objects.filter(user=user, is_primary=True).order_by("-created_at").first()
+    return (p.phone if p else "") or ""
+
+
+def _full_name_for_user(user) -> str:
+    first = (getattr(user, "first_name", "") or "").strip()
+    last = (getattr(user, "last_name", "") or "").strip()
+    return (first + " " + last).strip()
+
+
+def _pickup_point_address_fields(*, carrier_code: str, pickup_locker, pickup_snapshot: dict | None):
+    carrier_code = (carrier_code or "").strip().lower()
+
+    if pickup_locker is not None:
+        line1 = str(getattr(pickup_locker, "street", "") or "").strip()
+        city = str(getattr(pickup_locker, "city", "") or "").strip()
+        postal_code = str(getattr(pickup_locker, "postal_code", "") or "").strip()
+        country_code = str(getattr(pickup_locker, "country_code", "") or "").strip().upper()
+        label_name = str(getattr(pickup_locker, "name", "") or "").strip()
+        pickup_point_id = str(getattr(pickup_locker, "locker_id", "") or "").strip()
+        return {
+            "label_name": label_name,
+            "pickup_point_id": pickup_point_id,
+            "line1": line1,
+            "city": city,
+            "postal_code": postal_code,
+            "country_code": country_code,
+        }
+
+    snap = pickup_snapshot or {}
+
+    raw = snap.get("pickup_point_raw") if isinstance(snap, dict) else None
+    raw = raw if isinstance(raw, dict) else {}
+
+    line1 = (
+        str(raw.get("address") or "").strip()
+        or str(raw.get("street") or "").strip()
+        or str(raw.get("line1") or "").strip()
+    )
+    city = (
+        str(raw.get("city") or "").strip()
+        or str(raw.get("locality") or "").strip()
+        or str(raw.get("town") or "").strip()
+    )
+    postal_code = (
+        str(raw.get("postalCode") or "").strip()
+        or str(raw.get("postal_code") or "").strip()
+        or str(raw.get("zip") or "").strip()
+        or str(raw.get("zipCode") or "").strip()
+    )
+    country_code = (
+        str(raw.get("countryCode") or "").strip()
+        or str(raw.get("country_code") or "").strip()
+        or str(raw.get("country") or "").strip()
+    )
+
+    return {
+        "label_name": str(snap.get("pickup_point_name") or "").strip(),
+        "pickup_point_id": str(snap.get("pickup_point_id") or "").strip(),
+        "line1": line1,
+        "city": city,
+        "postal_code": postal_code,
+        "country_code": str(country_code or "").strip().upper(),
+    }
+
+
+@router.post("/checkout/apply-pickup-point", response=ApplyPickupPointOut, auth=_auth)
+def apply_pickup_point(request, payload: ApplyPickupPointIn):
+    user = _require_user(request)
+
+    shipping_method = (payload.shipping_method or "").strip()
+    pickup_point_id = (payload.pickup_point_id or "").strip()
+    if not shipping_method or not pickup_point_id:
+        raise HttpError(400, "shipping_method and pickup_point_id are required")
+
+    full_name = _full_name_for_user(user)
+    if not full_name:
+        raise HttpError(400, "Missing first_name/last_name")
+
+    phone = _primary_phone_for_user(user)
+    if not phone:
+        raise HttpError(400, "Missing phone")
+
+    # Resolve pickup point; this validates pickup_point_id for the carrier.
+    carrier_code, pickup_locker, pickup_snapshot = _validate_and_resolve_pickup(
+        shipping_method=shipping_method,
+        pickup_point_id=pickup_point_id,
+        country_code="",
+    )
+
+    addr_fields = _pickup_point_address_fields(
+        carrier_code=carrier_code,
+        pickup_locker=pickup_locker,
+        pickup_snapshot=pickup_snapshot,
+    )
+    country_code = (addr_fields.get("country_code") or "").strip().upper() or "LT"
+    if len(country_code) != 2:
+        country_code = "LT"
+
+    label_name = (addr_fields.get("label_name") or "").strip()
+    from shipping.models import ShippingMethod
+
+    method = ShippingMethod.objects.filter(code=shipping_method).first()
+    method_name = (getattr(method, "name", "") or "").strip()
+    technical_label = f"{shipping_method}:{label_name}".strip(":")
+    human_label = f"{(method_name or shipping_method)}:{label_name}".strip(":")
+    addr_label = human_label
+    line1 = (addr_fields.get("line1") or "").strip()
+    city = (addr_fields.get("city") or "").strip()
+    postal_code = (addr_fields.get("postal_code") or "").strip()
+    if not line1 or not city or not postal_code:
+        raise HttpError(400, "Pickup point address is incomplete")
+
+    with transaction.atomic():
+        has_default_billing = UserAddress.objects.filter(user=user, is_default_billing=True).exists()
+        UserAddress.objects.filter(user=user, is_default_shipping=True).update(is_default_shipping=False)
+        if not has_default_billing:
+            UserAddress.objects.filter(user=user, is_default_billing=True).update(is_default_billing=False)
+
+        # Avoid creating duplicate pickup-point addresses (common during checkout/preview flows).
+        # Match by shipping_method label prefix + resolved address fields.
+        existing = (
+            UserAddress.objects.filter(user=user)
+            .filter(
+                label__in=[addr_label[:50], technical_label[:50]],
+                line1=line1,
+                city=city,
+                postal_code=postal_code,
+                country_code=country_code,
+            )
+            .order_by("-updated_at")
+            .first()
+        )
+
+        if existing:
+            addr = existing
+            # Keep name/phone up to date with current user profile.
+            addr.full_name = full_name
+            addr.phone = phone
+            addr.label = addr_label[:50]
+            addr.is_default_shipping = True
+            if not has_default_billing:
+                addr.is_default_billing = True
+                addr.save(
+                    update_fields=[
+                        "label",
+                        "full_name",
+                        "phone",
+                        "is_default_shipping",
+                        "is_default_billing",
+                        "updated_at",
+                    ]
+                )
+            else:
+                addr.save(update_fields=["label", "full_name", "phone", "is_default_shipping", "updated_at"])
+        else:
+            addr = UserAddress.objects.create(
+                user=user,
+                label=addr_label[:50],
+                full_name=full_name,
+                company="",
+                company_reg_no="",
+                company_vat_no="",
+                line1=line1,
+                city=city,
+                postal_code=postal_code,
+                country_code=country_code,
+                phone=phone,
+                is_default_shipping=True,
+                is_default_billing=(not has_default_billing),
+            )
+
+        if bool(getattr(payload, "set_as_primary_pickup_point", True)):
+            UserPickupPoint.objects.update_or_create(
+                user=user,
+                defaults={
+                    "shipping_method_code": shipping_method,
+                    "pickup_point_id": pickup_point_id,
+                    "pickup_point_name": str(addr_fields.get("label_name") or "").strip(),
+                    "pickup_point_raw": (
+                        (pickup_locker.raw if pickup_locker is not None else (pickup_snapshot or {}).get("pickup_point_raw"))
+                        or {}
+                    ),
+                    "country_code": country_code,
+                },
+            )
+
+    return {"shipping_address_id": int(addr.id)}
 
 
 def _bank_transfer_instructions_for(*, order_id: int | None, country_code: str) -> str:
@@ -308,6 +501,7 @@ def _resolve_pickup_unisend(*, pickup_point_id: str, country_code: str):
 
 PICKUP_POINT_RESOLVERS = {
     "dpd": _resolve_pickup_dpd,
+    "unisend": _resolve_pickup_unisend,
     "lpexpress": _resolve_pickup_unisend,
 }
 
@@ -315,7 +509,7 @@ PICKUP_POINT_RESOLVERS = {
 def _validate_and_resolve_pickup(*, shipping_method: str, pickup_point_id: str | None, country_code: str):
     from shipping.models import ShippingMethod
 
-    shipping_method = (shipping_method or "").strip() or "lpexpress"
+    shipping_method = (shipping_method or "").strip() or "unisend_pickup"
     pickup_point_id = (pickup_point_id or "").strip() or None
     country_code = (country_code or "").strip().upper()
 
@@ -937,6 +1131,30 @@ def shipping_methods(request, country_code: str = "LT"):
 
         price = money_from_net(
             currency="EUR", unit_net=shipping_net, vat_rate=vat_rate, qty=1)
+
+        image_url = ""
+        try:
+            img = getattr(m, "image", None)
+            if img and getattr(img, "url", None):
+                image_url = request.build_absolute_uri(img.url)
+        except Exception:
+            image_url = ""
+
+        pickup_points_url = ""
+        try:
+            if bool(getattr(m, "requires_pickup_point", False)):
+                carrier = (getattr(m, "carrier_code", "") or "").strip().lower()
+                if carrier == "dpd":
+                    pickup_points_url = request.build_absolute_uri(
+                        f"/api/v1/dpd/lockers?country_code={country_code}"
+                    )
+                elif carrier in {"unisend", "lpexpress"}:
+                    pickup_points_url = request.build_absolute_uri(
+                        f"/api/v1/unisend/terminals?country_code={country_code}"
+                    )
+        except Exception:
+            pickup_points_url = ""
+
         out.append(
             ShippingMethodOut(
                 code=m.code,
@@ -944,6 +1162,8 @@ def shipping_methods(request, country_code: str = "LT"):
                 carrier_code=getattr(m, "carrier_code", "") or "",
                 requires_pickup_point=bool(
                     getattr(m, "requires_pickup_point", False)),
+                image_url=image_url,
+                pickup_points_url=pickup_points_url,
                 price=MoneyOut(
                     currency=price.currency,
                     net=price.net,
@@ -966,7 +1186,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
     if not addr:
         raise HttpError(404, "Shipping address not found")
 
-    shipping_method = (payload.shipping_method or "").strip() or "lpexpress"
+    shipping_method = (payload.shipping_method or "").strip() or "unisend_pickup"
     payment_method = (getattr(payload, "payment_method", "") or "").strip() or "klix"
     channel = (getattr(payload, "channel", "normal") or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
@@ -1199,7 +1419,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
     if not addr:
         raise HttpError(404, "Shipping address not found")
 
-    shipping_method = (payload.shipping_method or "").strip() or "lpexpress"
+    shipping_method = (payload.shipping_method or "").strip() or "unisend_pickup"
     pickup_point_id = _maybe_fill_pickup_point_id_from_user(
         user=user,
         shipping_method=shipping_method,

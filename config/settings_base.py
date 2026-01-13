@@ -116,6 +116,8 @@ elif AUTH_COOKIE_SECURE_RAW in {"false", "0", "no"}:
     AUTH_COOKIE_SECURE = False
 AUTH_COOKIE_DOMAIN = (env("AUTH_COOKIE_DOMAIN", default="") or "").strip() or None
 
+AUTH_RETURN_ACCESS_IN_BODY = env.bool("AUTH_RETURN_ACCESS_IN_BODY", default=False)
+
 RECENTLY_VIEWED_MAX = env.int("RECENTLY_VIEWED_MAX", default=12)
 
 EMAIL_OTP_CODE_LENGTH = env.int("EMAIL_OTP_CODE_LENGTH")

@@ -117,19 +117,19 @@ def _receiver_courier(order: Order) -> dict[str, Any]:
 
 def ensure_unisend_parcel(order: Order, *, client: UnisendClient | None = None) -> int:
     existing = (order.carrier_shipment_id or "").strip()
-    if (order.carrier_code or "").strip() == "lpexpress" and existing.isdigit():
+    if (order.carrier_code or "").strip() in {"lpexpress", "unisend"} and existing.isdigit():
         return int(existing)
 
     shipping_method = (order.shipping_method or "").strip()
-    if shipping_method not in {"lpexpress", "lpexpress_courier"}:
-        raise UnisendLabelConfigError("Šis užsakymas nėra Unisend (lpexpress).")
+    if shipping_method not in {"unisend_pickup", "unisend_courier", "lpexpress", "lpexpress_courier"}:
+        raise UnisendLabelConfigError("Šis užsakymas nėra Unisend.")
 
     receiver: dict[str, Any]
     plan_code: str
     parcel_type: str
     parcel_size: str
 
-    if shipping_method == "lpexpress_courier":
+    if shipping_method in {"unisend_courier", "lpexpress_courier"}:
         # Courier: from sender (home/office) to receiver address.
         plan_code = "HANDS"
         parcel_type = "H2H"
@@ -177,7 +177,7 @@ def ensure_unisend_parcel(order: Order, *, client: UnisendClient | None = None) 
     except Exception as e:
         raise UnisendLabelConfigError("Unisend: parcel id neteisingas") from e
 
-    order.carrier_code = "lpexpress"
+    order.carrier_code = "unisend"
     order.carrier_shipment_id = str(parcel_id_int)
     order.save(update_fields=["carrier_code", "carrier_shipment_id", "updated_at"])
 
