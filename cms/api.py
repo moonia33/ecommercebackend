@@ -43,7 +43,13 @@ def cms_page_detail(request, slug: str, language_code: str | None = None):
     if language_code is None:
         language_code = get_request_language_code(request)
 
-    page = CmsPage.objects.filter(slug=slug, is_active=True).only("id", "slug", "updated_at").first()
+    site = getattr(request, "site", None)
+
+    qs = CmsPage.objects.filter(slug=slug, is_active=True)
+    if site is not None and getattr(site, "id", None) is not None:
+        qs = qs.filter(site_id=int(site.id))
+
+    page = qs.only("id", "slug", "updated_at").first()
     if page is None:
         raise HttpError(404, "Page not found")
 

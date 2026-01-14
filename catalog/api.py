@@ -51,6 +51,9 @@ from .models import (
     ProductFeatureValue,
     ProductGroup,
     ProductOptionType,
+    SiteBrandExclusion,
+    SiteCategoryBrandExclusion,
+    SiteCategoryVisibility,
     Variant,
     VariantOptionValue,
 )
@@ -60,6 +63,141 @@ router = Router(tags=["catalog"])
 
 
 User = get_user_model()
+
+
+def _get_request_site_id(request) -> int | None:
+    site = getattr(request, "site", None)
+    if site is None:
+        return None
+    sid = getattr(site, "id", None)
+    if sid is None:
+        return None
+    try:
+        sid_i = int(sid)
+    except Exception:
+        return None
+    return sid_i if sid_i > 0 else None
+
+
+def _descendant_ids_map() -> dict[int, list[int]]:
+    rows = Category.objects.filter(is_active=True).values("id", "parent_id")
+    children: dict[int, list[int]] = {}
+    for r in rows:
+        pid = r["parent_id"]
+        if pid is None:
+            continue
+        children.setdefault(int(pid), []).append(int(r["id"]))
+    return children
+
+
+def _descendant_ids_for_root(*, root_id: int, children: dict[int, list[int]] | None = None) -> list[int]:
+    if children is None:
+        children = _descendant_ids_map()
+
+    out: list[int] = []
+    stack = [int(root_id)]
+    seen: set[int] = set()
+    while stack:
+        cid = stack.pop()
+        if cid in seen:
+            continue
+        seen.add(cid)
+        out.append(cid)
+        stack.extend(children.get(cid, []))
+    return out
+
+
+def _ancestor_ids_for_ids(*, ids: set[int]) -> set[int]:
+    if not ids:
+        return set()
+    rows = Category.objects.filter(is_active=True).values("id", "parent_id")
+    parent_of: dict[int, int | None] = {int(r["id"]): (int(r["parent_id"]) if r["parent_id"] is not None else None) for r in rows}
+    out = set(int(i) for i in ids)
+    stack = list(out)
+    while stack:
+        cid = stack.pop()
+        pid = parent_of.get(int(cid))
+        if pid is None:
+            continue
+        if pid in out:
+            continue
+        out.add(pid)
+        stack.append(pid)
+    return out
+
+
+def _get_site_allowed_category_ids(*, site_id: int) -> set[int] | None:
+    rules = list(
+        SiteCategoryVisibility.objects.filter(site_id=int(site_id), is_active=True)
+        .only("category_id", "include_descendants")
+    )
+    if not rules:
+        return None
+
+    children = _descendant_ids_map()
+    allowed: set[int] = set()
+    for r in rules:
+        cid = int(r.category_id)
+        if bool(r.include_descendants):
+            allowed.update(_descendant_ids_for_root(root_id=cid, children=children))
+        else:
+            allowed.add(cid)
+    return allowed
+
+
+def _get_site_excluded_brand_ids(*, site_id: int) -> set[int]:
+    return set(
+        int(i)
+        for i in SiteBrandExclusion.objects.filter(site_id=int(site_id), is_active=True).values_list(
+            "brand_id", flat=True
+        )
+    )
+
+
+def _get_site_category_excluded_brand_ids(*, site_id: int, category_id: int) -> set[int]:
+    rules = list(
+        SiteCategoryBrandExclusion.objects.filter(site_id=int(site_id), is_active=True)
+        .only("category_id", "include_descendants", "brand_id")
+    )
+    if not rules:
+        return set()
+
+    children = _descendant_ids_map()
+    out: set[int] = set()
+    for r in rules:
+        root_id = int(r.category_id)
+        if bool(r.include_descendants):
+            ids = _descendant_ids_for_root(root_id=root_id, children=children)
+            if int(category_id) in set(ids):
+                out.add(int(r.brand_id))
+        else:
+            if int(category_id) == root_id:
+                out.add(int(r.brand_id))
+    return out
+
+
+def _apply_site_assortment_to_product_qs(
+    *,
+    qs,
+    site_id: int | None,
+    selected_category_id: int | None,
+):
+    if site_id is None:
+        return qs
+
+    allowed = _get_site_allowed_category_ids(site_id=site_id)
+    if allowed is not None:
+        qs = qs.filter(category_id__in=list(allowed))
+
+    excluded = _get_site_excluded_brand_ids(site_id=site_id)
+    if selected_category_id is not None:
+        excluded |= _get_site_category_excluded_brand_ids(
+            site_id=site_id, category_id=int(selected_category_id)
+        )
+    if excluded:
+        qs = qs.exclude(brand_id__in=list(excluded))
+
+    return qs
 
 
 def _money_out(*, currency: str, unit_net: Decimal, vat_rate: Decimal) -> MoneyOut:
@@ -133,6 +271,8 @@ def recently_viewed(
     if channel not in {"normal", "outlet"}:
         raise HttpError(400, "Invalid channel")
 
+    site_id = _get_request_site_id(request)
+
     try:
         default_limit = int(getattr(settings, "RECENTLY_VIEWED_MAX", 12))
     except Exception:
@@ -185,12 +325,24 @@ def recently_viewed(
         else InventoryItem.OfferVisibility.NORMAL
     )
 
+    site_id = _get_request_site_id(request)
+    selected_category: Category | None = None
+    selected_category_ids: list[int] | None = None
+
+    qs = Product.objects.filter(is_active=True).annotate(
+        _min_variant_price=Min("variants__price_eur"),
+        _min_offer_price=Min(
+            "variants__inventory_items__offer_price_override_eur",
+            filter=Q(variants__is_active=True)
+            & Q(variants__inventory_items__offer_visibility=visibility)
+            & Q(variants__inventory_items__qty_on_hand__gt=F("variants__inventory_items__qty_reserved")),
+        ),
+    )
+
+    qs = _apply_site_assortment_to_product_qs(qs=qs, site_id=site_id, selected_category_id=None)
+
     min_price_expr = Min("variants__price_eur", filter=Q(variants__is_active=True))
     offer_price_expr = Case(
-        When(
-            variants__inventory_items__never_discount=True,
-            then=F("variants__price_eur"),
-        ),
         When(
             variants__inventory_items__offer_price_override_eur__isnull=False,
             then=F("variants__inventory_items__offer_price_override_eur"),
@@ -347,7 +499,17 @@ def _descendant_category_ids(*, root_id: int) -> list[int]:
 
 @router.get("/categories", response=list[CategoryOut])
 def categories(request):
-    qs = Category.objects.filter(is_active=True).order_by("name")
+    site_id = _get_request_site_id(request)
+
+    allowed = None
+    if site_id is not None:
+        allowed = _get_site_allowed_category_ids(site_id=site_id)
+
+    qs = Category.objects.filter(is_active=True)
+    if allowed is not None:
+        allowed_with_ancestors = _ancestor_ids_for_ids(ids=set(allowed))
+        qs = qs.filter(id__in=list(allowed_with_ancestors))
+    qs = qs.order_by("name")
     return [
         {
             "id": c.id,
@@ -367,9 +529,20 @@ def categories(request):
 
 @router.get("/categories/{slug}", response=CategoryDetailOut)
 def category_detail(request, slug: str):
-    c = Category.objects.filter(
-        slug=slug, is_active=True).select_related("parent").first()
+    site_id = _get_request_site_id(request)
+    allowed = None
+    if site_id is not None:
+        allowed = _get_site_allowed_category_ids(site_id=site_id)
+
+    c = (
+        Category.objects.filter(slug=slug, is_active=True)
+        .select_related("parent")
+        .first()
+    )
     if not c:
+        raise HttpError(404, "Category not found")
+
+    if allowed is not None and int(c.id) not in set(allowed):
         raise HttpError(404, "Category not found")
     return {
         "id": c.id,
@@ -387,14 +560,35 @@ def category_detail(request, slug: str):
 
 @router.get("/brands", response=list[BrandOut])
 def brands(request):
-    qs = Brand.objects.filter(is_active=True).order_by("name")
+    site_id = _get_request_site_id(request)
+    allowed = None
+    excluded = set()
+    if site_id is not None:
+        allowed = _get_site_allowed_category_ids(site_id=site_id)
+        excluded = _get_site_excluded_brand_ids(site_id=site_id)
+
+    qs = Brand.objects.filter(is_active=True)
+    if excluded:
+        qs = qs.exclude(id__in=list(excluded))
+    if allowed is not None:
+        qs = qs.filter(products__is_active=True, products__category_id__in=list(allowed)).distinct()
+
+    qs = qs.order_by("name")
     return [{"id": b.id, "slug": b.slug, "name": b.name} for b in qs]
 
 
 @router.get("/brands/{slug}", response=BrandOut)
 def brand_detail(request, slug: str):
+    site_id = _get_request_site_id(request)
+    excluded = set()
+    if site_id is not None:
+        excluded = _get_site_excluded_brand_ids(site_id=site_id)
+
     b = Brand.objects.filter(slug=slug, is_active=True).first()
     if not b:
+        raise HttpError(404, "Brand not found")
+
+    if excluded and int(b.id) in excluded:
         raise HttpError(404, "Brand not found")
     return {"id": b.id, "slug": b.slug, "name": b.name}
 
@@ -489,6 +683,9 @@ def products(
     channel = (channel or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
         raise HttpError(400, "Invalid channel")
+
+    site_id = _get_request_site_id(request)
+    selected_category: Category | None = None
 
     visibility = (
         InventoryItem.OfferVisibility.OUTLET
@@ -606,10 +803,10 @@ def products(
             qs = qs.filter(Q(name__icontains=qv) | Q(slug__icontains=qv) | Q(sku__icontains=qv))
 
     if category_slug:
-        c = Category.objects.filter(slug=category_slug, is_active=True).first()
-        if not c:
+        selected_category = Category.objects.filter(slug=category_slug, is_active=True).first()
+        if not selected_category:
             raise HttpError(404, "Category not found")
-        ids = _descendant_category_ids(root_id=int(c.id))
+        ids = _descendant_category_ids(root_id=int(selected_category.id))
         qs = qs.filter(category_id__in=ids)
 
     if brand_slug:
@@ -638,6 +835,13 @@ def products(
 
     if feature or option:
         qs = qs.distinct()
+
+    # Apply site assortment rules late (after user filters), but before channel/outlet filter.
+    qs = _apply_site_assortment_to_product_qs(
+        qs=qs,
+        site_id=site_id,
+        selected_category_id=(int(selected_category.id) if selected_category is not None else None),
+    )
 
     if channel == "outlet":
         qs = qs.filter(_min_offer_price__isnull=False)
@@ -777,6 +981,10 @@ def product_facets(
         & Q(variants__inventory_items__offer_visibility=visibility)
         & Q(variants__inventory_items__qty_on_hand__gt=F("variants__inventory_items__qty_reserved"))
     )
+    site_id = _get_request_site_id(request)
+
+    selected_category: Category | None = None
+
     qs = Product.objects.filter(is_active=True).annotate(
         _has_offer=Count("id", filter=offer_filter)
     )
@@ -788,13 +996,13 @@ def product_facets(
         if qv:
             qs = qs.filter(Q(name__icontains=qv) | Q(slug__icontains=qv) | Q(sku__icontains=qv))
 
-    selected_category: Category | None = None
     if category_slug:
         selected_category = Category.objects.filter(slug=category_slug, is_active=True).first()
         if not selected_category:
             raise HttpError(404, "Category not found")
         ids = _descendant_category_ids(root_id=int(selected_category.id))
-        qs = qs.filter(category_id__in=ids)
+        selected_category_ids = [int(i) for i in ids]
+        qs = qs.filter(category_id__in=selected_category_ids)
 
     if brand_slug:
         b = Brand.objects.filter(slug=brand_slug, is_active=True).first()
@@ -822,6 +1030,12 @@ def product_facets(
 
     if feature or option:
         qs = qs.distinct()
+
+    qs = _apply_site_assortment_to_product_qs(
+        qs=qs,
+        site_id=site_id,
+        selected_category_id=(int(selected_category.id) if selected_category is not None else None),
+    )
 
     product_ids = list(qs.values_list("id", flat=True))
     if not product_ids:
@@ -1110,8 +1324,17 @@ def product_detail(
     if channel not in {"normal", "outlet"}:
         raise HttpError(400, "Invalid channel")
 
+    site_id = _get_request_site_id(request)
+
+    product_qs = Product.objects.filter(slug=slug, is_active=True)
+    product_qs = _apply_site_assortment_to_product_qs(
+        qs=product_qs,
+        site_id=site_id,
+        selected_category_id=None,
+    )
+
     product = (
-        Product.objects.filter(slug=slug, is_active=True)
+        product_qs
         .select_related("brand", "category", "tax_class")
         .prefetch_related(
             "images",
@@ -1272,15 +1495,10 @@ def product_detail(
             }
         )
 
-    feature_rows = list(product.feature_values.select_related("feature", "feature_value").all())
-    feature_rows.sort(
-        key=lambda r: (
-            r.feature.sort_order,
-            r.feature.code,
-            r.feature_value.sort_order,
-            r.feature_value.value,
-            r.id,
-        )
+    feature_rows = list(
+        ProductFeatureValue.objects.filter(product_id=product.id)
+        .select_related("feature", "feature_value")
+        .order_by("feature__sort_order", "feature__code", "feature_value__sort_order", "feature_value__value")
     )
     features_out = [
         {
@@ -1293,15 +1511,18 @@ def product_detail(
         for r in feature_rows
     ]
 
+    site = getattr(request, "site", None)
+    site_id = int(getattr(site, "id", 0) or 0) if site is not None else None
+
     content_blocks = get_content_blocks_for_product(
+        site_id=site_id,
         product_id=int(product.id),
         placement="product_detail",
         channel=channel,
-        brand_id=int(product.brand_id) if product.brand_id else None,
-        category_id=int(product.category_id) if product.category_id else None,
-        product_group_id=int(product.group_id) if getattr(product, "group_id", None) else None,
+        brand_id=getattr(product, "brand_id", None),
+        category_id=getattr(product, "category_id", None),
+        product_group_id=getattr(getattr(product, "group", None), "id", None),
         language_code=language_code,
-        now=timezone.now().date(),
     )
 
     return {

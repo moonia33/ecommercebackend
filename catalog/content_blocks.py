@@ -64,6 +64,7 @@ def _translation_fallback_chain(language_code: str | None) -> list[str]:
 
 def get_content_blocks_for_product(
     *,
+    site_id: int | None = None,
     product_id: int,
     placement: str,
     channel: str,
@@ -76,8 +77,10 @@ def get_content_blocks_for_product(
 ) -> list[ContentBlockResolved]:
     now_date = now or date.today()
 
+    site_id_v = int(site_id) if site_id is not None else 0
+
     cache_key = (
-        f"content_blocks:v1:product:{product_id}:pl:{placement}:ch:{channel}:"
+        f"content_blocks:v1:site:{site_id_v}:product:{product_id}:pl:{placement}:ch:{channel}:"
         f"b:{brand_id or 0}:c:{category_id or 0}:g:{product_group_id or 0}:"
         f"lang:{(language_code or '').lower()}:d:{now_date.isoformat()}"
     )
@@ -93,11 +96,15 @@ def get_content_blocks_for_product(
     placement = (placement or "product_detail").strip().lower()
 
     # 1) Active blocks for placement + global (global always included)
+    block_qs = ContentBlock.objects.filter(
+        is_active=True,
+        placement__in=[placement, ContentBlock.Placement.GLOBAL],
+    )
+    if site_id_v:
+        block_qs = block_qs.filter(site_id=site_id_v)
+
     blocks = list(
-        ContentBlock.objects.filter(
-            is_active=True,
-            placement__in=[placement, ContentBlock.Placement.GLOBAL],
-        ).only(
+        block_qs.only(
             "id",
             "key",
             "type",

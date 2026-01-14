@@ -2,9 +2,17 @@ from __future__ import annotations
 
 from django.db import models
 
+from api.models import get_default_site_id
+
 
 class CmsPage(models.Model):
-    slug = models.SlugField(max_length=200, unique=True)
+    site = models.ForeignKey(
+        "api.Site",
+        default=get_default_site_id,
+        on_delete=models.PROTECT,
+        related_name="cms_pages",
+    )
+    slug = models.SlugField(max_length=200)
     is_active = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -12,6 +20,9 @@ class CmsPage(models.Model):
 
     class Meta:
         ordering = ["slug"]
+        constraints = [
+            models.UniqueConstraint(fields=["site", "slug"], name="uniq_cms_page_site_slug"),
+        ]
 
     def __str__(self) -> str:
         return self.slug

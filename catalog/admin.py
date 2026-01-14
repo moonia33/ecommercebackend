@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from django import forms
 from django.contrib import admin
+from django.contrib.admin.helpers import ActionForm
+from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db.models import F, IntegerField, Sum, Value
 from django.db.models.functions import Coalesce
 from django.forms.models import BaseInlineFormSet
 
+
+from api.models import Site
 
 from .widgets import TableEditorWidget, ToastUIMarkdownWidget
 
@@ -35,6 +39,9 @@ from .models import (
     EnrichmentRule,
     EnrichmentRun,
     EnrichmentMatch,
+    SiteBrandExclusion,
+    SiteCategoryBrandExclusion,
+    SiteCategoryVisibility,
 )
 
 
@@ -44,6 +51,57 @@ class CategoryAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
+
+    class CategoryVisibilityActionForm(ActionForm):
+        site = forms.ModelChoiceField(queryset=Site.objects.all(), required=False)
+        include_descendants = forms.BooleanField(required=False, initial=True)
+
+    action_form = CategoryVisibilityActionForm
+
+    @admin.action(description="Pridėti į site visibility")
+    def add_to_site_visibility(self, request, queryset):
+        site = request.POST.get("site")
+        include_descendants = request.POST.get("include_descendants") in {"1", "true", "True", "on"}
+
+        if not site:
+            self.message_user(request, "Pasirink Site prieš vykdant veiksmą.", level=messages.ERROR)
+            return
+
+        try:
+            site_id = int(site)
+        except Exception:
+            self.message_user(request, "Neteisingas Site pasirinkimas.", level=messages.ERROR)
+            return
+
+        created = 0
+        updated = 0
+        for c in queryset:
+            obj, was_created = SiteCategoryVisibility.objects.get_or_create(
+                site_id=site_id,
+                category_id=int(c.id),
+                defaults={"include_descendants": include_descendants, "is_active": True},
+            )
+            if was_created:
+                created += 1
+            else:
+                fields_to_update = []
+                if bool(obj.include_descendants) != bool(include_descendants):
+                    obj.include_descendants = include_descendants
+                    fields_to_update.append("include_descendants")
+                if not bool(obj.is_active):
+                    obj.is_active = True
+                    fields_to_update.append("is_active")
+                if fields_to_update:
+                    obj.save(update_fields=fields_to_update)
+                    updated += 1
+
+        self.message_user(
+            request,
+            f"Site visibility: sukurta {created}, atnaujinta {updated}.",
+            level=messages.SUCCESS,
+        )
+
+    actions = ("add_to_site_visibility",)
 
     class Form(forms.ModelForm):
         description = forms.CharField(
@@ -75,6 +133,36 @@ class CategoryAdmin(admin.ModelAdmin):
         ),
         ("SEO", {"fields": ("seo_title", "seo_description", "seo_keywords")}),
     )
+
+
+@admin.register(SiteCategoryVisibility)
+class SiteCategoryVisibilityAdmin(admin.ModelAdmin):
+    list_display = ("site", "category", "include_descendants", "is_active", "updated_at")
+    list_filter = ("site", "is_active", "include_descendants")
+    search_fields = ("site__code", "category__slug", "category__name")
+    autocomplete_fields = ("site", "category")
+
+
+@admin.register(SiteBrandExclusion)
+class SiteBrandExclusionAdmin(admin.ModelAdmin):
+    list_display = ("site", "brand", "is_active", "updated_at")
+    list_filter = ("site", "is_active")
+    search_fields = ("site__code", "brand__slug", "brand__name")
+    autocomplete_fields = ("site", "brand")
+
+
+@admin.register(SiteCategoryBrandExclusion)
+class SiteCategoryBrandExclusionAdmin(admin.ModelAdmin):
+    list_display = ("site", "category", "brand", "include_descendants", "is_active", "updated_at")
+    list_filter = ("site", "is_active", "include_descendants")
+    search_fields = (
+        "site__code",
+        "category__slug",
+        "category__name",
+        "brand__slug",
+        "brand__name",
+    )
+    autocomplete_fields = ("site", "category", "brand")
 
 
 @admin.register(Brand)

@@ -7,6 +7,8 @@ from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import models
 
+from api.models import get_default_site_id
+
 
 class TaxClass(models.Model):
     code = models.SlugField(max_length=50, unique=True)
@@ -130,6 +132,97 @@ class Brand(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class SiteCategoryVisibility(models.Model):
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.CASCADE,
+        related_name="visible_categories",
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        related_name="site_visibility_rules",
+    )
+    include_descendants = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["site", "category"],
+                name="uniq_site_category_visibility",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.site.code}: {self.category.slug}"
+
+
+class SiteBrandExclusion(models.Model):
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.CASCADE,
+        related_name="excluded_brands",
+    )
+    brand = models.ForeignKey(
+        Brand,
+        on_delete=models.CASCADE,
+        related_name="site_exclusion_rules",
+    )
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["site", "brand"],
+                name="uniq_site_brand_exclusion",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.site.code}: exclude {self.brand.slug}"
+
+
+class SiteCategoryBrandExclusion(models.Model):
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.CASCADE,
+        related_name="excluded_category_brands",
+    )
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        related_name="site_brand_exclusions",
+    )
+    include_descendants = models.BooleanField(default=True)
+    brand = models.ForeignKey(
+        Brand,
+        on_delete=models.CASCADE,
+        related_name="site_category_exclusion_rules",
+    )
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["site", "category", "brand"],
+                name="uniq_site_category_brand_exclusion",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.site.code}: {self.category.slug} exclude {self.brand.slug}"
 
 
 class Product(models.Model):
@@ -462,7 +555,13 @@ class ContentBlock(models.Model):
         ACCORDION = "accordion", "Accordion"
         ATTACHMENTS = "attachments", "Attachments"
 
-    key = models.SlugField(max_length=100, unique=True)
+    site = models.ForeignKey(
+        "api.Site",
+        default=get_default_site_id,
+        on_delete=models.PROTECT,
+        related_name="content_blocks",
+    )
+    key = models.SlugField(max_length=100)
     type = models.CharField(
         max_length=32, choices=BlockType.choices, default=BlockType.RICH_TEXT
     )
@@ -480,6 +579,9 @@ class ContentBlock(models.Model):
 
     class Meta:
         ordering = ["-priority", "key"]
+        constraints = [
+            models.UniqueConstraint(fields=["site", "key"], name="uniq_content_block_site_key"),
+        ]
 
     def __str__(self) -> str:
         return self.key

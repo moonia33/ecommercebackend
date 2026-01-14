@@ -220,7 +220,7 @@ Vykdymo „engine“ yra `catalog/enrichment.py`:
 - Sukuria `EnrichmentRun` + `EnrichmentMatch` (audit lieka).
 - Neįrašo realių priskyrimų į `ProductFeatureValue` (tik simuliuoja, ką būtų priskyręs).
 
-Pastaba: management command (CLI) šitam varikliui dar bus pridėtas atskirai ir ši sekcija bus papildyta su konkrečiomis komandomis.
+Pastaba: management command (CLI) yra `python manage.py enrich_catalog`.
 
 ### Paleidimas per management command
 
@@ -247,6 +247,73 @@ Dažniausi pavyzdžiai:
 - Varianto reikšmės: `VariantOptionValue` (Variant edit lange)
 
 Pastaba: jei produktas yra "paprastas", seed migracija sukuria 1 default variantą iš produkto `sku/price_eur/stock_qty` (jei produktų dar nėra, nieko nekuria).
+
+## Multi-site (foundation)
+
+Projektas turi pradėtą multi-site architektūros pagrindą (kol kas one-site režimu).
+
+Kas įdiegta:
+
+- `api.Site` modelis (Admin: `Api -> Sites`) su `code` ir `primary_domain`.
+- `api.middleware.SiteMiddleware` nustato `request.site` pagal `Host` (fallback į `Site(code="default")`).
+- `cms.CmsPage` yra scoped per site: unikalumas `(site, slug)`.
+- `catalog.ContentBlock` yra scoped per site: unikalumas `(site, key)`.
+- `GET /api/v1/cms/pages/{slug}` filtruoja pagal `request.site`.
+- Product detail `content_blocks` (`GET /api/v1/catalog/products/{slug}`) parenka blokus pagal `request.site`.
+
+Site-level assortment (katalogo matomumas per site):
+
+- `catalog.SiteCategoryVisibility` — allow-list kategorijoms per site.
+  - jei `include_descendants=true`, tada automatiškai matosi ir visos subkategorijos.
+  - jei site neturi nei vienos `SiteCategoryVisibility`, katalogas elgiasi kaip iki šiol (rodo viską).
+- `catalog.SiteBrandExclusion` — globalus brand exclude per site.
+- `catalog.SiteCategoryBrandExclusion` — brand exclude konkrečiai kategorijai (su optional descendants).
+
+Kaip konfigūruoti (rekomenduojamas kelias):
+
+- Admin -> `Api -> Sites`: susikurk `Site` su `primary_domain` (pvz. `miegui.lt`).
+- Admin -> `Catalog -> Categories`: pažymėk 1–kelias root kategorijas ir per bulk action `Pridėti į site visibility` su `include_descendants=true`.
+- (optional) Admin -> `Catalog -> Site brand exclusions` ir/ar `Site category brand exclusions`.
+
+Kaip testuoti per API:
+
+- `SiteMiddleware` site’ą parenka pagal `Host` header. Lokaliai galima testuoti taip:
+  - `curl -H "Host: miegui.lt" "http://127.0.0.1:8000/api/v1/catalog/categories"`
+  - `curl -H "Host: miegui.lt" "http://127.0.0.1:8000/api/v1/catalog/products?country_code=LT"`
+  - `curl -H "Host: miegui.lt" "http://127.0.0.1:8000/api/v1/catalog/products/facets?country_code=LT"`
+
+Pastaba: kad testas veiktų, `ALLOWED_HOSTS` turi turėti ir tą host’ą (pvz. `miegui.lt`).
+
+Migracijos:
+
+- `api.0001_initial` sukuria `Site` ir default įrašą `code=default`.
+- `cms.0006_cmspage_site_scope` backfill’ina `CmsPage.site` į default.
+- `catalog.0021_contentblock_site_scope` backfill’ina `ContentBlock.site` į default.
+- `catalog.0022_site_assortment_rules` sukuria site assortment lenteles (`SiteCategoryVisibility`, `SiteBrandExclusion`, `SiteCategoryBrandExclusion`).
+
+Front-end integracija (CORS / CSRF / domenai):
+
+- `ALLOWED_HOSTS` — turi turėti visus domenus, per kuriuos ateina request’ai į Django (kitaip gausi `DisallowedHost`).
+- `CORS_ALLOWED_ORIGINS` — front-end origin’ai, kuriems leidžiami cross-origin request’ai.
+- `CSRF_TRUSTED_ORIGINS` — reikalinga, jei naudoji session/cookie auth ir darai `POST/PUT/PATCH/DELETE` iš kito origin’o.
+- `CORS_ALLOW_CREDENTIALS=true` — jei naudoji cookies (session/JWT cookies), tai turi būti įjungta.
+
+Šiame projekte tai valdoma per env (`config/settings_base.py`):
+
+- `CORS_ALLOWED_ORIGINS` (pvz. `http://localhost:5173,https://s-xxl.lt,https://www.s-xxl.lt`)
+- `CSRF_TRUSTED_ORIGINS` (pvz. `https://s-xxl.lt,https://www.s-xxl.lt`)
+- `ALLOWED_HOSTS` (pvz. `s-xxl.lt,www.s-xxl.lt,api.s-xxl.lt`)
+
+Pastaba dėl multi-site: `api.Site.primary_domain` naudojamas request’o site resolvinimui (pagal `Host`), bet CORS/CSRF yra **security whitelist’ai** ir paprastai paliekami kaip explicit konfigūracija per env (kad neatsidarytų netyčia visiems domenams). Ateityje, jei norėsi, galima sukurti helperį kuris sugeneruoja recommended `ALLOWED_HOSTS`/`CSRF_TRUSTED_ORIGINS` iš aktyvių `Site` įrašų, bet default rekomendacija — laikyti tai per env.
+
+Kas dar NĖRA multi-site scoped (bus daroma vėliau pilnam multi-shop):
+
+- `checkout` (Cart/Order/PaymentIntent ir kt.)
+- `promotions` (Coupon ir redemption’ai)
+- `payments` (PaymentMethod/Neopay config ir kt.)
+- `shipping` (ShippingMethod/Rate/DeliveryRule)
+- `analytics` (events, recently-viewed)
+- `notifications` (EmailTemplate)
 
 ## PVM / VAT (MVP)
 
