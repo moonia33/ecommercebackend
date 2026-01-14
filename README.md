@@ -181,6 +181,65 @@ Pagrindinis principas: **krepšelio eilutė turi būti pririšta prie konkretaus
 - Facetų aprašai: `Catalog -> Features` (pvz. `composition`, `season`)
 - Reikšmės: pridedamos per Feature vidų (inline) ir priskiriamos produktui per `ProductFeatureValue` (Product edit lange).
 
+## Catalog Enrichment (taisyklių variklis facetams)
+
+Tikslas: automatiškai priskirti produktams `FeatureValue` (facetų reikšmes) pagal produkto tekstą (pavadinimą/aprašymą/SKU), panašiai kaip Vendure „facet enrichment“.
+
+### Duomenų modeliai
+
+Į `catalog/models.py` pridėti modeliai:
+
+- `EnrichmentRule`
+  - Taisyklė su `priority` ir `is_active`.
+  - Scope filtrai: `brand`, `category` (+ `include_descendants`), `product_group`.
+  - Matcher: `contains` arba `regex` (`pattern`, `extract_group`).
+  - Ištrauktos reikšmės formatavimas: `value_format` (pvz. `decimal_trim`).
+  - Priskyrimo targetas: `feature` (kuriam facetui priskirti) ir `value_template`/`fixed_value`.
+- `EnrichmentRun`
+  - Vykdymo istorija/auditas: `status`, `dry_run`, `triggered_by`, `started_at/finished_at`, `summary`, `error`.
+- `EnrichmentMatch`
+  - Auditas kiekvienam match’ui: `run`, `rule`, `product`, `matched_field`, `matched_text`, `extracted_value`, `action`.
+
+### Admin integracija
+
+`catalog/admin.py` pridėtos admin registracijos:
+
+- `EnrichmentRuleAdmin` – taisyklių CRUD.
+- `EnrichmentRunAdmin` – run istorija (read-only).
+- `EnrichmentMatchAdmin` – match/audit įrašai (read-only).
+
+### Vykdymo logika
+
+Vykdymo „engine“ yra `catalog/enrichment.py`:
+
+- Pagrindinė funkcija: `apply_enrichment_rules(dry_run=..., rule_ids=None, since=None, limit=None, triggered_by=None)`.
+- Ji sukuria `EnrichmentRun`, praeina per produktus ir taiko aktyvias taisykles pagal `priority`.
+
+`dry_run` režimas:
+
+- Sukuria `EnrichmentRun` + `EnrichmentMatch` (audit lieka).
+- Neįrašo realių priskyrimų į `ProductFeatureValue` (tik simuliuoja, ką būtų priskyręs).
+
+Pastaba: management command (CLI) šitam varikliui dar bus pridėtas atskirai ir ši sekcija bus papildyta su konkrečiomis komandomis.
+
+### Paleidimas per management command
+
+Komanda: `python manage.py enrich_catalog`
+
+Dažniausi pavyzdžiai:
+
+- Dry-run (tik auditas, be priskyrimų):
+  - `python manage.py enrich_catalog --dry-run`
+- Paleisti tik vieną taisyklę:
+  - `python manage.py enrich_catalog --dry-run --rule-id 12`
+  - `python manage.py enrich_catalog --dry-run --rule-id 12 --rule-id 13`
+- Apdoroti tik neseniai atnaujintas prekes:
+  - `python manage.py enrich_catalog --dry-run --since 2026-01-14T00:00:00`
+- Apriboti apdorojamų produktų kiekį (debug):
+  - `python manage.py enrich_catalog --dry-run --limit 50`
+- Nurodyti kas paleido (įrašoma į `EnrichmentRun.triggered_by`):
+  - `python manage.py enrich_catalog --dry-run --user-id 1`
+
 ### Variantai (Options + Variants)
 
 - Option ašys: `Catalog -> Option types` (pvz. `size`, `color`, `cast_weight`)

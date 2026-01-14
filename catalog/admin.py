@@ -32,6 +32,9 @@ from .models import (
     Warehouse,
     InventoryItem,
     BackInStockSubscription,
+    EnrichmentRule,
+    EnrichmentRun,
+    EnrichmentMatch,
 )
 
 
@@ -659,3 +662,78 @@ class ContentBlockTranslationAdmin(admin.ModelAdmin):
             fields = "__all__"
 
     form = Form
+
+@admin.register(EnrichmentRule)
+class EnrichmentRuleAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "feature",
+        "matcher_type",
+        "priority",
+        "is_active",
+        "brand",
+        "category",
+        "product_group",
+        "updated_at",
+    )
+    list_filter = ("is_active", "matcher_type", "feature")
+    search_fields = ("name", "pattern", "value_template", "fixed_value")
+    autocomplete_fields = ("feature", "brand", "category", "product_group")
+    ordering = ("-priority", "id")
+
+
+@admin.register(EnrichmentRun)
+class EnrichmentRunAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "status",
+        "dry_run",
+        "triggered_by",
+        "started_at",
+        "finished_at",
+    )
+    list_filter = ("status", "dry_run")
+    search_fields = ("id", "error")
+    autocomplete_fields = ("triggered_by",)
+    readonly_fields = (
+        "status",
+        "dry_run",
+        "triggered_by",
+        "started_at",
+        "finished_at",
+        "summary",
+        "error",
+    )
+
+
+@admin.register(EnrichmentMatch)
+class EnrichmentMatchAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "run",
+        "rule",
+        "product",
+        "action",
+        "matched_field",
+        "extracted_value",
+        "created_at",
+    )
+    list_filter = ("action", "matched_field")
+    search_fields = (
+        "product__sku",
+        "product__name",
+        "matched_text",
+        "extracted_value",
+    )
+    autocomplete_fields = ("run", "rule", "product")
+    readonly_fields = (
+        "run",
+        "rule",
+        "product",
+        "action",
+        "matched_field",
+        "matched_text",
+        "extracted_value",
+        "created_at",
+    )
