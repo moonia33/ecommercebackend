@@ -43,12 +43,16 @@ def send_templated_email(
 
     resolved_language_code = normalize_language_code(language_code) or get_default_language_code()
     langs = translation_fallback_chain(resolved_language_code)
+
+    tmpl_qs = EmailTemplate.objects.filter(
+        key=template_key,
+        is_active=True,
+        language_code__in=langs,
+    )
+    if site_id is not None:
+        tmpl_qs = tmpl_qs.filter(site_id=int(site_id))
     templates = list(
-        EmailTemplate.objects.filter(
-            key=template_key,
-            is_active=True,
-            language_code__in=langs,
-        )
+        tmpl_qs
     )
     order_index = {lang: i for i, lang in enumerate(langs)}
     template = None
@@ -60,6 +64,7 @@ def send_templated_email(
             best_idx = idx
     if not template:
         outbound = OutboundEmail.objects.create(
+            site_id=(int(site_id) if site_id is not None else None),
             to_email=to_email,
             template_key=template_key,
             subject="",
@@ -115,6 +120,7 @@ def send_templated_email(
             template.body_html, render_ctx) if template.body_html else ""
     except Exception as exc:
         outbound = OutboundEmail.objects.create(
+            site_id=(int(site_id) if site_id is not None else None),
             to_email=to_email,
             template_key=template_key,
             subject=template.subject,
@@ -126,6 +132,7 @@ def send_templated_email(
         return SendEmailResult(ok=False, outbound_id=outbound.id, error=outbound.error_message)
 
     outbound = OutboundEmail.objects.create(
+        site_id=(int(site_id) if site_id is not None else None),
         to_email=to_email,
         template_key=template_key,
         subject=subject,

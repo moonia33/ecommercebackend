@@ -50,18 +50,19 @@ def inventory_item_post_save(sender, instance: InventoryItem, created: bool, **k
 
         now = timezone.now()
         for sub in qs.distinct().iterator():
+            product_name = getattr(product, "name", "") if product else ""
+            variant_sku = getattr(variant, "sku", "") if variant else ""
+            product_url = getattr(product, "get_absolute_url", lambda: "")()
             result = send_templated_email(
                 template_key="catalog_back_in_stock",
                 to_email=sub.email,
                 context={
-                    "product_name": getattr(product, "name", "") if product else "",
-                    "product_slug": getattr(product, "slug", "") if product else "",
-                    "product_sku": getattr(product, "sku", "") if product else "",
-                    "variant_sku": getattr(variant, "sku", "") if variant else "",
-                    "channel": channel,
+                    "product_name": product_name,
+                    "variant_sku": variant_sku,
+                    "product_url": product_url,
                 },
-                language_code=(getattr(sub, "language_code", "") or None),
-                site_id=(getattr(sub, "site_id", None) or None),
+                language_code=getattr(sub, "language_code", "") or None,
+                site_id=int(getattr(sub, "site_id", 0) or 0) or None,
             )
             if result.ok:
                 sub.notified_at = now

@@ -166,3 +166,35 @@ Migrations:
   - be taisyklių katalogas identiškas kaip anksčiau
   - su taisyklėmis katalogas apribotas
   - product_detail grąžina 404 jei nevisible.
+
+## FE instrukcijos (multi-site)
+
+### Kaip parenkamas site
+
+- Backend kiekvienai užklausai priskiria `request.site` per `api.middleware.SiteMiddleware`.
+- Site parenkamas pagal `Host` header (domeną be porto):
+  - jei yra `api.Site.primary_domain` match (case-insensitive) ir `is_active=True` → tas site
+  - kitu atveju fallback į `code="default"`
+  - kitu atveju pirmas aktyvus site pagal `code`
+
+### Local dev: keli host’ai
+
+- Susikurk 2 `api.Site` įrašus su skirtingais `primary_domain`.
+- Lokalioje aplinkoje patogiausia pridėti į `hosts`:
+  - `127.0.0.1 shop-a.local`
+  - `127.0.0.1 shop-b.local`
+- FE turi kviesti tą patį backend’ą, bet su skirtingu host’u (pvz. `http://shop-a.local:8000/...` vs `http://shop-b.local:8000/...`).
+
+### Kas yra site-scoped (praktinis efektas)
+
+- **Homepage**: parenkamas pagal `request.site` (`HomePage` unikalus per `(site, code)`).
+- **Cart**: vienas krepšelis per `(site, user)` arba `(site, session_key)`.
+- **Checkout/Order**: `Order` turi `site_id`, idempotency yra per-site.
+- **Coupons/Promotions**: kuponai ir promo rules parenkami pagal `site_id`.
+- **Fee rules**: checkout fees parenkami pagal `site_id`.
+
+### Rekomendacija FE testams
+
+- Testuok tą patį user per 2 host’us:
+  - cart turi skirtis
+  - promo/coupon/fees turi skirtis (kai sukonfigūruota admin’e)

@@ -5,21 +5,21 @@ from .models import EmailTemplate, OutboundEmail
 
 @admin.register(EmailTemplate)
 class EmailTemplateAdmin(admin.ModelAdmin):
-    list_display = ("key", "language_code", "name", "is_active", "updated_at")
-    list_filter = ("is_active",)
+    list_display = ("site", "key", "language_code", "name", "is_active", "updated_at")
+    list_filter = ("site", "is_active")
     search_fields = ("key", "name", "subject")
-    ordering = ("key", "language_code")
+    ordering = ("site", "key", "language_code")
 
 
 @admin.register(OutboundEmail)
 class OutboundEmailAdmin(admin.ModelAdmin):
-    list_display = ("to_email", "template_key",
-                    "status", "created_at", "sent_at")
-    list_filter = ("status", "template_key")
+    list_display = ("site", "to_email", "template_key", "status", "created_at", "sent_at")
+    list_filter = ("site", "status", "template_key")
     search_fields = ("to_email", "subject", "template_key")
     ordering = ("-created_at",)
 
     readonly_fields = (
+        "site",
         "to_email",
         "template_key",
         "subject",
