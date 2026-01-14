@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from payments.models import NeopayBank
-from payments.services.neopay import get_neopay_config
+from payments.services.neopay import NEOPAY_BANKS_API_BASE_URL_DEFAULT, get_neopay_config
 
 
 class Command(BaseCommand):
@@ -26,12 +26,9 @@ class Command(BaseCommand):
         limit = int(opts.get("limit") or 0)
         deactivate_missing = bool(opts.get("deactivate_missing"))
 
-        if (cfg.force_bank_bic or "").strip():
-            raise SystemExit("force_bank_bic is set; syncing banks list is not applicable")
-
         import requests
 
-        base = (cfg.banks_api_base_url or "https://psd2.neopay.lt/api").rstrip("/")
+        base = (NEOPAY_BANKS_API_BASE_URL_DEFAULT or "https://psd2.neopay.lt/api").rstrip("/")
         if base.endswith("/countries"):
             base = base[: -len("/countries")]
 

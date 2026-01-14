@@ -61,6 +61,7 @@ def inventory_item_post_save(sender, instance: InventoryItem, created: bool, **k
                     "channel": channel,
                 },
                 language_code=(getattr(sub, "language_code", "") or None),
+                site_id=(getattr(sub, "site_id", None) or None),
             )
             if result.ok:
                 sub.notified_at = now

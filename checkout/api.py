@@ -7,8 +7,7 @@ import logging
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import models
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
@@ -44,6 +43,8 @@ from .schemas import (
     FeeOut,
     ShippingMethodOut,
 )
+
+from api.models import SiteConfig
 from .services import (
     calculate_fee_money,
     calculate_fees,
@@ -284,24 +285,55 @@ def _bank_transfer_instructions_for(*, order_id: int | None, country_code: str) 
     return (getattr(settings, "BANK_TRANSFER_INSTRUCTIONS", "") or "").strip()
 
 
+def _checkout_consent_settings_for_request(request) -> tuple[str, str, str, str]:
+    site = getattr(request, "site", None)
+    site_id = int(getattr(site, "id", 0) or 0) or None
+
+    terms_ver = getattr(settings, "CHECKOUT_TERMS_VERSION", "v1")
+    privacy_ver = getattr(settings, "CHECKOUT_PRIVACY_VERSION", "v1")
+    terms_url = getattr(settings, "CHECKOUT_TERMS_URL", "/terms")
+    privacy_url = getattr(settings, "CHECKOUT_PRIVACY_URL", "/privacy")
+
+    if site_id is None:
+        return terms_ver, privacy_ver, terms_url, privacy_url
+
+    cfg = (
+        SiteConfig.objects.filter(site_id=int(site_id))
+        .only("terms_version", "privacy_version", "terms_url", "privacy_url")
+        .first()
+    )
+    if cfg is None:
+        return terms_ver, privacy_ver, terms_url, privacy_url
+
+    if (cfg.terms_version or "").strip():
+        terms_ver = (cfg.terms_version or "").strip()
+    if (cfg.privacy_version or "").strip():
+        privacy_ver = (cfg.privacy_version or "").strip()
+    if (cfg.terms_url or "").strip():
+        terms_url = (cfg.terms_url or "").strip()
+    if (cfg.privacy_url or "").strip():
+        privacy_url = (cfg.privacy_url or "").strip()
+    return terms_ver, privacy_ver, terms_url, privacy_url
+
+
 @router.get("/consents", response=list[ConsentDefinitionOut], auth=_auth)
 def checkout_consents(request):
     _require_user(request)
+    terms_ver, privacy_ver, terms_url, privacy_url = _checkout_consent_settings_for_request(request)
     return [
         ConsentDefinitionOut(
             kind="terms",
             name="Pirkimo sąlygos",
-            document_version=getattr(settings, "CHECKOUT_TERMS_VERSION", "v1"),
+            document_version=terms_ver,
             required=True,
-            url=getattr(settings, "CHECKOUT_TERMS_URL", "/terms"),
+            url=terms_url,
         ),
         ConsentDefinitionOut(
             kind="privacy",
             name="Privatumo politika",
-            document_version=getattr(
-                settings, "CHECKOUT_PRIVACY_VERSION", "v1"),
+            document_version=privacy_ver,
             required=True,
-            url=getattr(settings, "CHECKOUT_PRIVACY_URL", "/privacy"),
+            url=privacy_url,
         ),
     ]
 
@@ -401,181 +433,38 @@ def payment_options(request, country_code: str = "LT"):
     try:
         from payments.services.neopay import get_neopay_config
 
-        cfg = get_neopay_config()
+        site = getattr(request, "site", None)
+        site_id = int(getattr(site, "id", 0) or 0) or None
+
+        cfg = get_neopay_config(site_id=site_id)
     except Exception:
         cfg = None
 
     if cfg and bool(getattr(cfg, "enable_bank_preselect", False)):
-        forced_bic = (getattr(cfg, "force_bank_bic", "") or "").strip()
-        forced_name = (getattr(cfg, "force_bank_name", "") or "").strip()
-
         banks_raw: list[dict] = []
 
-        if forced_bic:
-            banks_raw = [
+        # Checkout should not call external Neopay API. Bank list is managed via NeopayBank DB.
+        try:
+            from payments.models import NeopayBank
+
+            db_banks = list(
+                NeopayBank.objects.filter(country_code=country_code, is_enabled=True)
+                .order_by("sort_order", "name", "bic")
+            )
+        except Exception:
+            db_banks = []
+
+        for b in db_banks:
+            banks_raw.append(
                 {
-                    "bic": forced_bic,
-                    "name": forced_name or forced_bic,
+                    "bic": b.bic,
+                    "name": (b.name or b.bic),
                     "services": ["pisp"],
-                    "logo": "",
-                    "isOperating": True,
+                    "logo": (b.logo_url or ""),
+                    "isOperating": bool(b.is_operating),
+                    "sortOrder": int(getattr(b, "sort_order", 0) or 0),
                 }
-            ]
-        else:
-            # Prefer local DB cache (NeopayBank) to avoid external API calls in checkout.
-            try:
-                from payments.models import NeopayBank
-
-                db_banks = list(
-                    NeopayBank.objects.filter(country_code=country_code, is_enabled=True)
-                    .order_by("sort_order", "name", "bic")
-                )
-            except Exception:
-                db_banks = []
-
-            if db_banks:
-                for idx, b in enumerate(db_banks):
-                    bic = (getattr(b, "bic", "") or "").strip()
-                    if not bic:
-                        continue
-                    name = (getattr(b, "name", "") or "").strip() or bic
-                    logo_url = (getattr(b, "logo_url", "") or "").strip()
-                    _bank_rank[bic] = idx
-                    options.append(
-                        PaymentOptionOut(
-                            id=f"neopay:{bic}",
-                            kind="neopay_bank",
-                            title=name,
-                            provider="neopay",
-                            instructions="",
-                            logo_url=logo_url,
-                            payload={
-                                "payment_method": "neopay",
-                                "neopay_bank_bic": bic,
-                            },
-                        )
-                    )
-
-                # DB is authoritative: do not also fetch from cache/live to avoid duplicates.
-                banks_raw = []
-            else:
-                cache_key = f"neopay:banks:{int(getattr(cfg, 'project_id', 0) or 0)}:{country_code}"
-                cached = cache.get(cache_key)
-                if isinstance(cached, list) and cached:
-                    # Cache stores already-normalized bank dicts.
-                    banks_raw = [b for b in cached if isinstance(b, dict)]
-                else:
-                    import requests
-
-                base_url = (getattr(cfg, "banks_api_base_url", "") or "https://psd2.neopay.lt/api").rstrip("/")
-                if base_url.endswith("/countries"):
-                    base_url = base_url[: -len("/countries")]
-                candidates = [
-                    f"{base_url}/countries/{cfg.project_id}",
-                    f"{base_url}/countries/{cfg.project_id}/",
-                    f"{base_url}/countries",
-                    f"{base_url}/countries/",
-                ]
-                if base_url.endswith("/api"):
-                    root = base_url[: -len("/api")]
-                    candidates.append(f"{root}/api/countries/{cfg.project_id}")
-                    candidates.append(f"{root}/api/countries/{cfg.project_id}/")
-
-                data = None
-                last_response = None
-                last_exc: Exception | None = None
-
-                for url in candidates:
-                    try:
-                        r = requests.get(
-                            url,
-                            timeout=5,
-                            headers={
-                                "Accept": "application/json",
-                                "User-Agent": "inultimo-backend/1.0",
-                            },
-                        )
-                    except requests.RequestException as e:
-                        last_exc = e
-                        continue
-
-                    last_response = r
-                    if r.status_code == 404:
-                        continue
-                    if r.status_code >= 400:
-                        body = (r.text or "").strip().replace("\n", " ")
-                        if len(body) > 300:
-                            body = body[:300] + "..."
-                        raise HttpError(502, f"Neopay banks api failed: {r.status_code} url={url} body={body}")
-
-                    try:
-                        data = r.json()
-                    except Exception:
-                        # Try next candidate if response isn't valid JSON.
-                        continue
-
-                    break
-
-                if data is None:
-                    if last_exc is not None:
-                        raise HttpError(502, f"Neopay banks api request failed: {type(last_exc).__name__}")
-                    if last_response is not None:
-                        body = (last_response.text or "").strip().replace("\n", " ")
-                        if len(body) > 300:
-                            body = body[:300] + "..."
-                        raise HttpError(
-                            502,
-                            f"Neopay banks api failed: {last_response.status_code} url={candidates[-1]} body={body}",
-                        )
-                    raise HttpError(502, "Neopay banks api failed: no response")
-
-                # Normalize to countries list
-                countries = []
-                if isinstance(data, list):
-                    countries = data
-                elif isinstance(data, dict):
-                    countries = data.get("countries") or []
-                    if not countries and country_code:
-                        cc = (country_code or "").strip().upper()
-                        if cc and cc in data and isinstance(data.get(cc), dict):
-                            countries = [{"code": cc, **data.get(cc)}]
-
-                cc = (country_code or "").strip().upper()
-                for c in countries:
-                    if not isinstance(c, dict):
-                        continue
-                    ccode = (c.get("code") or c.get("country") or c.get("countryCode") or "").strip().upper()
-                    if ccode and ccode != cc:
-                        continue
-                    candidate = c.get("aspsps") or c.get("banks") or []
-                    if isinstance(candidate, list):
-                        for b in candidate:
-                            if isinstance(b, dict):
-                                banks_raw.append(b)
-                    break
-
-                # Cache as simple dicts to avoid pickling issues.
-                try:
-                    normalized_cache: list[dict] = []
-                    for b in banks_raw:
-                        if not isinstance(b, dict):
-                            continue
-                        bic = (b.get("bic") or b.get("BIC") or "").strip()
-                        if not bic:
-                            continue
-                        normalized_cache.append(
-                            {
-                                "bic": bic,
-                                "name": (b.get("name") or b.get("bankName") or "").strip() or bic,
-                                "services": b.get("services") or b.get("serviceTypes") or [],
-                                "logo": (b.get("logo") or b.get("logoUrl") or "") if isinstance(b.get("logo") or b.get("logoUrl") or "", str) else "",
-                                "isOperating": b.get("isOperating") if "isOperating" in b else True,
-                            }
-                        )
-                    # 10 min cache is enough for UX and protects Neopay API.
-                    cache.set(cache_key, normalized_cache, timeout=600)
-                except Exception:
-                    logger.exception("Failed to cache neopay banks list")
+            )
 
         # NOTE: variable reuse guard (banks list may be nested above)
         normalized: list[dict] = []
@@ -1783,8 +1672,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             400, f"Missing required consents: {', '.join(missing)}")
 
     # Optional safety: if the front-end has stale versions, fail with 409 so it can refresh.
-    current_terms = getattr(settings, "CHECKOUT_TERMS_VERSION", "v1")
-    current_privacy = getattr(settings, "CHECKOUT_PRIVACY_VERSION", "v1")
+    current_terms, current_privacy, _terms_url, _privacy_url = _checkout_consent_settings_for_request(request)
     if consents_by_kind["terms"] != current_terms or consents_by_kind["privacy"] != current_privacy:
         raise HttpError(
             409, "Consent versions are outdated; refresh /checkout/consents")
@@ -2033,6 +1921,9 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         if provider == PaymentIntent.Provider.NEOPAY:
             from payments.services.neopay import build_neopay_payment_link
 
+            site = getattr(request, "site", None)
+            site_id = int(getattr(site, "id", 0) or 0) or None
+
             tx_id = f"order-{order.id}"
             link, neopay_payload = build_neopay_payment_link(
                 amount=order.total_gross,
@@ -2040,6 +1931,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 transaction_id=tx_id,
                 payment_purpose=f"Order {order.id}",
                 bank_bic=neopay_bank_bic,
+                site_id=site_id,
             )
             pi.external_id = tx_id
             pi.redirect_url = link

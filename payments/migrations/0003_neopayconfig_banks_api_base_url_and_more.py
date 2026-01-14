@@ -10,14 +10,9 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField(
+        migrations.AlterField(
             model_name="neopayconfig",
-            name="banks_api_base_url",
-            field=models.URLField(blank=True, default="https://psd2.neopay.lt/api"),
-        ),
-        migrations.AddField(
-            model_name="neopayconfig",
-            name="enable_bank_preselect",
-            field=models.BooleanField(default=False),
+            name="client_redirect_url",
+            field=models.URLField(blank=True, default=""),
         ),
     ]

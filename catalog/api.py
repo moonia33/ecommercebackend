@@ -1290,7 +1290,13 @@ def back_in_stock_subscribe(request, payload: BackInStockSubscribeIn):
 
     language_code = get_request_language_code(request)
 
+    site = getattr(request, "site", None)
+    site_id = int(getattr(site, "id", 0) or 0) or None
+    if site_id is None:
+        raise HttpError(400, "Site is not resolved")
+
     obj, created = BackInStockSubscription.objects.get_or_create(
+        site_id=int(site_id),
         email=email,
         product=product,
         variant=variant,

@@ -4,11 +4,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings
-from django.core.mail import EmailMultiAlternatives
+from django.core.mail import EmailMultiAlternatives, get_connection
 from django.template import Context, Engine, TemplateDoesNotExist
 from django.utils import timezone
 
 from api.i18n import get_default_language_code, normalize_language_code, translation_fallback_chain
+from api.models import SiteConfig
 
 from .models import EmailTemplate, OutboundEmail
 
@@ -33,6 +34,7 @@ def send_templated_email(
     context: dict[str, Any] | None = None,
     from_email: str | None = None,
     language_code: str | None = None,
+    site_id: int | None = None,
 ) -> SendEmailResult:
     """Send an email based on a DB-stored template.
 
@@ -66,9 +68,43 @@ def send_templated_email(
         )
         return SendEmailResult(ok=False, outbound_id=outbound.id, error=outbound.error_message)
 
+    resolved_from_email = from_email
+    connection = None
+
+    if site_id is not None:
+        cfg = SiteConfig.objects.filter(site_id=int(site_id)).only(
+            "default_from_email",
+            "smtp_host",
+            "smtp_port",
+            "smtp_user",
+            "smtp_password",
+            "smtp_use_tls",
+            "smtp_use_ssl",
+            "smtp_timeout",
+        ).first()
+        if cfg is not None:
+            if not resolved_from_email:
+                resolved_from_email = (cfg.default_from_email or "").strip() or None
+
+            smtp_host = (cfg.smtp_host or "").strip()
+            if smtp_host:
+                connection = get_connection(
+                    backend="django.core.mail.backends.smtp.EmailBackend",
+                    host=smtp_host,
+                    port=int(cfg.smtp_port or 587),
+                    username=(cfg.smtp_user or "").strip() or None,
+                    password=(cfg.smtp_password or "") or None,
+                    use_tls=bool(cfg.smtp_use_tls),
+                    use_ssl=bool(cfg.smtp_use_ssl),
+                    timeout=int(cfg.smtp_timeout or 10),
+                )
+
+    if not resolved_from_email:
+        resolved_from_email = (getattr(settings, "DEFAULT_FROM_EMAIL", "") or "").strip() or None
+
     render_ctx: dict[str, Any] = {
         "site_name": getattr(settings, "SITE_NAME", ""),
-        "support_email": getattr(settings, "DEFAULT_FROM_EMAIL", ""),
+        "support_email": resolved_from_email or "",
         **(context or {}),
     }
 
@@ -102,9 +138,9 @@ def send_templated_email(
         msg = EmailMultiAlternatives(
             subject=subject,
             body=body_text,
-            from_email=from_email or getattr(
-                settings, "DEFAULT_FROM_EMAIL", None) or None,
+            from_email=resolved_from_email,
             to=[to_email],
+            connection=connection,
         )
         if body_html:
             msg.attach_alternative(body_html, "text/html")

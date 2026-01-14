@@ -31,3 +31,35 @@ class Site(models.Model):
 
     def __str__(self) -> str:
         return self.code
+
+
+class SiteConfig(models.Model):
+    site = models.OneToOneField(Site, on_delete=models.CASCADE, related_name="config")
+
+    default_from_email = models.CharField(max_length=255, blank=True, default="")
+    smtp_host = models.CharField(max_length=255, blank=True, default="")
+    smtp_port = models.PositiveIntegerField(default=587)
+    smtp_user = models.CharField(max_length=255, blank=True, default="")
+    smtp_password = models.CharField(max_length=255, blank=True, default="")
+    smtp_use_tls = models.BooleanField(default=True)
+    smtp_use_ssl = models.BooleanField(default=False)
+    smtp_timeout = models.PositiveIntegerField(default=10)
+
+    terms_url = models.URLField(blank=True, default="")
+    privacy_url = models.URLField(blank=True, default="")
+    terms_version = models.CharField(max_length=50, blank=True, default="")
+    privacy_version = models.CharField(max_length=50, blank=True, default="")
+
+    neopay_project_id = models.BigIntegerField(null=True, blank=True)
+    neopay_project_key = models.CharField(max_length=255, blank=True, default="")
+    neopay_client_redirect_url = models.URLField(blank=True, default="")
+    neopay_enable_bank_preselect = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["site__code"]
+
+    def __str__(self) -> str:
+        return f"{self.site.code} config"

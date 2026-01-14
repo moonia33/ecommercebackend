@@ -6,20 +6,49 @@ from decimal import Decimal
 
 import jwt
 
+from api.models import SiteConfig
+
+
+NEOPAY_WIDGET_HOST_DEFAULT = "https://psd2.neopay.lt/widget.html?"
+NEOPAY_BANKS_API_BASE_URL_DEFAULT = "https://psd2.neopay.lt/api"
+
 
 @dataclass(frozen=True)
 class NeopayConfigData:
     project_id: int
     project_key: str
-    widget_host: str
     client_redirect_url: str
     enable_bank_preselect: bool
-    banks_api_base_url: str
-    force_bank_bic: str
-    force_bank_name: str
 
 
-def get_neopay_config() -> NeopayConfigData | None:
+def get_neopay_config(*, site_id: int | None = None) -> NeopayConfigData | None:
+    # 1) Prefer per-site config.
+    if site_id is not None:
+        try:
+            sc = (
+                SiteConfig.objects.filter(site_id=int(site_id))
+                .only(
+                    "neopay_project_id",
+                    "neopay_project_key",
+                    "neopay_client_redirect_url",
+                    "neopay_enable_bank_preselect",
+                )
+                .first()
+            )
+            if sc is not None:
+                pid = int(getattr(sc, "neopay_project_id", 0) or 0)
+                pkey = str(getattr(sc, "neopay_project_key", "") or "").strip()
+                if pid and pkey:
+                    return NeopayConfigData(
+                        project_id=pid,
+                        project_key=pkey,
+                        client_redirect_url=(getattr(sc, "neopay_client_redirect_url", "") or "").strip(),
+                        enable_bank_preselect=bool(getattr(sc, "neopay_enable_bank_preselect", False)),
+                    )
+        except Exception:
+            pass
+
+    # 2) Fallback to global DB config.
     try:
         from payments.models import NeopayConfig
 
@@ -31,12 +60,8 @@ def get_neopay_config() -> NeopayConfigData | None:
         return NeopayConfigData(
             project_id=int(cfg.project_id),
             project_key=str(cfg.project_key).strip(),
-            widget_host=(cfg.widget_host or "https://psd2.neopay.lt/widget.html?").strip(),
             client_redirect_url=(cfg.client_redirect_url or "").strip(),
             enable_bank_preselect=bool(getattr(cfg, "enable_bank_preselect", False)),
-            banks_api_base_url=(getattr(cfg, "banks_api_base_url", "") or "https://psd2.neopay.lt/api").strip(),
-            force_bank_bic=(getattr(cfg, "force_bank_bic", "") or "").strip(),
-            force_bank_name=(getattr(cfg, "force_bank_name", "") or "").strip(),
         )
     except Exception:
         return None
@@ -49,8 +74,9 @@ def build_neopay_payment_link(
     transaction_id: str,
     payment_purpose: str,
     bank_bic: str | None = None,
+    site_id: int | None = None,
 ) -> tuple[str, dict]:
-    cfg = get_neopay_config()
+    cfg = get_neopay_config(site_id=site_id)
     if not cfg:
         raise ValueError("Neopay config is not set")
 
@@ -63,13 +89,9 @@ def build_neopay_payment_link(
         "serviceType": "pisp",
     }
 
-    forced_bic = (cfg.force_bank_bic or "").strip()
-    if forced_bic:
-        payload["bank"] = forced_bic
-    else:
-        bank_bic = (bank_bic or "").strip()
-        if bank_bic and cfg.enable_bank_preselect:
-            payload["bank"] = bank_bic
+    bank_bic = (bank_bic or "").strip()
+    if bank_bic and cfg.enable_bank_preselect:
+        payload["bank"] = bank_bic
 
     if cfg.client_redirect_url:
         payload["clientRedirectUrl"] = cfg.client_redirect_url
@@ -80,9 +102,9 @@ def build_neopay_payment_link(
 
     token = jwt.encode(payload, cfg.project_key, algorithm="HS256")
 
-    widget_host = (cfg.widget_host or "").strip()
+    widget_host = NEOPAY_WIDGET_HOST_DEFAULT
     if not widget_host:
-        widget_host = "https://psd2.neopay.lt/widget.html?"
+        widget_host = NEOPAY_WIDGET_HOST_DEFAULT
     if widget_host.endswith("?") or widget_host.endswith("&"):
         base = widget_host
     elif "?" in widget_host:
@@ -93,8 +115,8 @@ def build_neopay_payment_link(
     return f"{base}{token}", payload
 
 
-def decode_neopay_token(token: str) -> dict:
-    cfg = get_neopay_config()
+def decode_neopay_token(token: str, *, site_id: int | None = None) -> dict:
+    cfg = get_neopay_config(site_id=site_id)
     if not cfg:
         raise ValueError("Neopay config is not set")
 

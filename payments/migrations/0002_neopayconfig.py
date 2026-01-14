@@ -25,12 +25,7 @@ class Migration(migrations.Migration):
                 ("is_active", models.BooleanField(default=True)),
                 ("project_id", models.BigIntegerField()),
                 ("project_key", models.CharField(max_length=255)),
-                (
-                    "widget_host",
-                    models.URLField(
-                        blank=True, default="https://psd2.neopay.lt/widget.html?"
-                    ),
-                ),
+                ("enable_bank_preselect", models.BooleanField(default=False)),
                 ("client_redirect_url", models.URLField(blank=True, default="")),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),

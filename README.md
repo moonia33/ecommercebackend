@@ -683,16 +683,10 @@ Neopay:
 
 - `Payments -> Neopay config`:
   - `project_id`, `project_key`
-  - `widget_host` (default: `https://psd2.neopay.lt/widget.html?`)
   - `client_redirect_url` (kur Neopay nukreips userį po payment)
-  - `banks_api_base_url` (Banks API bazinis URL)
   - `enable_bank_preselect`:
     - `false`: frontas rodo tik Neopay (banką useris pasirenka widget'e)
     - `true`: frontas gali rodyti bankų sąrašą (gaunamą iš backend) ir perduoti `neopay_bank_bic` į `checkout/confirm`
-
-  - `force_bank_bic` / `force_bank_name` (nebūtina):
-    - Jei nustatyta – backend'as visais atvejais įdės `bank` į Neopay JWT (override) ir `GET /payments/neopay/banks` grąžins tik šitą banką.
-    - Naudinga sandbox'e, kai projektui leidžiamas tik vienas testinis bankas (pvz. `TESTLT123`).
 
 Bankų sąrašas (kai `enable_bank_preselect=true`):
 
@@ -735,15 +729,10 @@ Local testavimas per `cloudflared`/tunnel:
 
 Sandbox vs Production (deploy checklist):
 
-- Sandbox host'ai (pvz.):
-  - `widget_host=https://psd2.sandboxnpay.online/widget.html`
-  - `banks_api_base_url=https://psd2.sandboxnpay.online/api`
-- Production host'ai:
-  - `widget_host=https://psd2.neopay.lt/widget.html?`
-  - `banks_api_base_url=https://psd2.neopay.lt/api`
+- Sandbox host'ai / Production host'ai šitam projekte yra fiksuoti kode (pakeitimai būtų daromi per deployment/config, ne per DB).
 - Prieš deploy į production:
   - Pašalinti test tunnel URL iš `client_redirect_url` ir suvesti realų viešą fronto URL.
-  - Išjungti `force_bank_bic` (palikti tuščią), kad būtų rodomi realūs bankai.
+  - Patikrinti, kad Neopay bankų sąrašas (`NeopayBank`) yra atsinaujinęs (pvz. paleidus sync komandą).
   - Patikrinti, kad Neopay self-service portale server-side callback URL suvestas į realų backend (`/api/v1/payments/neopay/callback`).
   - Įsitikinti, kad `project_id`/`project_key` yra production projekto.
 

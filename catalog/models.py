@@ -952,6 +952,11 @@ class BackInStockSubscription(models.Model):
         OUTLET = "outlet", "Outlet"
 
     email = models.EmailField()
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.PROTECT,
+        related_name="back_in_stock_subscriptions",
+    )
     product = models.ForeignKey(
         Product,
         null=True,
@@ -980,7 +985,7 @@ class BackInStockSubscription(models.Model):
         ordering = ["-created_at", "-id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["email", "product", "variant", "channel"],
+                fields=["site", "email", "product", "variant", "channel"],
                 name="uniq_back_in_stock_subscription",
             )
         ]

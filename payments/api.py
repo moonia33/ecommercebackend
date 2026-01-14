@@ -21,7 +21,10 @@ def neopay_callback(request, payload: NeopayCallbackIn):
     if not token:
         raise HttpError(400, "Missing token")
 
-    decoded = decode_neopay_token(token)
+    site = getattr(request, "site", None)
+    site_id = int(getattr(site, "id", 0) or 0) or None
+
+    decoded = decode_neopay_token(token, site_id=site_id)
     transactions = decoded.get("transactions")
 
     # Neopay may send either:
@@ -126,31 +129,23 @@ def neopay_callback(request, payload: NeopayCallbackIn):
 
 @router.get("/neopay/banks", response=list[NeopayBankOut])
 def neopay_banks(request, country_code: str = "LT"):
-    cfg = get_neopay_config()
+    site = getattr(request, "site", None)
+    site_id = int(getattr(site, "id", 0) or 0) or None
+
+    cc = (country_code or "").strip().upper() or "LT"
+
+    cfg = get_neopay_config(site_id=site_id)
     if not cfg:
         raise HttpError(400, "Neopay config is not set")
 
     if not cfg.enable_bank_preselect:
         return []
 
-    forced_bic = (getattr(cfg, "force_bank_bic", "") or "").strip()
-    forced_name = (getattr(cfg, "force_bank_name", "") or "").strip()
-    if forced_bic:
-        cc = (country_code or "").strip().upper() or "LT"
-        return [
-            NeopayBankOut(
-                country_code=cc,
-                bic=forced_bic,
-                name=forced_name or forced_bic,
-                service_types=["pisp"],
-            )
-        ]
-
-    cc = (country_code or "").strip().upper() or "LT"
-
     import requests
 
-    base = (cfg.banks_api_base_url or "https://psd2.neopay.lt/api").rstrip("/")
+    from payments.services.neopay import NEOPAY_BANKS_API_BASE_URL_DEFAULT
+
+    base = (NEOPAY_BANKS_API_BASE_URL_DEFAULT or "https://psd2.neopay.lt/api").rstrip("/")
     if base.endswith("/countries"):
         base = base[: -len("/countries")]
     candidates = [
@@ -262,7 +257,10 @@ def neopay_banks(request, country_code: str = "LT"):
 
 @router.get("/neopay/countries", response=list[NeopayCountryOut])
 def neopay_countries(request, country_code: str | None = None):
-    cfg = get_neopay_config()
+    site = getattr(request, "site", None)
+    site_id = int(getattr(site, "id", 0) or 0) or None
+
+    cfg = get_neopay_config(site_id=site_id)
     if not cfg:
         raise HttpError(400, "Neopay config is not set")
 
@@ -271,7 +269,9 @@ def neopay_countries(request, country_code: str | None = None):
 
     import requests
 
-    base = (cfg.banks_api_base_url or "https://psd2.neopay.lt/api").rstrip("/")
+    from payments.services.neopay import NEOPAY_BANKS_API_BASE_URL_DEFAULT
+
+    base = (NEOPAY_BANKS_API_BASE_URL_DEFAULT or "https://psd2.neopay.lt/api").rstrip("/")
     if base.endswith("/countries"):
         base = base[: -len("/countries")]
     candidates = [

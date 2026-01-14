@@ -218,11 +218,15 @@ def otp_request(request, payload: OTPRequestIn):
 
     language_code = get_request_language_code(request)
 
+    site = getattr(request, "site", None)
+    site_id = int(getattr(site, "id", 0) or 0) or None
+
     result = send_templated_email(
         template_key="auth_otp_code",
         to_email=email,
         context={"code": code, "ttl_minutes": ttl},
         language_code=language_code,
+        site_id=site_id,
     )
     if not result.ok:
         if getattr(settings, "DEBUG", False):

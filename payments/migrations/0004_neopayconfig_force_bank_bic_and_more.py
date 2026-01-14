@@ -10,14 +10,4 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField(
-            model_name="neopayconfig",
-            name="force_bank_bic",
-            field=models.CharField(blank=True, default="", max_length=32),
-        ),
-        migrations.AddField(
-            model_name="neopayconfig",
-            name="force_bank_name",
-            field=models.CharField(blank=True, default="", max_length=200),
-        ),
     ]
