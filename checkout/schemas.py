@@ -69,6 +69,7 @@ class CheckoutPreviewIn(Schema):
     shipping_method: str = "unisend_pickup"
     pickup_point_id: str | None = None
     payment_method: str = "klix"
+    neopay_bank_bic: str | None = None
     channel: str = "normal"
     coupon_code: str | None = None
 
@@ -144,6 +145,17 @@ class PaymentMethodOut(Schema):
     kind: str
     provider: str = ""
     instructions: str = ""
+    logo_url: str = ""
+
+
+class PaymentOptionOut(Schema):
+    id: str
+    kind: str
+    title: str
+    provider: str = ""
+    instructions: str = ""
+    logo_url: str = ""
+    payload: dict = {}
 
 
 class OrderLineOut(Schema):

@@ -161,6 +161,12 @@ Rekomenduojamas UX:
 - Kviečiant preview UI lygyje daryti debounce (pvz. 200–400ms), kad nekviestų per dažnai.
 - Kol preview negaunamas (arba grąžina klaidą), mygtukas "Mokėti" turi būti disabled.
 
+## Mokėjimų pasirinkimai (Neopay + kiti) be hardcode
+
+- `GET /api/v1/checkout/payment-options?country_code=LT`
+  - Neopay bankai paduodami iš lokalaus DB (modelis `NeopayBank`) pagal `country_code` ir `is_enabled=true`.
+  - FE turi naudoti `option.id` kaip unikalų key renderinant sąrašą (pvz. `{#each options as opt (opt.id)}`), nes `code` gali dubliuotis tarp skirtingų option'ų.
+
 ### 8) Checkout confirm
 
 - `POST /api/v1/checkout/checkout/confirm`

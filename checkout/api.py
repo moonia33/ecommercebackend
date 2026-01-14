@@ -3,7 +3,10 @@ from __future__ import annotations
 from decimal import Decimal
 from datetime import date
 
+import logging
+
 from django.conf import settings
+from django.core.cache import cache
 from django.db import models
 from django.db import transaction
 from django.utils import timezone
@@ -37,6 +40,7 @@ from .schemas import (
     OrderOut,
     OrderLineOut,
     PaymentMethodOut,
+    PaymentOptionOut,
     FeeOut,
     ShippingMethodOut,
 )
@@ -53,6 +57,9 @@ from .services import (
 
 
 router = Router(tags=["checkout"])
+
+
+logger = logging.getLogger(__name__)
 
 
 def _dw_value(dw, key: str):
@@ -319,6 +326,12 @@ def payment_methods(request, country_code: str = "LT"):
     if methods:
         out: list[PaymentMethodOut] = []
         for m in methods:
+            logo_url = ""
+            try:
+                if getattr(m, "image", None) and getattr(m.image, "url", None):
+                    logo_url = str(m.image.url)
+            except Exception:
+                logo_url = ""
             out.append(
                 PaymentMethodOut(
                     code=m.code,
@@ -326,6 +339,7 @@ def payment_methods(request, country_code: str = "LT"):
                     kind=m.kind,
                     provider=m.provider,
                     instructions=(m.instructions or "").strip(),
+                    logo_url=logo_url,
                 )
             )
         return out
@@ -339,6 +353,7 @@ def payment_methods(request, country_code: str = "LT"):
             kind="offline",
             provider="bank_transfer",
             instructions=instructions,
+            logo_url="",
         ),
         PaymentMethodOut(
             code="klix",
@@ -346,8 +361,300 @@ def payment_methods(request, country_code: str = "LT"):
             kind="gateway",
             provider="klix",
             instructions="",
+            logo_url="",
         ),
     ]
+
+
+@router.get("/payment-options", response=list[PaymentOptionOut], auth=_auth)
+def payment_options(request, country_code: str = "LT"):
+    _require_user(request)
+    country_code = (country_code or "").strip().upper() or "LT"
+
+    # 1) Base payment methods from DB (or fallback)
+    base = payment_methods(request, country_code=country_code)
+
+    options: list[PaymentOptionOut] = []
+    _base_rank: dict[str, int] = {}
+    _bank_rank: dict[str, int] = {}
+
+    for idx, m in enumerate(base):
+        # When using Neopay bank list UX, we don't expose a generic "neopay" option here.
+        # Instead, we expose individual banks below.
+        if (m.code or "").strip().lower() == "neopay" or (m.provider or "").strip().lower() == "neopay":
+            continue
+
+        _base_rank[str(m.code)] = idx
+        options.append(
+            PaymentOptionOut(
+                id=str(m.code),
+                kind="method",
+                title=str(m.name),
+                provider=str(m.provider or m.code or ""),
+                instructions=str(getattr(m, "instructions", "") or ""),
+                logo_url=str(getattr(m, "logo_url", "") or ""),
+                payload={"payment_method": str(m.code)},
+            )
+        )
+
+    # 2) Neopay banks as separate payment options (only if enabled)
+    try:
+        from payments.services.neopay import get_neopay_config
+
+        cfg = get_neopay_config()
+    except Exception:
+        cfg = None
+
+    if cfg and bool(getattr(cfg, "enable_bank_preselect", False)):
+        forced_bic = (getattr(cfg, "force_bank_bic", "") or "").strip()
+        forced_name = (getattr(cfg, "force_bank_name", "") or "").strip()
+
+        banks_raw: list[dict] = []
+
+        if forced_bic:
+            banks_raw = [
+                {
+                    "bic": forced_bic,
+                    "name": forced_name or forced_bic,
+                    "services": ["pisp"],
+                    "logo": "",
+                    "isOperating": True,
+                }
+            ]
+        else:
+            # Prefer local DB cache (NeopayBank) to avoid external API calls in checkout.
+            try:
+                from payments.models import NeopayBank
+
+                db_banks = list(
+                    NeopayBank.objects.filter(country_code=country_code, is_enabled=True)
+                    .order_by("sort_order", "name", "bic")
+                )
+            except Exception:
+                db_banks = []
+
+            if db_banks:
+                for idx, b in enumerate(db_banks):
+                    bic = (getattr(b, "bic", "") or "").strip()
+                    if not bic:
+                        continue
+                    name = (getattr(b, "name", "") or "").strip() or bic
+                    logo_url = (getattr(b, "logo_url", "") or "").strip()
+                    _bank_rank[bic] = idx
+                    options.append(
+                        PaymentOptionOut(
+                            id=f"neopay:{bic}",
+                            kind="neopay_bank",
+                            title=name,
+                            provider="neopay",
+                            instructions="",
+                            logo_url=logo_url,
+                            payload={
+                                "payment_method": "neopay",
+                                "neopay_bank_bic": bic,
+                            },
+                        )
+                    )
+
+                # DB is authoritative: do not also fetch from cache/live to avoid duplicates.
+                banks_raw = []
+            else:
+                cache_key = f"neopay:banks:{int(getattr(cfg, 'project_id', 0) or 0)}:{country_code}"
+                cached = cache.get(cache_key)
+                if isinstance(cached, list) and cached:
+                    # Cache stores already-normalized bank dicts.
+                    banks_raw = [b for b in cached if isinstance(b, dict)]
+                else:
+                    import requests
+
+                base_url = (getattr(cfg, "banks_api_base_url", "") or "https://psd2.neopay.lt/api").rstrip("/")
+                if base_url.endswith("/countries"):
+                    base_url = base_url[: -len("/countries")]
+                candidates = [
+                    f"{base_url}/countries/{cfg.project_id}",
+                    f"{base_url}/countries/{cfg.project_id}/",
+                    f"{base_url}/countries",
+                    f"{base_url}/countries/",
+                ]
+                if base_url.endswith("/api"):
+                    root = base_url[: -len("/api")]
+                    candidates.append(f"{root}/api/countries/{cfg.project_id}")
+                    candidates.append(f"{root}/api/countries/{cfg.project_id}/")
+
+                data = None
+                last_response = None
+                last_exc: Exception | None = None
+
+                for url in candidates:
+                    try:
+                        r = requests.get(
+                            url,
+                            timeout=5,
+                            headers={
+                                "Accept": "application/json",
+                                "User-Agent": "inultimo-backend/1.0",
+                            },
+                        )
+                    except requests.RequestException as e:
+                        last_exc = e
+                        continue
+
+                    last_response = r
+                    if r.status_code == 404:
+                        continue
+                    if r.status_code >= 400:
+                        body = (r.text or "").strip().replace("\n", " ")
+                        if len(body) > 300:
+                            body = body[:300] + "..."
+                        raise HttpError(502, f"Neopay banks api failed: {r.status_code} url={url} body={body}")
+
+                    try:
+                        data = r.json()
+                    except Exception:
+                        # Try next candidate if response isn't valid JSON.
+                        continue
+
+                    break
+
+                if data is None:
+                    if last_exc is not None:
+                        raise HttpError(502, f"Neopay banks api request failed: {type(last_exc).__name__}")
+                    if last_response is not None:
+                        body = (last_response.text or "").strip().replace("\n", " ")
+                        if len(body) > 300:
+                            body = body[:300] + "..."
+                        raise HttpError(
+                            502,
+                            f"Neopay banks api failed: {last_response.status_code} url={candidates[-1]} body={body}",
+                        )
+                    raise HttpError(502, "Neopay banks api failed: no response")
+
+                # Normalize to countries list
+                countries = []
+                if isinstance(data, list):
+                    countries = data
+                elif isinstance(data, dict):
+                    countries = data.get("countries") or []
+                    if not countries and country_code:
+                        cc = (country_code or "").strip().upper()
+                        if cc and cc in data and isinstance(data.get(cc), dict):
+                            countries = [{"code": cc, **data.get(cc)}]
+
+                cc = (country_code or "").strip().upper()
+                for c in countries:
+                    if not isinstance(c, dict):
+                        continue
+                    ccode = (c.get("code") or c.get("country") or c.get("countryCode") or "").strip().upper()
+                    if ccode and ccode != cc:
+                        continue
+                    candidate = c.get("aspsps") or c.get("banks") or []
+                    if isinstance(candidate, list):
+                        for b in candidate:
+                            if isinstance(b, dict):
+                                banks_raw.append(b)
+                    break
+
+                # Cache as simple dicts to avoid pickling issues.
+                try:
+                    normalized_cache: list[dict] = []
+                    for b in banks_raw:
+                        if not isinstance(b, dict):
+                            continue
+                        bic = (b.get("bic") or b.get("BIC") or "").strip()
+                        if not bic:
+                            continue
+                        normalized_cache.append(
+                            {
+                                "bic": bic,
+                                "name": (b.get("name") or b.get("bankName") or "").strip() or bic,
+                                "services": b.get("services") or b.get("serviceTypes") or [],
+                                "logo": (b.get("logo") or b.get("logoUrl") or "") if isinstance(b.get("logo") or b.get("logoUrl") or "", str) else "",
+                                "isOperating": b.get("isOperating") if "isOperating" in b else True,
+                            }
+                        )
+                    # 10 min cache is enough for UX and protects Neopay API.
+                    cache.set(cache_key, normalized_cache, timeout=600)
+                except Exception:
+                    logger.exception("Failed to cache neopay banks list")
+
+        # NOTE: variable reuse guard (banks list may be nested above)
+        normalized: list[dict] = []
+        for b in banks_raw:
+            if isinstance(b, dict):
+                normalized.append(b)
+
+        for b in normalized:
+            bic = (b.get("bic") or b.get("BIC") or "").strip()
+            if not bic:
+                continue
+            services = b.get("services") or b.get("serviceTypes") or []
+            if isinstance(services, str):
+                services = [services]
+            if not isinstance(services, list):
+                services = []
+            if "pisp" not in {str(x).strip().lower() for x in services}:
+                continue
+
+            name = (b.get("name") or b.get("bankName") or "").strip() or bic
+            logo_url = (b.get("logo") or b.get("logoUrl") or "").strip() if isinstance(b.get("logo") or b.get("logoUrl") or "", str) else ""
+            is_operating = bool(b.get("isOperating")) if "isOperating" in b else True
+            if not is_operating:
+                continue
+
+            if bic not in _bank_rank:
+                _bank_rank[bic] = len(_bank_rank)
+            options.append(
+                PaymentOptionOut(
+                    id=f"neopay:{bic}",
+                    kind="neopay_bank",
+                    title=name,
+                    provider="neopay",
+                    instructions="",
+                    logo_url=logo_url,
+                    payload={
+                        "payment_method": "neopay",
+                        "neopay_bank_bic": bic,
+                    },
+                )
+            )
+
+    # Defensive dedupe (prevents FE keyed each issues if upstream ever duplicates ids)
+    unique: list[PaymentOptionOut] = []
+    seen_ids: set[str] = set()
+    for o in options:
+        oid = str(getattr(o, "id", "") or "")
+        if not oid or oid in seen_ids:
+            continue
+        seen_ids.add(oid)
+        unique.append(o)
+    options = unique
+
+    # Common ordering for all payment options.
+    # - Payment methods first
+    # - Neopay banks afterwards
+    # - bank_transfer always last (regardless of sort_order)
+    def _option_sort_key(o: PaymentOptionOut) -> tuple:
+        payload = getattr(o, "payload", None) or {}
+        payment_method = str(payload.get("payment_method") or "").strip().lower()
+        oid = str(getattr(o, "id", "") or "").strip().lower()
+
+        if payment_method == "bank_transfer" or oid == "bank_transfer":
+            return (999, 0, oid)
+
+        kind = str(getattr(o, "kind", "") or "")
+        if kind == "method":
+            pm_code = str(payload.get("payment_method") or "").strip()
+            return (0, int(_base_rank.get(pm_code, 10**9)), oid)
+
+        if kind == "neopay_bank":
+            bic = str(payload.get("neopay_bank_bic") or "").strip()
+            return (1, int(_bank_rank.get(bic, 10**9)), oid)
+
+        # Fallback: keep unknown kinds after methods, before bank_transfer
+        return (2, 0, oid)
+
+    options.sort(key=_option_sort_key)
+    return options
 
 
 def _require_user(request):
@@ -1188,6 +1495,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
 
     shipping_method = (payload.shipping_method or "").strip() or "unisend_pickup"
     payment_method = (getattr(payload, "payment_method", "") or "").strip() or "klix"
+    _neopay_bank_bic = (getattr(payload, "neopay_bank_bic", None) or "").strip() or None
     channel = (getattr(payload, "channel", "normal") or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
         raise HttpError(400, "Invalid channel")

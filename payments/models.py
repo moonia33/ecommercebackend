@@ -21,6 +21,8 @@ class PaymentMethod(models.Model):
 
     instructions = models.TextField(blank=True, default="")
 
+    image = models.ImageField(upload_to="payment_methods/%Y/%m/", null=True, blank=True)
+
     bank_account_iban = models.CharField(max_length=64, blank=True, default="")
     bank_account_bic = models.CharField(max_length=32, blank=True, default="")
     bank_account_beneficiary = models.CharField(max_length=200, blank=True, default="")
@@ -95,3 +97,33 @@ class NeopayConfig(models.Model):
 
     def __str__(self) -> str:
         return f"neopay:{self.project_id}"
+
+
+class NeopayBank(models.Model):
+    country_code = models.CharField(max_length=2)
+    bic = models.CharField(max_length=32)
+    name = models.CharField(max_length=200, blank=True, default="")
+    logo_url = models.URLField(blank=True, default="")
+
+    is_operating = models.BooleanField(default=True)
+    is_enabled = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+
+    raw = models.JSONField(default=dict, blank=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["country_code", "sort_order", "name", "bic"]
+        constraints = [
+            models.UniqueConstraint(fields=["country_code", "bic"], name="uniq_neopay_bank_country_bic"),
+        ]
+        indexes = [
+            models.Index(fields=["country_code", "is_enabled", "sort_order"]),
+            models.Index(fields=["bic"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.country_code}:{self.bic}"

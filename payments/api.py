@@ -151,6 +151,8 @@ def neopay_banks(request, country_code: str = "LT"):
     import requests
 
     base = (cfg.banks_api_base_url or "https://psd2.neopay.lt/api").rstrip("/")
+    if base.endswith("/countries"):
+        base = base[: -len("/countries")]
     candidates = [
         f"{base}/countries/{cfg.project_id}",
         f"{base}/countries/{cfg.project_id}/",
@@ -270,6 +272,8 @@ def neopay_countries(request, country_code: str | None = None):
     import requests
 
     base = (cfg.banks_api_base_url or "https://psd2.neopay.lt/api").rstrip("/")
+    if base.endswith("/countries"):
+        base = base[: -len("/countries")]
     candidates = [
         f"{base}/countries/{cfg.project_id}",
         f"{base}/countries/{cfg.project_id}/",

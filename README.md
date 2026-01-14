@@ -400,7 +400,7 @@ Endpointai (MVP):
     - `search` (nebūtinas; ieško per `locker_id/name/city/street/postal_code`)
     - `postal_code` (nebūtinas)
     - `locker_type` (nebūtinas; filtruojama iš `raw.lockerType`)
-    - `limit` (default 50, max 1000)
+    - `limit` (default 1000, max 1000)
   - Pastaba: jei DB cache tuščias – endpointas grąžins tuščią sąrašą; pirma paleisk sync.
 - `GET /api/v1/dpd/status?tracking_number=...`
   - Proxy į DPD `/status/tracking` (kol kas grąžina `raw`).
@@ -572,6 +572,16 @@ Bankų sąrašas (kai `enable_bank_preselect=true`):
 
 - `GET /api/v1/payments/neopay/banks?country_code=LT`
 
+Šis endpointas grąžina tik bankų sąrašą, skirtą FE bankų picker'iui (o ne visą Neopay `countries` payload). Papildomi laukai:
+
+- `logo_url` – banko logo URL (pvz. `https://assets.neopay.lt/...svg`)
+- `is_operating` – ar bankas šiuo metu veikia (jei Neopay pateikia)
+
+Jei FE reikia pilnos `countries` informacijos (pvz. `defaultLanguage`, `languages`, `rules` tekstai), naudoti:
+
+- `GET /api/v1/payments/neopay/countries`
+- `GET /api/v1/payments/neopay/countries?country_code=LT`
+
 Callback'ai (2 tipai):
 
 Client redirect (browser redirect į frontą):
@@ -620,6 +630,28 @@ Mokėjimo būdų sąrašas frontui:
 - `GET /api/v1/checkout/payment-methods?country_code=LT`
   - Grąžina aktyvius mokėjimo būdus iš DB (`Payments -> Payment methods`).
   - Jei DB tuščia, grąžina fallback (hardcoded: `bank_transfer`, `klix`).
+
+FE-friendly (agreguotas) mokėjimo pasirinkimų sąrašas:
+
+- `GET /api/v1/checkout/payment-options?country_code=LT`
+  - Grąžina vieną sąrašą, skirtą tiesioginiam UI renderinimui.
+  - Sąrašą sudaro:
+    - įprasti mokėjimo metodai (pvz. `bank_transfer`, `cod` jei sukonfigūruota)
+    - Neopay bankai kaip atskiri pasirinkimai (pvz. `Swedbank`, `SEB`, ...), jei `NeopayConfig.enable_bank_preselect=true`.
+      - Bankai checkout'e paduodami iš lokalaus DB (`Payments -> Neopay banks`, modelis `NeopayBank`) pagal `country_code` ir `is_enabled=true`.
+      - `is_operating` laikomas informaciniu (rodymas valdomas `is_enabled`).
+      - Jei DB konkrečiai šaliai dar tuščias (pvz. pirmas paleidimas), backend gali pabandyti parsisiųsti bankus iš Neopay API (bootstrap).
+  - Kiekvienas įrašas turi `payload`, kurį FE gali tiesiai paduoti į `POST /checkout/preview` ir `POST /checkout/confirm`.
+  - Šiuo režimu FE neturi rodyti bendro "Neopay" kaip atskiro pasirinkimo (tik bankus).
+  - Paprastiems mokėjimo metodams (pvz. `bank_transfer`, `cod`, `klix`) galima admin'e įkelti logo (`Payments -> Payment methods -> image`) ir API grąžins `logo_url`.
+
+Neopay bankų sinchronizavimas į DB (multi-country):
+
+- Rankinis sync:
+  - `python manage.py neopay_sync_banks --country-code=LT`
+- Sync visoms šalims:
+  - `python manage.py neopay_sync_banks`
+- Rekomendacija: paleisti periodiškai (pvz. kartą per savaitę) ir prireikus rankiniu būdu (kai Neopay informuoja apie pokyčius).
 
 ### Orders
 
