@@ -6,7 +6,13 @@ from django.db import models
 
 
 class Coupon(models.Model):
-    code = models.SlugField(max_length=40, unique=True)
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.PROTECT,
+        related_name="coupons",
+    )
+
+    code = models.SlugField(max_length=40)
     name = models.CharField(max_length=150, blank=True, default="")
 
     # Discount configuration (applies to items/cart only)
@@ -41,6 +47,9 @@ class Coupon(models.Model):
 
     class Meta:
         ordering = ["code"]
+        constraints = [
+            models.UniqueConstraint(fields=["site", "code"], name="uniq_coupon_site_code"),
+        ]
 
     def __str__(self) -> str:
         return self.code
@@ -144,6 +153,12 @@ class PromoRule(models.Model):
         PRODUCT = "product", "Product"
         VARIANT = "variant", "Variant"
 
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.PROTECT,
+        related_name="promo_rules",
+    )
+
     name = models.CharField(max_length=200)
     is_active = models.BooleanField(default=True)
     priority = models.IntegerField(default=0, help_text="Higher wins")
@@ -209,7 +224,7 @@ class PromoRule(models.Model):
     class Meta:
         ordering = ["-priority", "name", "id"]
         indexes = [
-            models.Index(fields=["is_active", "-priority"]),
+            models.Index(fields=["site", "is_active", "-priority"]),
             models.Index(fields=["scope", "is_active"]),
         ]
 

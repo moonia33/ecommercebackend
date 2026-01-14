@@ -96,13 +96,14 @@ def calculate_fee_money(
     return money_from_net(currency=currency, unit_net=amount_net, vat_rate=vat_rate, qty=1)
 
 
-def select_fee_rules(*, country_code: str, payment_method: str) -> list["FeeRule"]:
+def select_fee_rules(*, site_id: int, country_code: str, payment_method: str) -> list["FeeRule"]:
     from checkout.models import FeeRule
 
+    site_id = int(site_id)
     country_code = (country_code or "").strip().upper()
     payment_method = (payment_method or "").strip()
 
-    qs = FeeRule.objects.filter(is_active=True).order_by("sort_order", "code")
+    qs = FeeRule.objects.filter(site_id=site_id, is_active=True).order_by("sort_order", "code")
     if country_code:
         qs = qs.filter(models.Q(country_code="") | models.Q(country_code=country_code))
     if payment_method:
@@ -114,12 +115,13 @@ def select_fee_rules(*, country_code: str, payment_method: str) -> list["FeeRule
 
 def calculate_fees(
     *,
+    site_id: int,
     currency: str,
     country_code: str,
     items_gross: Decimal,
     payment_method: str,
 ) -> list[tuple["FeeRule", Money]]:
-    rules = select_fee_rules(country_code=country_code, payment_method=payment_method)
+    rules = select_fee_rules(site_id=int(site_id), country_code=country_code, payment_method=payment_method)
     out: list[tuple["FeeRule", Money]] = []
     items_gross_d = Decimal(items_gross or 0)
 

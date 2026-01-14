@@ -20,8 +20,9 @@ class CartItemInline(admin.TabularInline):
 
 @admin.register(Cart)
 class CartAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "updated_at")
-    search_fields = ("user__email",)
+    list_display = ("id", "site", "user", "session_key", "updated_at")
+    list_filter = ("site",)
+    search_fields = ("user__email", "session_key")
     inlines = (CartItemInline,)
 
 
@@ -129,6 +130,7 @@ class OrderDiscountInline(admin.TabularInline):
 class OrderAdmin(admin.ModelAdmin):
     list_display = (
         "id",
+        "site",
         "user",
         "status",
         "delivery_status",
@@ -141,6 +143,7 @@ class OrderAdmin(admin.ModelAdmin):
         "created_at",
     )
     list_filter = (
+        "site",
         "status",
         "delivery_status",
         "carrier_code",
@@ -822,6 +825,7 @@ class OrderAdmin(admin.ModelAdmin):
 @admin.register(FeeRule)
 class FeeRuleAdmin(admin.ModelAdmin):
     list_display = (
+        "site",
         "code",
         "name",
         "is_active",
@@ -833,7 +837,7 @@ class FeeRuleAdmin(admin.ModelAdmin):
         "tax_class",
         "sort_order",
     )
-    list_filter = ("is_active", "country_code", "payment_method_code")
+    list_filter = ("site", "is_active", "country_code", "payment_method_code")
     search_fields = ("code", "name")
     ordering = ("sort_order", "code")
     autocomplete_fields = ("tax_class",)

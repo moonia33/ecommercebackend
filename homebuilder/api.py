@@ -76,12 +76,19 @@ def home(
     if language_code is None:
         language_code = get_request_language_code(request)
 
-    cache_key = f"homebuilder:home:v1:cc:{(country_code or '').upper()}:ch:{(channel or '').lower()}:lang:{(language_code or '').lower()}"
+    site = getattr(request, "site", None)
+    site_id = int(getattr(site, "id", 0) or 0) or 0
+
+    cache_key = f"homebuilder:home:v1:s:{int(site_id)}:cc:{(country_code or '').upper()}:ch:{(channel or '').lower()}:lang:{(language_code or '').lower()}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
-    page = HomePage.objects.filter(code="home", is_active=True).only("id", "code", "updated_at").first()
+    page = (
+        HomePage.objects.filter(site_id=int(site_id), code="home", is_active=True)
+        .only("id", "code", "updated_at")
+        .first()
+    )
     if page is None:
         raise HttpError(404, "Home page not configured")
 
@@ -134,7 +141,11 @@ def home(
             pinned_rows.sort(key=lambda r: (r.sort_order, r.id))
             pinned_slugs = [r.product.slug for r in pinned_rows if r.product_id]
 
+            site = getattr(request, "site", None)
+            site_id = int(getattr(site, "id", 0) or 0) or None
+
             pinned_items = get_products_by_slugs_for_grid(
+                site_id=site_id,
                 country_code=country_code,
                 channel=channel,
                 product_slugs=pinned_slugs,
@@ -163,6 +174,7 @@ def home(
                     in_stock_only=in_stock_only,
                     limit=remaining,
                     exclude_product_ids=pinned_ids,
+                    site_id=site_id,
                 )
 
             items = pinned_items + grid_items

@@ -589,6 +589,9 @@ def _user_from_cookie_if_present(request):
 def _get_cart_for_request(request, *, create: bool) -> Cart | None:
     user = _user_from_cookie_if_present(request)
 
+    site = getattr(request, "site", None)
+    site_id = int(getattr(site, "id", 0) or 0) or 0
+
     session_key = ""
     if hasattr(request, "session"):
         try:
@@ -597,18 +600,18 @@ def _get_cart_for_request(request, *, create: bool) -> Cart | None:
             session_key = ""
 
     if user:
-        user_cart = getattr(user, "cart", None)
+        user_cart = Cart.objects.filter(site_id=site_id, user=user).first()
 
         guest_cart = None
         if session_key:
             guest_cart = Cart.objects.filter(
-                user=None, session_key=session_key).first()
+                site_id=site_id, user=None, session_key=session_key).first()
 
         if not user_cart:
             # Allow merge on first GET after login if a guest cart exists.
             if create or guest_cart:
                 user_cart, _ = Cart.objects.get_or_create(
-                    user=user, defaults={"session_key": ""})
+                    site_id=site_id, user=user, defaults={"session_key": ""})
             else:
                 return None
 
@@ -652,9 +655,9 @@ def _get_cart_for_request(request, *, create: bool) -> Cart | None:
         return None
 
     if not create:
-        return Cart.objects.filter(user=None, session_key=session_key).first()
+        return Cart.objects.filter(site_id=site_id, user=None, session_key=session_key).first()
 
-    cart, _ = Cart.objects.get_or_create(user=None, session_key=session_key)
+    cart, _ = Cart.objects.get_or_create(site_id=site_id, user=None, session_key=session_key)
     return cart
 
 
@@ -840,8 +843,11 @@ def _cart_item_money(
         )
     )
 
+    site_id = int(getattr(getattr(item, "cart", None), "site_id", 0) or 0) or 0
+
     unit_net, _rule = apply_promo_to_unit_net(
         base_unit_net=base_unit_net,
+        site_id=int(site_id),
         channel=channel,
         category_id=(v.product.category_id if v.product_id else None),
         brand_id=(v.product.brand_id if v.product_id else None),
@@ -1002,7 +1008,7 @@ def get_cart(request, country_code: str = "LT", channel: str = "normal"):
         )
     items = list(
         CartItem.objects.select_related(
-            "variant", "variant__product", "variant__product__tax_class", "offer")
+            "cart", "variant", "variant__product", "variant__product__tax_class", "offer")
         .filter(cart=cart)
         .order_by("id")
     )
@@ -1377,6 +1383,9 @@ def shipping_methods(request, country_code: str = "LT"):
 def checkout_preview(request, payload: CheckoutPreviewIn):
     user = _require_user(request)
 
+    site = getattr(request, "site", None)
+    site_id = int(getattr(site, "id", 0) or 0) or 0
+
     addr = UserAddress.objects.filter(
         user=user, id=payload.shipping_address_id).first()
     if not addr:
@@ -1411,7 +1420,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         raise HttpError(400, "Cart is empty")
     items = list(
         CartItem.objects.select_related(
-            "variant", "variant__product", "variant__product__tax_class", "offer")
+            "cart", "variant", "variant__product", "variant__product__tax_class", "offer")
         .filter(cart=cart)
         .order_by("id")
     )
@@ -1441,7 +1450,10 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         if primary and not bool(getattr(primary, "allow_coupons", True)):
             raise HttpError(400, "Coupons are not allowed for this customer")
 
-        coupon = Coupon.objects.filter(code=coupon_code).first()
+        site = getattr(request, "site", None)
+        site_id = int(getattr(site, "id", 0) or 0) or 0
+
+        coupon = Coupon.objects.filter(site_id=site_id, code=coupon_code).first()
         if not coupon or not coupon.is_valid_now():
             raise HttpError(400, "Invalid coupon")
 
@@ -1544,6 +1556,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         currency="EUR", unit_net=shipping_net, vat_rate=shipping_vat_rate, qty=1)
 
     fee_pairs = calculate_fees(
+        site_id=int(site_id),
         currency="EUR",
         country_code=country_code,
         items_gross=items_total.gross,
@@ -1637,8 +1650,11 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
     coupon_code = (getattr(payload, "coupon_code", None) or "").strip().lower() or None
 
     if idem_key:
+        site = getattr(request, "site", None)
+        site_id = int(getattr(site, "id", 0) or 0) or 0
+
         existing = Order.objects.filter(
-            user=user, idempotency_key=idem_key).first()
+            site_id=site_id, user=user, idempotency_key=idem_key).first()
         if existing:
             pi = getattr(existing, "payment_intent", None)
             return CheckoutConfirmOut(
@@ -1739,7 +1755,11 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             dw_rule = ""
             dw_source = ""
 
+        site = getattr(request, "site", None)
+        site_id = int(getattr(site, "id", 0) or 0) or 0
+
         order = Order.objects.create(
+            site_id=site_id,
             user=user,
             status=Order.Status.PENDING_PAYMENT,
             idempotency_key=idem_key or "",
@@ -1790,7 +1810,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         )
 
         if coupon_code:
-            coupon = Coupon.objects.filter(code=coupon_code).first()
+            coupon = Coupon.objects.filter(site_id=site_id, code=coupon_code).first()
             OrderDiscount.objects.create(
                 order=order,
                 kind=OrderDiscount.Kind.COUPON,

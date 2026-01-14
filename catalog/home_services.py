@@ -29,6 +29,39 @@ def _parse_pairs(value: str | None) -> list[tuple[str, str]]:
     return out
 
 
+def get_products_for_grid(
+    *,
+    country_code: str,
+    channel: str,
+    q: str | None = None,
+    category_slug: str | None = None,
+    brand_slug: str | None = None,
+    group_code: str | None = None,
+    feature: str | None = None,
+    option: str | None = None,
+    sort: str | None = None,
+    in_stock_only: bool = False,
+    limit: int = 12,
+    exclude_product_ids: set[int] | None = None,
+    site_id: int | None = None,
+) -> list[ProductListOut]:
+    return get_products_for_home(
+        site_id=site_id,
+        country_code=country_code,
+        channel=channel,
+        q=q,
+        category_slug=category_slug,
+        brand_slug=brand_slug,
+        group_code=group_code,
+        feature=feature,
+        option=option,
+        sort=sort,
+        in_stock_only=in_stock_only,
+        limit=limit,
+        exclude_product_ids=exclude_product_ids,
+    )
+
+
 def _money_out(*, currency: str, unit_net: Decimal, vat_rate: Decimal) -> MoneyOut:
     b = compute_vat(unit_net=Decimal(unit_net), vat_rate=Decimal(vat_rate), qty=1)
     return {
@@ -76,6 +109,7 @@ def _descendant_category_ids(*, root_id: int) -> list[int]:
 
 def get_products_by_slugs_for_grid(
     *,
+    site_id: int | None = None,
     country_code: str,
     channel: str,
     product_slugs: list[str],
@@ -182,8 +216,11 @@ def get_products_by_slugs_for_grid(
         is_discounted_offer = bool(base_net and list_net and base_net < list_net)
         allow_additional_promotions = not is_discounted_offer
 
+        sid = int(site_id or 0)
+
         sale_net, _rule = apply_promo_to_unit_net(
             base_unit_net=base_net,
+            site_id=sid,
             channel=channel,
             category_id=p.category_id,
             brand_id=p.brand_id,
@@ -241,8 +278,9 @@ def get_products_by_slugs_for_grid(
     return rendered
 
 
-def get_products_for_grid(
+def get_products_for_home(
     *,
+    site_id: int | None,
     country_code: str,
     channel: str,
     q: str | None = None,
@@ -441,8 +479,11 @@ def get_products_for_grid(
         is_discounted_offer = bool(base_net and list_net and base_net < list_net)
         allow_additional_promotions = not is_discounted_offer
 
+        sid = int(site_id or 0)
+
         sale_net, _rule = apply_promo_to_unit_net(
             base_unit_net=base_net,
+            site_id=sid,
             channel=channel,
             category_id=p.category_id,
             brand_id=p.brand_id,

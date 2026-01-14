@@ -6,7 +6,12 @@ from catalog.models import Brand, Category, Product, ProductGroup
 
 
 class HomePage(models.Model):
-    code = models.SlugField(max_length=64, unique=True, default="home")
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.PROTECT,
+        related_name="home_pages",
+    )
+    code = models.SlugField(max_length=64, default="home")
     is_active = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -14,6 +19,9 @@ class HomePage(models.Model):
 
     class Meta:
         ordering = ["code"]
+        constraints = [
+            models.UniqueConstraint(fields=["site", "code"], name="uniq_homepage_site_code"),
+        ]
 
     def __str__(self) -> str:
         return self.code

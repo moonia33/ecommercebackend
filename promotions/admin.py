@@ -8,6 +8,7 @@ from .models import Coupon, PromoRule, PromoRuleCondition, PromoRuleConditionGro
 @admin.register(Coupon)
 class CouponAdmin(admin.ModelAdmin):
     list_display = (
+        "site",
         "code",
         "name",
         "is_active",
@@ -23,7 +24,7 @@ class CouponAdmin(admin.ModelAdmin):
     )
 
     search_fields = ("code", "name")
-    list_filter = ("is_active", "apply_on_discounted_items", "free_shipping")
+    list_filter = ("site", "is_active", "apply_on_discounted_items", "free_shipping")
     readonly_fields = ("times_redeemed", "created_at", "updated_at")
     filter_horizontal = ("free_shipping_methods",)
     fieldsets = (
@@ -75,6 +76,7 @@ class PromoRuleConditionGroupInline(admin.TabularInline):
 @admin.register(PromoRule)
 class PromoRuleAdmin(admin.ModelAdmin):
     list_display = (
+        "site",
         "name",
         "is_active",
         "priority",
@@ -83,13 +85,13 @@ class PromoRuleAdmin(admin.ModelAdmin):
         "start_at",
         "end_at",
     )
-    list_filter = ("is_active",)
+    list_filter = ("site", "is_active")
     search_fields = ("name",)
     filter_horizontal = ("customer_groups", "channels")
     readonly_fields = ("created_at", "updated_at")
     inlines = (PromoRuleConditionGroupInline,)
     fieldsets = (
-        (None, {"fields": ("name", "is_active", "priority", "start_at", "end_at")}),
+        (None, {"fields": ("site", "name", "is_active", "priority", "start_at", "end_at")}),
         (
             "Applies to",
             {

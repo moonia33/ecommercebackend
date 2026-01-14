@@ -17,6 +17,12 @@ class AnalyticsEvent(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.PROTECT,
+        related_name="analytics_events",
+    )
+
     name = models.CharField(max_length=64, choices=Name.choices)
     occurred_at = models.DateTimeField()
 
@@ -46,6 +52,11 @@ class AnalyticsEvent(models.Model):
 
 
 class VisitorLink(models.Model):
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.PROTECT,
+        related_name="visitor_links",
+    )
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     visitor_id = models.CharField(max_length=64)
 
@@ -53,7 +64,7 @@ class VisitorLink(models.Model):
     last_seen_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ("user", "visitor_id")
+        unique_together = ("site", "user", "visitor_id")
         indexes = [models.Index(fields=["visitor_id"])]
 
 
@@ -79,6 +90,11 @@ class AnalyticsOutbox(models.Model):
 
 
 class RecentlyViewedProduct(models.Model):
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.PROTECT,
+        related_name="recently_viewed_products",
+    )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -100,18 +116,18 @@ class RecentlyViewedProduct(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "product"],
+                fields=["site", "user", "product"],
                 condition=models.Q(user__isnull=False),
                 name="analytics_rvp_unique_user_product",
             ),
             models.UniqueConstraint(
-                fields=["visitor_id", "product"],
+                fields=["site", "visitor_id", "product"],
                 condition=~models.Q(visitor_id=""),
                 name="analytics_rvp_unique_visitor_product",
             ),
         ]
         indexes = [
-            models.Index(fields=["user", "last_viewed_at"]),
-            models.Index(fields=["visitor_id", "last_viewed_at"]),
+            models.Index(fields=["site", "user", "last_viewed_at"]),
+            models.Index(fields=["site", "visitor_id", "last_viewed_at"]),
             models.Index(fields=["product", "last_viewed_at"]),
         ]

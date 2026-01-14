@@ -7,12 +7,17 @@ from django.db import models
 
 
 class Cart(models.Model):
-    user = models.OneToOneField(
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.PROTECT,
+        related_name="carts",
+    )
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
         blank=True,
         on_delete=models.CASCADE,
-        related_name="cart",
+        related_name="carts",
     )
     # Anonymous carts are stored per Django session.
     session_key = models.CharField(max_length=40, blank=True, default="")
@@ -27,18 +32,27 @@ class Cart(models.Model):
                 name="chk_cart_user_or_session",
             ),
             models.UniqueConstraint(
-                fields=["session_key"],
+                fields=["site", "session_key"],
                 condition=~models.Q(session_key=""),
                 name="uniq_cart_session_key",
+            ),
+            models.UniqueConstraint(
+                fields=["site", "user"],
+                condition=models.Q(user__isnull=False),
+                name="uniq_cart_site_user",
             ),
         ]
 
     def __str__(self) -> str:
+        if self.site_id:
+            prefix = f"site:{self.site_id} "
+        else:
+            prefix = ""
         if self.user_id:
-            return f"cart:user:{self.user_id}"
+            return f"{prefix}cart:user:{self.user_id}"
         if self.session_key:
-            return f"cart:session:{self.session_key}"
-        return f"cart:{self.id}"
+            return f"{prefix}cart:session:{self.session_key}"
+        return f"{prefix}cart:{self.id}"
 
 
 class CartItem(models.Model):
@@ -105,6 +119,12 @@ class Order(models.Model):
         DELIVERED = "delivered", "Delivered"
         CANCELLED = "cancelled", "Cancelled"
         ERROR = "error", "Error"
+
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.PROTECT,
+        related_name="orders",
+    )
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -215,14 +235,14 @@ class Order(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["site", "user", "-created_at"]),
             models.Index(fields=["status", "-created_at"]),
             models.Index(fields=["carrier_code", "tracking_number"]),
             models.Index(fields=["fulfillment_mode", "supplier_reservation_status", "-created_at"]),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "idempotency_key"],
+                fields=["site", "user", "idempotency_key"],
                 condition=~models.Q(idempotency_key=""),
                 name="uniq_order_idempotency_key_per_user",
             )
@@ -528,7 +548,12 @@ class PaymentIntent(models.Model):
 
 
 class FeeRule(models.Model):
-    code = models.SlugField(max_length=50, unique=True)
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.PROTECT,
+        related_name="fee_rules",
+    )
+    code = models.SlugField(max_length=50)
     name = models.CharField(max_length=200)
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
@@ -555,9 +580,12 @@ class FeeRule(models.Model):
 
     class Meta:
         ordering = ["sort_order", "code"]
+        constraints = [
+            models.UniqueConstraint(fields=["site", "code"], name="uniq_feerule_site_code"),
+        ]
         indexes = [
-            models.Index(fields=["is_active", "country_code", "sort_order"]),
-            models.Index(fields=["payment_method_code"]),
+            models.Index(fields=["site", "is_active", "country_code", "sort_order"]),
+            models.Index(fields=["site", "payment_method_code"]),
         ]
 
     def __str__(self) -> str:

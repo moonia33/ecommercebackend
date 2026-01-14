@@ -26,7 +26,7 @@ def reserve_coupon_for_order(*, order_id: int) -> bool:
 
         coupon = (
             Coupon.objects.select_for_update()
-            .filter(code=(discount.code or "").strip().lower())
+            .filter(site_id=int(order.site_id), code=(discount.code or "").strip().lower())
             .first()
         )
         if not coupon:
@@ -100,7 +100,7 @@ def redeem_coupon_for_paid_order(*, order_id: int) -> bool:
 
         coupon = (
             Coupon.objects.select_for_update()
-            .filter(code=(discount.code or "").strip().lower())
+            .filter(site_id=int(order.site_id), code=(discount.code or "").strip().lower())
             .first()
         )
         if not coupon:
@@ -146,6 +146,7 @@ def redeem_coupon_for_paid_order(*, order_id: int) -> bool:
 
 def find_best_promo_rule(
     *,
+    site_id: int,
     channel: str,
     category_id: int | None,
     brand_id: int | None,
@@ -161,7 +162,7 @@ def find_best_promo_rule(
     ch = (channel or "").strip().lower() or "normal"
 
     qs = (
-        PromoRule.objects.filter(is_active=True)
+        PromoRule.objects.filter(site_id=int(site_id), is_active=True)
         .prefetch_related(
             "customer_groups",
             "channels",
@@ -265,6 +266,7 @@ def find_best_promo_rule(
 def apply_promo_to_unit_net(
     *,
     base_unit_net: Decimal,
+    site_id: int,
     channel: str,
     category_id: int | None,
     brand_id: int | None,
@@ -282,6 +284,7 @@ def apply_promo_to_unit_net(
         return base_unit_net, None
 
     rule = find_best_promo_rule(
+        site_id=int(site_id),
         channel=channel,
         category_id=category_id,
         brand_id=brand_id,

@@ -73,8 +73,8 @@ class NewsletterSectionTranslationInline(admin.StackedInline):
 
 @admin.register(HomePage)
 class HomePageAdmin(admin.ModelAdmin):
-    list_display = ("code", "is_active", "updated_at")
-    list_filter = ("is_active",)
+    list_display = ("site", "code", "is_active", "updated_at")
+    list_filter = ("site", "is_active")
     search_fields = ("code",)
 
     inlines = [HomePageTranslationInline]

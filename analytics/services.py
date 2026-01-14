@@ -25,6 +25,18 @@ def _get_visitor_id_from_request(request) -> str:
         return ""
 
 
+def _get_site_id_from_request(request) -> int | None:
+    site = getattr(request, "site", None)
+    sid = getattr(site, "id", None)
+    if sid is None:
+        return None
+    try:
+        sid_i = int(sid)
+    except Exception:
+        return None
+    return sid_i if sid_i > 0 else None
+
+
 def _get_user_from_request(request):
     u = getattr(request, "user", None)
     if u is not None and getattr(u, "is_authenticated", False):
@@ -72,6 +84,10 @@ def _recently_viewed_max() -> int:
 def record_recently_viewed_product(*, request, product_id: int, now=None) -> None:
     now = now or timezone.now()
 
+    site_id = _get_site_id_from_request(request)
+    if site_id is None:
+        return
+
     visitor_id = _get_visitor_id_from_request(request)
     user = _get_user_from_request(request)
     if user is None and not visitor_id:
@@ -82,31 +98,33 @@ def record_recently_viewed_product(*, request, product_id: int, now=None) -> Non
     with transaction.atomic():
         if user is not None:
             RecentlyViewedProduct.objects.update_or_create(
+                site_id=int(site_id),
                 user=user,
                 product_id=int(product_id),
                 defaults={"visitor_id": "", "last_viewed_at": now},
             )
             ids_to_keep = list(
-                RecentlyViewedProduct.objects.filter(user=user)
+                RecentlyViewedProduct.objects.filter(site_id=int(site_id), user=user)
                 .order_by("-last_viewed_at")
                 .values_list("id", flat=True)[:max_items]
             )
-            RecentlyViewedProduct.objects.filter(user=user).exclude(
+            RecentlyViewedProduct.objects.filter(site_id=int(site_id), user=user).exclude(
                 id__in=ids_to_keep
             ).delete()
         else:
             RecentlyViewedProduct.objects.update_or_create(
+                site_id=int(site_id),
                 user=None,
                 visitor_id=str(visitor_id),
                 product_id=int(product_id),
                 defaults={"last_viewed_at": now},
             )
             ids_to_keep = list(
-                RecentlyViewedProduct.objects.filter(user__isnull=True, visitor_id=str(visitor_id))
+                RecentlyViewedProduct.objects.filter(site_id=int(site_id), user__isnull=True, visitor_id=str(visitor_id))
                 .order_by("-last_viewed_at")
                 .values_list("id", flat=True)[:max_items]
             )
-            RecentlyViewedProduct.objects.filter(user__isnull=True, visitor_id=str(visitor_id)).exclude(
+            RecentlyViewedProduct.objects.filter(site_id=int(site_id), user__isnull=True, visitor_id=str(visitor_id)).exclude(
                 id__in=ids_to_keep
             ).delete()
 
@@ -116,33 +134,38 @@ def merge_recently_viewed_from_visitor_to_user(*, request, user) -> None:
     if not visitor_id or user is None:
         return
 
+    site_id = _get_site_id_from_request(request)
+    if site_id is None:
+        return
+
     max_items = _recently_viewed_max()
     now = timezone.now()
 
     with transaction.atomic():
         anon_qs = (
-            RecentlyViewedProduct.objects.filter(user__isnull=True, visitor_id=str(visitor_id))
+            RecentlyViewedProduct.objects.filter(site_id=int(site_id), user__isnull=True, visitor_id=str(visitor_id))
             .order_by("-last_viewed_at")
             .values_list("product_id", "last_viewed_at")
         )
 
         for product_id, last_viewed_at in anon_qs:
             RecentlyViewedProduct.objects.update_or_create(
+                site_id=int(site_id),
                 user=user,
                 product_id=int(product_id),
                 defaults={"visitor_id": "", "last_viewed_at": last_viewed_at or now},
             )
 
         # Remove anon list after merge
-        RecentlyViewedProduct.objects.filter(user__isnull=True, visitor_id=str(visitor_id)).delete()
+        RecentlyViewedProduct.objects.filter(site_id=int(site_id), user__isnull=True, visitor_id=str(visitor_id)).delete()
 
         # Enforce cap on user
         ids_to_keep = list(
-            RecentlyViewedProduct.objects.filter(user=user)
+            RecentlyViewedProduct.objects.filter(site_id=int(site_id), user=user)
             .order_by("-last_viewed_at")
             .values_list("id", flat=True)[:max_items]
         )
-        RecentlyViewedProduct.objects.filter(user=user).exclude(id__in=ids_to_keep).delete()
+        RecentlyViewedProduct.objects.filter(site_id=int(site_id), user=user).exclude(id__in=ids_to_keep).delete()
 
 
 def track_event(
@@ -160,16 +183,20 @@ def track_event(
     now = timezone.now()
     payload = payload or {}
 
+    site_id = _get_site_id_from_request(request)
+    if site_id is None:
+        return None
+
     visitor_id = _get_visitor_id_from_request(request)
     user = _get_user_from_request(request)
 
-    raw_key = f"{name}:u:{getattr(user, 'id', 0)}:v:{visitor_id}:o:{object_type}:{object_id}:cc:{country_code}:ch:{channel}:lc:{language_code}"
+    raw_key = f"{name}:s:{int(site_id)}:u:{getattr(user, 'id', 0)}:v:{visitor_id}:o:{object_type}:{object_id}:cc:{country_code}:ch:{channel}:lc:{language_code}"
 
     if name == AnalyticsEvent.Name.PRODUCT_VIEW:
         w = _product_view_window_index(now)
         raw_key = raw_key + f":w:{w}"
     elif name == AnalyticsEvent.Name.PURCHASE and object_type == "order" and object_id is not None:
-        raw_key = f"purchase:u:{getattr(user, 'id', 0)}:order:{int(object_id)}"
+        raw_key = f"purchase:s:{int(site_id)}:u:{getattr(user, 'id', 0)}:order:{int(object_id)}"
 
     idempotency_key = _sha256(raw_key)
 
@@ -177,6 +204,7 @@ def track_event(
         ev = AnalyticsEvent.objects.create(
             name=name,
             occurred_at=now,
+            site_id=int(site_id),
             user=user,
             visitor_id=visitor_id,
             object_type=(object_type or ""),
@@ -202,6 +230,7 @@ def track_event(
     if user is not None and visitor_id:
         try:
             VisitorLink.objects.update_or_create(
+                site_id=int(site_id),
                 user=user,
                 visitor_id=visitor_id,
                 defaults={},

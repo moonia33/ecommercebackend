@@ -308,6 +308,10 @@ def recently_viewed(
         visitor_id = ""
 
     qs = RecentlyViewedProduct.objects.all()
+    site_id = _get_request_site_id(request)
+    if site_id is None:
+        return []
+    qs = qs.filter(site_id=int(site_id))
     if user is not None:
         qs = qs.filter(user=user)
     elif visitor_id:
@@ -325,7 +329,7 @@ def recently_viewed(
         else InventoryItem.OfferVisibility.NORMAL
     )
 
-    site_id = _get_request_site_id(request)
+    # site_id already resolved above
     selected_category: Category | None = None
     selected_category_ids: list[int] | None = None
 
@@ -406,8 +410,13 @@ def recently_viewed(
         is_discounted_offer = bool(base_net and list_net and base_net < list_net)
         allow_additional_promotions = not is_discounted_offer
 
+        site_id = _get_request_site_id(request)
+        if site_id is None:
+            site_id = 0
+
         sale_net, _rule = apply_promo_to_unit_net(
             base_unit_net=base_net,
+            site_id=int(site_id),
             channel=channel,
             category_id=p.category_id,
             brand_id=p.brand_id,
@@ -881,6 +890,7 @@ def products(
 
         sale_net, _rule = apply_promo_to_unit_net(
             base_unit_net=base_net,
+            site_id=int(site_id),
             channel=channel,
             category_id=p.category_id,
             brand_id=p.brand_id,
@@ -1450,8 +1460,13 @@ def product_detail(
             )
         )
 
+        site_id = _get_request_site_id(request)
+        if site_id is None:
+            site_id = 0
+
         sale_unit_net, _rule = apply_promo_to_unit_net(
             base_unit_net=base_unit_net,
+            site_id=int(site_id),
             channel=channel,
             category_id=product.category_id,
             brand_id=product.brand_id,
