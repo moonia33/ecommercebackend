@@ -682,6 +682,52 @@ class EnrichmentRuleAdmin(admin.ModelAdmin):
     autocomplete_fields = ("feature", "brand", "category", "product_group")
     ordering = ("-priority", "id")
 
+    actions = ("run_selected_dry_run", "run_selected_apply")
+
+    def run_selected_dry_run(self, request, queryset):
+        from catalog.enrichment import apply_enrichment_rules
+
+        rule_ids = list(queryset.values_list("id", flat=True))
+        run, result = apply_enrichment_rules(
+            dry_run=True,
+            rule_ids=rule_ids,
+            triggered_by=request.user,
+        )
+        self.message_user(
+            request,
+            (
+                "Dry-run done. "
+                f"run_id={run.id}, processed_products={result.processed_products}, "
+                f"matched={result.matched}, assigned={result.assigned}, "
+                f"created_feature_values={result.created_feature_values}, "
+                f"skipped_existing={result.skipped_existing}, skipped_conflict={result.skipped_conflict}"
+            ),
+        )
+
+    run_selected_dry_run.short_description = "Run selected rules (dry-run)"
+
+    def run_selected_apply(self, request, queryset):
+        from catalog.enrichment import apply_enrichment_rules
+
+        rule_ids = list(queryset.values_list("id", flat=True))
+        run, result = apply_enrichment_rules(
+            dry_run=False,
+            rule_ids=rule_ids,
+            triggered_by=request.user,
+        )
+        self.message_user(
+            request,
+            (
+                "Apply done. "
+                f"run_id={run.id}, processed_products={result.processed_products}, "
+                f"matched={result.matched}, assigned={result.assigned}, "
+                f"created_feature_values={result.created_feature_values}, "
+                f"skipped_existing={result.skipped_existing}, skipped_conflict={result.skipped_conflict}"
+            ),
+        )
+
+    run_selected_apply.short_description = "Run selected rules (apply)"
+
 
 @admin.register(EnrichmentRun)
 class EnrichmentRunAdmin(admin.ModelAdmin):
