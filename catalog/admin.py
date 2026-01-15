@@ -693,14 +693,14 @@ class ContentBlockTranslationInline(admin.StackedInline):
 
 @admin.register(ContentBlock)
 class ContentBlockAdmin(admin.ModelAdmin):
-    list_display = ("key", "type", "placement", "priority", "is_active", "valid_from", "valid_to")
-    list_filter = ("is_active", "type", "placement")
+    list_display = ("site", "key", "type", "placement", "priority", "is_active", "valid_from", "valid_to")
+    list_filter = ("site", "is_active", "type", "placement")
     search_fields = ("key",)
 
     inlines = (ContentBlockTranslationInline,)
 
     fieldsets = (
-        (None, {"fields": ("key", "type", "placement", "is_active", "priority")}),
+        (None, {"fields": ("site", "key", "type", "placement", "is_active", "priority")}),
         ("Galiojimas", {"fields": ("valid_from", "valid_to")}),
     )
 

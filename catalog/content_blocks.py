@@ -243,3 +243,107 @@ def get_content_blocks_for_product(
 
     cache.set(cache_key, resolved, timeout=cache_seconds)
     return resolved
+
+
+def get_content_blocks_by_keys(
+    *,
+    site_id: int | None = None,
+    keys: list[str],
+    language_code: str | None = None,
+    now: date | None = None,
+    cache_seconds: int = 120,
+) -> list[ContentBlockResolved]:
+    now_date = now or date.today()
+
+    normalized_keys = [(k or "").strip() for k in (keys or [])]
+    normalized_keys = [k for k in normalized_keys if k]
+    if not normalized_keys:
+        return []
+
+    site_id_v = int(site_id) if site_id is not None else 0
+    keys_part = ",".join(sorted(set(normalized_keys)))
+
+    cache_key = (
+        f"content_blocks_by_keys:v1:site:{site_id_v}:keys:{keys_part}:"
+        f"lang:{(language_code or '').lower()}:d:{now_date.isoformat()}"
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    qs = ContentBlock.objects.filter(
+        is_active=True,
+        placement=ContentBlock.Placement.GLOBAL,
+        key__in=normalized_keys,
+    )
+    if site_id_v:
+        qs = qs.filter(site_id=site_id_v)
+
+    blocks = list(
+        qs.only(
+            "id",
+            "key",
+            "type",
+            "placement",
+            "priority",
+            "valid_from",
+            "valid_to",
+        )
+    )
+    blocks = [
+        b
+        for b in blocks
+        if _is_date_in_range(now=now_date, valid_from=b.valid_from, valid_to=b.valid_to)
+    ]
+    blocks_by_id = {int(b.id): b for b in blocks}
+
+    fallback_langs = _translation_fallback_chain(language_code)
+    translations = list(
+        ContentBlockTranslation.objects.filter(
+            content_block_id__in=list(blocks_by_id.keys()),
+            language_code__in=fallback_langs,
+        ).only("content_block_id", "language_code", "title", "payload", "markdown")
+    )
+
+    order_index = {lang: i for i, lang in enumerate(fallback_langs)}
+    best_by_block: dict[int, ContentBlockTranslation] = {}
+    for t in translations:
+        bid = int(t.content_block_id)
+        idx = order_index.get((t.language_code or "").lower(), 10_000)
+        cur = best_by_block.get(bid)
+        if cur is None:
+            best_by_block[bid] = t
+            continue
+        cur_idx = order_index.get((cur.language_code or "").lower(), 10_000)
+        if idx < cur_idx:
+            best_by_block[bid] = t
+
+    def _sort_key(b: ContentBlock):
+        return (-int(getattr(b, "priority", 0) or 0), (getattr(b, "key", "") or ""))
+
+    blocks.sort(key=_sort_key)
+
+    resolved: list[ContentBlockResolved] = []
+    for b in blocks:
+        bid = int(b.id)
+        t = best_by_block.get(bid)
+        payload = {}
+        title = ""
+        if t is not None:
+            title = getattr(t, "title", "") or ""
+            payload = getattr(t, "payload", None) or {}
+            if not payload and getattr(t, "markdown", ""):
+                payload = {"markdown": t.markdown or ""}
+
+        resolved.append(
+            ContentBlockResolved(
+                key=b.key,
+                title=title,
+                placement=b.placement,
+                type=b.type,
+                payload=payload,
+            )
+        )
+
+    cache.set(cache_key, resolved, timeout=cache_seconds)
+    return resolved

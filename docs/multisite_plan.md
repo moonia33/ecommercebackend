@@ -193,6 +193,50 @@ Migrations:
 - **Coupons/Promotions**: kuponai ir promo rules parenkami pagal `site_id`.
 - **Fee rules**: checkout fees parenkami pagal `site_id`.
 
+### Shipping (pristatymo metodai + delivery ETA) per-site
+
+- **ShippingMethod** yra per-site valdomas per `allowed_sites` (M2M į `api.Site`):
+  - jei `allowed_sites` tuščias → metodas galioja visiems site’ams
+  - jei sužymėta → metodas rodomas tik tiems site’ams
+- **DeliveryRule** yra site-scoped per `DeliveryRule.site`:
+  - unikalumas yra per `(site, code)`
+  - delivery ETA skaičiavimas `estimate_delivery_window(...)` visur turi gauti `site_id` (iš `request.site` arba `order.site_id`)
+
+- Admin valdymas:
+  - `Shipping -> Shipping methods`: pažymėk `allowed_sites`
+  - `Shipping -> Delivery rules`: kiekvienam site’ui kurk atskiras taisykles
+
+- API/servisų elgsena:
+  - checkout ir kiti endpointai filtruoja metodus pagal `request.site`
+  - pickup point validacija pririšta prie site (kad negalėtum pasirinkti metodo, kuris neleidžiamas tame site)
+
+### Header / menu / footer (FE navigacija) per-site
+
+- Valdymas admin'e:
+  - `CMS -> Site navigations`
+  - Kiekvienam `api.Site` susikurk atskiras navigacijas su `code`:
+    - `header`
+    - `main_menu`
+    - `footer`
+  - Viduje kurk `NavigationItem` (hierarchija per `parent`, tvarka per `sort_order`).
+  - Kiekvienam item'ui pridėk `NavigationItemTranslation` su `language_code` ir `label`.
+  - Smart link tipai:
+    - `category`
+    - `brand`
+    - `cms_page`
+    - `url` (external)
+
+- FE endpoint'as:
+  - `GET /api/v1/cms/navigation/{code}?language_code=lt`
+  - Atsakymas yra medžio struktūra (`items` su `children`), kiekvienas item turi `label`, `href`, `icon`, `image_src`, `badge`.
+  - `href` sugeneruojamas backend'e pagal `link_type` ir per-site route templates.
+
+- Per-site URL struktūros keitimas (kad FE galėtų keisti route'us be DB perrašymo):
+  - `API -> Site configs -> Frontend routes`
+    - `category_path_template` (pvz. `/c/{slug}` arba `/category/{slug}`)
+    - `brand_path_template` (pvz. `/b/{slug}` arba `/brand/{slug}`)
+    - `cms_page_path_template` (pvz. `/page/{slug}` arba `/info/{slug}`)
+
 ### Rekomendacija FE testams
 
 - Testuok tą patį user per 2 host’us:

@@ -20,3 +20,21 @@ class CmsPageOut(Schema):
     updated_at: datetime
 
     content_blocks: list[ContentBlockOut]
+
+
+class NavigationItemOut(Schema):
+    id: int
+    label: str = ""
+    href: str = ""
+    link_type: str
+    icon: str = ""
+    image_src: str = ""
+    badge: str = ""
+    badge_kind: str = ""
+    open_in_new_tab: bool = False
+    children: list["NavigationItemOut"] = []
+
+
+class NavigationOut(Schema):
+    code: str
+    items: list[NavigationItemOut] = []

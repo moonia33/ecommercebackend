@@ -77,8 +77,14 @@ def _serialize_pickup_point(request, obj: UserPickupPoint | None):
     shipping_method_image_url = ""
     try:
         from shipping.models import ShippingMethod
+        from django.db.models import Q
 
-        m = ShippingMethod.objects.filter(code=obj.shipping_method_code, is_active=True).only("image").first()
+        site = getattr(request, "site", None)
+        site_id = int(getattr(site, "id", 0) or 0) or None
+        qs = ShippingMethod.objects.filter(code=obj.shipping_method_code, is_active=True)
+        if site_id is not None:
+            qs = qs.filter(Q(allowed_sites__isnull=True) | Q(allowed_sites__id=int(site_id))).distinct()
+        m = qs.only("image").first()
         img = getattr(m, "image", None) if m else None
         if img and getattr(img, "url", None):
             shipping_method_image_url = request.build_absolute_uri(img.url)
@@ -528,14 +534,21 @@ def update_me(request, payload: MeUpdateIn | None = None):
     return me(request)
 
 
-def _resolve_pickup_point_snapshot(*, shipping_method_code: str, pickup_point_id: str):
+def _resolve_pickup_point_snapshot(request, *, shipping_method_code: str, pickup_point_id: str):
     from shipping.models import ShippingMethod
+    from django.db.models import Q
 
-    method = ShippingMethod.objects.filter(code=shipping_method_code, is_active=True).first()
+    site = getattr(request, "site", None)
+    site_id = int(getattr(site, "id", 0) or 0) or None
+
+    qs = ShippingMethod.objects.filter(code=shipping_method_code, is_active=True)
+    if site_id is not None:
+        qs = qs.filter(Q(allowed_sites__isnull=True) | Q(allowed_sites__id=int(site_id))).distinct()
+    method = qs.first()
     if not method:
         raise HttpError(400, "Invalid shipping_method_code")
     if not bool(getattr(method, "requires_pickup_point", False)):
-        raise HttpError(400, "shipping_method_code does not require pickup point")
+        raise HttpError(400, "Shipping method does not require pickup point")
 
     carrier_code = (getattr(method, "carrier_code", "") or "").strip().lower()
     if not carrier_code:
@@ -556,6 +569,7 @@ def set_pickup_point(request, payload: PickupPointSetIn):
         raise HttpError(400, "shipping_method_code and pickup_point_id are required")
 
     snap = _resolve_pickup_point_snapshot(
+        request,
         shipping_method_code=shipping_method_code,
         pickup_point_id=pickup_point_id,
     )

@@ -30,13 +30,15 @@ from .api_schemas import (
     CategoryOut,
     CategoryDetailOut,
     CategoryRefOut,
+    ContentBlockOut,
     FeatureOut,
-    OptionTypeOut,
     MoneyOut,
+    OptionTypeOut,
     ProductDetailOut,
     ProductGroupOut,
     ProductImageOut,
     ProductListOut,
+    UiConfigOut,
     VariantOptionOut,
     VariantOut,
 )
@@ -77,6 +79,34 @@ def _get_request_site_id(request) -> int | None:
     except Exception:
         return None
     return sid_i if sid_i > 0 else None
+
+
+@router.get("/ui", response=UiConfigOut)
+def ui_config(request, language_code: str | None = None):
+    from .content_blocks import get_content_blocks_by_keys
+
+    if language_code is None:
+        language_code = get_request_language_code(request)
+
+    site_id = _get_request_site_id(request)
+    blocks = get_content_blocks_by_keys(
+        site_id=site_id,
+        keys=["header", "menu", "footer"],
+        language_code=language_code,
+    )
+
+    return UiConfigOut(
+        blocks=[
+            ContentBlockOut(
+                key=b.key,
+                title=b.title,
+                placement=b.placement,
+                type=b.type,
+                payload=b.payload,
+            )
+            for b in blocks
+        ]
+    )
 
 
 def _descendant_ids_map() -> dict[int, list[int]]:
@@ -1425,6 +1455,7 @@ def product_detail(
         if best_offer and product is not None:
             dw = estimate_delivery_window(
                 now=timezone.now(),
+                site_id=_get_request_site_id(request),
                 country_code=country_code,
                 channel=channel,
                 warehouse_id=int(best_offer.warehouse_id) if best_offer.warehouse_id else None,

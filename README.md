@@ -261,6 +261,13 @@ Kas įdiegta:
 - `GET /api/v1/cms/pages/{slug}` filtruoja pagal `request.site`.
 - Product detail `content_blocks` (`GET /api/v1/catalog/products/{slug}`) parenka blokus pagal `request.site`.
 
+- FE navigacija per-site (header/menu/footer):
+  - `GET /api/v1/cms/navigation/{code}?language_code=lt` grąžina medį su sugeneruotais `href` pagal `request.site`.
+
+- Shipping per-site:
+  - `shipping.ShippingMethod.allowed_sites` valdo kokie metodai leidžiami konkrečiam site (tuščia = visiems).
+  - `shipping.DeliveryRule.site` daro delivery ETA taisykles site-scoped; `estimate_delivery_window(..., site_id=...)` naudoja `request.site`/`order.site_id`.
+
 Site-level assortment (katalogo matomumas per site):
 
 - `catalog.SiteCategoryVisibility` — allow-list kategorijoms per site.
@@ -311,9 +318,8 @@ Kas dar NĖRA multi-site scoped (bus daroma vėliau pilnam multi-shop):
 - `checkout` (Cart/Order/PaymentIntent ir kt.)
 - `promotions` (Coupon ir redemption’ai)
 - `payments` (PaymentMethod/Neopay config ir kt.)
-- `shipping` (ShippingMethod/Rate/DeliveryRule)
-- `analytics` (events, recently-viewed)
-- `notifications` (EmailTemplate)
+
+Pastaba: `analytics` ir `notifications` šiuo metu yra site-scoped.
 
 ## PVM / VAT (MVP)
 

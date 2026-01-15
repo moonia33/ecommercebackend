@@ -55,6 +55,10 @@ class SiteConfig(models.Model):
     neopay_client_redirect_url = models.URLField(blank=True, default="")
     neopay_enable_bank_preselect = models.BooleanField(default=False)
 
+    category_path_template = models.CharField(max_length=255, blank=True, default="/c/{slug}")
+    brand_path_template = models.CharField(max_length=255, blank=True, default="/b/{slug}")
+    cms_page_path_template = models.CharField(max_length=255, blank=True, default="/page/{slug}")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

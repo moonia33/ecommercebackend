@@ -238,9 +238,14 @@ class OrderAdmin(admin.ModelAdmin):
             super().__init__(*args, **kwargs)
             from shipping.models import ShippingMethod
             from unisend.models import UnisendTerminal
+            from django.db.models import Q
 
-            choices = [(m.code, f"{m.name} ({m.code})") for m in ShippingMethod.objects.filter(
-                is_active=True).order_by("sort_order", "code")]
+            site_id = int(getattr(self.instance, "site_id", 0) or 0) or None
+
+            qs = ShippingMethod.objects.filter(is_active=True)
+            if site_id is not None:
+                qs = qs.filter(Q(allowed_sites__isnull=True) | Q(allowed_sites__id=int(site_id))).distinct()
+            choices = [(m.code, f"{m.name} ({m.code})") for m in qs.order_by("sort_order", "code")]
             if not choices:
                 choices = [("unisend_pickup", "Unisend pickup (unisend_pickup)")]
             self.fields["shipping_method"].choices = choices
@@ -265,10 +270,16 @@ class OrderAdmin(admin.ModelAdmin):
             from shipping.models import ShippingMethod
             from dpd.models import DpdLocker
             from unisend.models import UnisendTerminal
+            from django.db.models import Q
+
+            site_id = int(getattr(self.instance, "site_id", 0) or 0) or None
 
             code = (cleaned.get("shipping_method") or "").strip()
             if code:
-                m = ShippingMethod.objects.filter(code=code).first()
+                qs = ShippingMethod.objects.filter(code=code)
+                if site_id is not None:
+                    qs = qs.filter(Q(allowed_sites__isnull=True) | Q(allowed_sites__id=int(site_id))).distinct()
+                m = qs.first()
                 if m and not cleaned.get("carrier_code"):
                     cleaned["carrier_code"] = m.carrier_code or ""
 
@@ -360,17 +371,16 @@ class OrderAdmin(admin.ModelAdmin):
                     )
                     dw = estimate_delivery_window(
                         now=timezone.now(),
+                        site_id=int(getattr(o, "site_id", 0) or 0) or None,
                         country_code=o.country_code,
                         channel=line_channel,
                         warehouse_id=int(ln.offer.warehouse_id)
                         if getattr(ln, "offer_id", None) and ln.offer and ln.offer.warehouse_id
                         else None,
                         product_id=int(p.id) if p else None,
-                        brand_id=int(p.brand_id) if p and p.brand_id else None,
-                        category_id=int(p.category_id) if p and p.category_id else None,
-                        product_group_id=int(getattr(p, "group_id", None))
-                        if p and getattr(p, "group_id", None)
-                        else None,
+                        brand_id=int(getattr(p, "brand_id", 0) or 0) or None,
+                        category_id=int(getattr(p, "category_id", 0) or 0) or None,
+                        product_group_id=int(getattr(p, "group_id", 0) or 0) or None,
                     )
                 except Exception:
                     dw = None

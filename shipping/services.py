@@ -59,6 +59,7 @@ def _next_weekday_time(*, now: datetime, weekday: int, at_time: time) -> datetim
 
 def _select_delivery_rule(
     *,
+    site_id: int | None,
     channel: str,
     warehouse_id: int | None,
     product_id: int | None,
@@ -68,6 +69,9 @@ def _select_delivery_rule(
     today: date,
 ) -> DeliveryRule | None:
     qs = DeliveryRule.objects.filter(is_active=True)
+
+    if site_id is not None:
+        qs = qs.filter(site_id=int(site_id))
 
     # Channel match: empty means "any"
     if channel:
@@ -120,6 +124,7 @@ def _select_delivery_rule(
 def estimate_delivery_window(
     *,
     now: datetime | None = None,
+    site_id: int | None = None,
     country_code: str = "LT",
     channel: str = "normal",
     warehouse_id: int | None = None,
@@ -133,6 +138,7 @@ def estimate_delivery_window(
     channel = (channel or "normal").strip().lower()
 
     rule = _select_delivery_rule(
+        site_id=site_id,
         channel=channel,
         warehouse_id=warehouse_id,
         product_id=product_id,

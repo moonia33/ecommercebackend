@@ -33,10 +33,11 @@ class ShippingMethodAdmin(admin.ModelAdmin):
         "is_active",
         "sort_order",
     )
-    list_filter = ("is_active", "carrier_code", "requires_pickup_point")
+    list_filter = ("is_active", "carrier_code", "requires_pickup_point", "allowed_sites")
     search_fields = ("code", "name", "carrier_code")
     ordering = ("sort_order", "code")
     inlines = (ShippingRateInline,)
+    filter_horizontal = ("allowed_sites",)
 
 
 @admin.register(ShippingRate)
@@ -66,8 +67,8 @@ class HolidayAdmin(admin.ModelAdmin):
 
 @admin.register(DeliveryRule)
 class DeliveryRuleAdmin(admin.ModelAdmin):
-    list_display = ("code", "kind", "priority", "channel", "warehouse", "is_active")
-    list_filter = ("is_active", "kind", "channel")
+    list_display = ("site", "code", "kind", "priority", "channel", "warehouse", "is_active")
+    list_filter = ("site", "is_active", "kind", "channel")
     search_fields = ("code", "name")
     autocomplete_fields = ("warehouse", "brand", "category", "product_group", "product")
     ordering = ("-priority", "code")

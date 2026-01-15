@@ -936,6 +936,7 @@ def _serialize_cart_items(
             product = v.product
             dw = estimate_delivery_window(
                 now=timezone.now(),
+                site_id=int(getattr(it.cart, "site_id", 0) or 0) or None,
                 country_code=country_code,
                 channel=channel,
                 warehouse_id=int(it.offer.warehouse_id) if getattr(it, "offer_id", None) and it.offer and it.offer.warehouse_id else None,
@@ -1299,6 +1300,7 @@ def shipping_methods(request, country_code: str = "LT"):
         raise HttpError(400, "Invalid country_code")
 
     from shipping.models import ShippingMethod, ShippingRate
+    from django.db.models import Q
 
     tax_class = get_shipping_tax_class()
     if not tax_class:
@@ -1306,10 +1308,13 @@ def shipping_methods(request, country_code: str = "LT"):
     else:
         vat_rate = get_vat_rate(country_code=country_code, tax_class=tax_class)
 
-    methods = list(
-        ShippingMethod.objects.filter(
-            is_active=True).order_by("sort_order", "code")
-    )
+    site = getattr(request, "site", None)
+    site_id = int(getattr(site, "id", 0) or 0) or None
+
+    methods_qs = ShippingMethod.objects.filter(is_active=True)
+    if site_id is not None:
+        methods_qs = methods_qs.filter(Q(allowed_sites__isnull=True) | Q(allowed_sites__id=int(site_id))).distinct()
+    methods = list(methods_qs.order_by("sort_order", "code"))
     rates = {
         r.method_id: r
         for r in ShippingRate.objects.filter(
@@ -2147,6 +2152,7 @@ def list_orders(request, limit: int = 20):
                 )
                 dw = estimate_delivery_window(
                     now=timezone.now(),
+                    site_id=int(getattr(o, "site_id", 0) or 0) or None,
                     country_code=o.country_code,
                     channel=line_channel,
                     warehouse_id=int(ln.offer.warehouse_id) if getattr(ln, "offer_id", None) and ln.offer and ln.offer.warehouse_id else None,
@@ -2290,6 +2296,7 @@ def get_order(request, order_id: int):
             )
             dw = estimate_delivery_window(
                 now=timezone.now(),
+                site_id=int(getattr(o, "site_id", 0) or 0) or None,
                 country_code=o.country_code,
                 channel=line_channel,
                 warehouse_id=int(ln.offer.warehouse_id) if getattr(ln, "offer_id", None) and ln.offer and ln.offer.warehouse_id else None,

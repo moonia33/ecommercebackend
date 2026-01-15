@@ -4,6 +4,8 @@ from decimal import Decimal
 
 from django.db import models
 
+from api.models import get_default_site_id
+
 
 class ShippingCountry(models.Model):
     code = models.CharField(max_length=2, unique=True)
@@ -68,6 +70,12 @@ class ShippingMethod(models.Model):
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
 
+    allowed_sites = models.ManyToManyField(
+        "api.Site",
+        blank=True,
+        related_name="shipping_methods",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -111,7 +119,14 @@ class DeliveryRule(models.Model):
         LEAD_TIME = "lead_time", "Lead time"
         CYCLE = "cycle", "Cycle"
 
-    code = models.SlugField(max_length=100, unique=True)
+    site = models.ForeignKey(
+        "api.Site",
+        default=get_default_site_id,
+        on_delete=models.PROTECT,
+        related_name="delivery_rules",
+    )
+
+    code = models.SlugField(max_length=100)
     name = models.CharField(max_length=255, blank=True, default="")
     is_active = models.BooleanField(default=True)
     priority = models.IntegerField(default=0)
@@ -182,6 +197,9 @@ class DeliveryRule(models.Model):
 
     class Meta:
         ordering = ["-priority", "code"]
+        constraints = [
+            models.UniqueConstraint(fields=["site", "code"], name="uniq_deliveryrule_site_code"),
+        ]
 
     def __str__(self) -> str:
         return self.code

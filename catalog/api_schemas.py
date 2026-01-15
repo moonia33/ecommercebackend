@@ -121,6 +121,10 @@ class ContentBlockOut(Schema):
     payload: dict
 
 
+class UiConfigOut(Schema):
+    blocks: list[ContentBlockOut] = []
+
+
 class ProductDetailOut(Schema):
     id: int
     sku: str
