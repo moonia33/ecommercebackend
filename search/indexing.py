@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
+from django.conf import settings
 from django.db.models import Case, DecimalField, ExpressionWrapper, F, Min, Q, Value, When
 
 from catalog.models import (
@@ -282,6 +283,32 @@ def build_product_search_docs(*, site_ids: list[int] | None = None) -> list[dict
 
 
 def meili_products_settings() -> dict:
+    synonyms_payload: dict[str, list[str]] = {}
+    try:
+        from .models import SearchSynonym
+
+        lang = str(getattr(settings, "LANGUAGE_CODE", "lt") or "lt")
+        lang = lang.split("-")[0].strip().lower() or "lt"
+
+        rows = SearchSynonym.objects.filter(is_active=True, language_code=lang).values("term", "synonyms")
+        for r in rows:
+            term = str(r.get("term") or "").strip()
+            if not term:
+                continue
+            syns = r.get("synonyms")
+            if not isinstance(syns, list):
+                continue
+            cleaned: list[str] = []
+            for s in syns:
+                sv = str(s or "").strip()
+                if not sv or sv == term:
+                    continue
+                cleaned.append(sv)
+            if cleaned:
+                synonyms_payload[term] = cleaned
+    except Exception:
+        synonyms_payload = {}
+
     return {
         "searchableAttributes": ["name", "sku", "slug"],
         "filterableAttributes": [
@@ -310,4 +337,5 @@ def meili_products_settings() -> dict:
             "sort",
             "exactness",
         ],
+        "synonyms": synonyms_payload,
     }

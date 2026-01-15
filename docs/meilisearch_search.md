@@ -117,6 +117,10 @@ Management command:
 
 - `python manage.py reindex_meili_products --reset`
 
+Jei keitėsi tik settings (pvz. sinonimai), paprastai užtenka paleisti be `--reset`:
+
+- `python manage.py reindex_meili_products`
+
 Elgsena:
 
 - sukuria index’ą (jei nėra)
@@ -147,6 +151,24 @@ Elgsena:
 - `index_already_exists`: normalu, jei index jau sukurtas.
 - `invalid_api_key`: neteisingas `MEILI_API_KEY`.
 - `invalid_document_fields`: doc schema nesutampa su settings / payload.
+
+## Sinonimai (admin)
+
+Sinonimai valdomi per admin’ą (DB) ir automatiškai siunčiami į Meili index settings.
+
+Modelis:
+
+- `search.SearchSynonym`
+  - `language_code` (pvz. `lt`)
+  - `term` (pvz. `kedai`)
+  - `synonyms` (JSON list, pvz. `["sneakeriai", "sportiniai"]`)
+  - `is_active`
+
+Elgsena:
+
+- Sinonimai yra **index-level** setting’as.
+- Backend parenka `language_code` pagal `settings.LANGUAGE_CODE` (imamas prefix’as iki `-`, pvz. `lt-LT` -> `lt`).
+- Pakeitus sinonimus admin’e, paleisk `python manage.py reindex_meili_products` (be reset), kad settings atsinaujintų.
 
 ## Production rekomendacijos
 
