@@ -22,6 +22,9 @@ env = environ.Env(
     AUTH_COOKIE_SECURE=(str, ""),
     AUTH_COOKIE_DOMAIN=(str, ""),
     RECENTLY_VIEWED_MAX=(int, 12),
+    RECO_MANUAL_LIMIT=(int, 12),
+    RECO_CROSS_SELL_LIMIT=(int, 12),
+    RECO_UPSELL_LIMIT=(int, 8),
     EMAIL_OTP_CODE_LENGTH=(int, 6),
     EMAIL_OTP_TTL_MINUTES=(int, 10),
     EMAIL_OTP_RESEND_COOLDOWN_SECONDS=(int, 30),
@@ -126,6 +129,10 @@ AUTH_RETURN_ACCESS_IN_BODY = env.bool("AUTH_RETURN_ACCESS_IN_BODY", default=Fals
 
 RECENTLY_VIEWED_MAX = env.int("RECENTLY_VIEWED_MAX", default=12)
 
+RECO_MANUAL_LIMIT = env.int("RECO_MANUAL_LIMIT", default=12)
+RECO_CROSS_SELL_LIMIT = env.int("RECO_CROSS_SELL_LIMIT", default=12)
+RECO_UPSELL_LIMIT = env.int("RECO_UPSELL_LIMIT", default=8)
+
 EMAIL_OTP_CODE_LENGTH = env.int("EMAIL_OTP_CODE_LENGTH")
 EMAIL_OTP_TTL_MINUTES = env.int("EMAIL_OTP_TTL_MINUTES")
 EMAIL_OTP_RESEND_COOLDOWN_SECONDS = env.int(
@@ -165,6 +172,7 @@ INSTALLED_APPS = [
     "notifications",
     "analytics.apps.AnalyticsConfig",
     "catalog.apps.CatalogConfig",
+    "recommendations.apps.RecommendationsConfig",
     "cms.apps.CmsConfig",
     "homebuilder.apps.HomebuilderConfig",
     "zaliuojibanga",
