@@ -88,6 +88,12 @@ env = environ.Env(
 
     # Promotions/Coupons policy
     COUPON_ALLOWED_CHANNELS=(list, ["normal"]),
+
+    # Search (Meilisearch)
+    MEILI_ENABLED=(bool, False),
+    MEILI_HOST=(str, ""),
+    MEILI_API_KEY=(str, ""),
+    MEILI_PRODUCTS_INDEX=(str, "products_lt_v1"),
 )
 
 # Loads variables from .env if present (dev convenience). In prod use real env vars.
@@ -168,7 +174,13 @@ INSTALLED_APPS = [
     "promotions",
     "dpd",
     "unisend",
+    "search.apps.SearchConfig",
 ]
+
+MEILI_ENABLED = env.bool("MEILI_ENABLED", default=False)
+MEILI_HOST = env("MEILI_HOST", default="")
+MEILI_API_KEY = env("MEILI_API_KEY", default="")
+MEILI_PRODUCTS_INDEX = env("MEILI_PRODUCTS_INDEX", default="products_lt_v1")
 
 DPD_BASE_URL = env("DPD_BASE_URL", default="https://esiunta.dpd.lt/api/v1")
 # Prefer DPD_TOKEN, but allow legacy DPD_API_KEY

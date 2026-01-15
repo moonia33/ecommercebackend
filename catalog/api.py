@@ -20,6 +20,9 @@ from shipping.services import estimate_delivery_window
 from analytics.services import track_event
 from analytics.models import RecentlyViewedProduct
 
+from search.meili import MeiliError
+from search.provider import search_products_facets, search_products_ids
+
 from .content_blocks import get_content_blocks_for_product
 from .api_schemas import (
     BackInStockSubscribeIn,
@@ -47,8 +50,10 @@ from .models import (
     Brand,
     Category,
     Feature,
+    FeatureValue,
     InventoryItem,
     OptionType,
+    OptionValue,
     Product,
     ProductFeatureValue,
     ProductGroup,
@@ -836,10 +841,90 @@ def products(
     else:
         qs = qs.order_by("-_has_stock", "name", "id")
 
+    meili_ids: list[int] | None = None
     if q:
         qv = q.strip()
         if qv:
-            qs = qs.filter(Q(name__icontains=qv) | Q(slug__icontains=qv) | Q(sku__icontains=qv))
+            try:
+                index_uid = str(getattr(settings, "MEILI_PRODUCTS_INDEX", "products_lt_v1"))
+
+                category_ancestor_ids = None
+                if category_slug:
+                    selected_category = Category.objects.filter(slug=category_slug, is_active=True).first()
+                    if not selected_category:
+                        raise HttpError(404, "Category not found")
+                    category_ancestor_ids = list(_ancestor_ids_for_ids(ids={int(selected_category.id)}))
+
+                b_id = None
+                if brand_slug:
+                    b = Brand.objects.filter(slug=brand_slug, is_active=True).first()
+                    if not b:
+                        raise HttpError(404, "Brand not found")
+                    b_id = int(b.id)
+
+                g_id = None
+                if group_code:
+                    g = ProductGroup.objects.filter(code=group_code, is_active=True).first()
+                    if not g:
+                        raise HttpError(404, "Product group not found")
+                    g_id = int(g.id)
+
+                fv_ids: list[int] = []
+                for f_code, f_val in _parse_pairs(feature):
+                    fv = (
+                        FeatureValue.objects.filter(
+                            feature__code=f_code,
+                            value=f_val,
+                            is_active=True,
+                            feature__is_active=True,
+                            feature__is_filterable=True,
+                        )
+                        .values_list("id", flat=True)
+                        .first()
+                    )
+                    if fv:
+                        fv_ids.append(int(fv))
+
+                ov_ids: list[int] = []
+                for o_type, o_val in _parse_pairs(option):
+                    ov = (
+                        OptionValue.objects.filter(
+                            option_type__code=o_type,
+                            code=o_val,
+                            is_active=True,
+                            option_type__is_active=True,
+                        )
+                        .values_list("id", flat=True)
+                        .first()
+                    )
+                    if ov:
+                        ov_ids.append(int(ov))
+
+                res = search_products_ids(
+                    q=qv,
+                    index_uid=index_uid,
+                    site_id=site_id,
+                    channel=channel,
+                    in_stock_only=bool(in_stock_only),
+                    category_ancestor_ids=category_ancestor_ids,
+                    brand_id=b_id,
+                    group_id=g_id,
+                    feature_value_ids=fv_ids or None,
+                    option_value_ids=ov_ids or None,
+                    offset=0,
+                    limit=200,
+                )
+                if res.ids:
+                    meili_ids = list(res.ids)
+                    qs = qs.filter(id__in=meili_ids)
+            except MeiliError:
+                meili_ids = None
+
+    if meili_ids is None:
+        if q:
+            qv = q.strip()
+            if qv:
+                qs = qs.filter(Q(name__icontains=qv) | Q(slug__icontains=qv) | Q(sku__icontains=qv))
 
     if category_slug:
         selected_category = Category.objects.filter(slug=category_slug, is_active=True).first()
@@ -903,7 +988,15 @@ def products(
         return vat_cache[key]
 
     out: list[ProductListOut] = []
-    for p in qs:
+    if meili_ids:
+        by_id = {int(p.id): p for p in qs}
+        ordered = [by_id.get(int(i)) for i in meili_ids if int(i) in by_id]
+    else:
+        ordered = list(qs)
+
+    for p in ordered:
+        if p is None:
+            continue
         list_net = Decimal(p._min_variant_price if getattr(p, "_min_variant_price", None) is not None else 0)
         if getattr(p, "_min_offer_price", None) is not None:
             base_net = Decimal(p._min_offer_price)
@@ -1031,9 +1124,82 @@ def product_facets(
     if channel == "outlet":
         qs = qs.filter(_has_offer__gt=0)
 
+    meili_dist: dict | None = None
     if q:
         qv = q.strip()
         if qv:
+            try:
+                index_uid = str(getattr(settings, "MEILI_PRODUCTS_INDEX", "products_lt_v1"))
+
+                category_ancestor_ids = None
+                if category_slug:
+                    selected_category = Category.objects.filter(slug=category_slug, is_active=True).first()
+                    if not selected_category:
+                        raise HttpError(404, "Category not found")
+                    category_ancestor_ids = list(_ancestor_ids_for_ids(ids={int(selected_category.id)}))
+
+                b_id = None
+                if brand_slug:
+                    b = Brand.objects.filter(slug=brand_slug, is_active=True).first()
+                    if not b:
+                        raise HttpError(404, "Brand not found")
+                    b_id = int(b.id)
+
+                g_id = None
+                if group_code:
+                    g = ProductGroup.objects.filter(code=group_code, is_active=True).first()
+                    if not g:
+                        raise HttpError(404, "Product group not found")
+                    g_id = int(g.id)
+
+                fv_ids: list[int] = []
+                for f_code, f_val in _parse_pairs(feature):
+                    fv = (
+                        FeatureValue.objects.filter(
+                            feature__code=f_code,
+                            value=f_val,
+                            is_active=True,
+                            feature__is_active=True,
+                            feature__is_filterable=True,
+                        )
+                        .values_list("id", flat=True)
+                        .first()
+                    )
+                    if fv:
+                        fv_ids.append(int(fv))
+
+                ov_ids: list[int] = []
+                for o_type, o_val in _parse_pairs(option):
+                    ov = (
+                        OptionValue.objects.filter(
+                            option_type__code=o_type,
+                            code=o_val,
+                            is_active=True,
+                            option_type__is_active=True,
+                        )
+                        .values_list("id", flat=True)
+                        .first()
+                    )
+                    if ov:
+                        ov_ids.append(int(ov))
+
+                fres = search_products_facets(
+                    q=qv,
+                    index_uid=index_uid,
+                    site_id=site_id,
+                    channel=channel,
+                    in_stock_only=False,
+                    category_ancestor_ids=category_ancestor_ids,
+                    brand_id=b_id,
+                    group_id=g_id,
+                    feature_value_ids=fv_ids or None,
+                    option_value_ids=ov_ids or None,
+                )
+                meili_dist = fres.distribution
+            except MeiliError:
+                meili_dist = None
+
+        if meili_dist is None and qv:
             qs = qs.filter(Q(name__icontains=qv) | Q(slug__icontains=qv) | Q(sku__icontains=qv))
 
     if category_slug:
@@ -1077,15 +1243,17 @@ def product_facets(
         selected_category_id=(int(selected_category.id) if selected_category is not None else None),
     )
 
-    product_ids = list(qs.values_list("id", flat=True))
-    if not product_ids:
-        return {
-            "categories": [],
-            "brands": [],
-            "product_groups": [],
-            "features": [],
-            "option_types": [],
-        }
+    product_ids: list[int] = []
+    if meili_dist is None:
+        product_ids = list(qs.values_list("id", flat=True))
+        if not product_ids:
+            return {
+                "categories": [],
+                "brands": [],
+                "product_groups": [],
+                "features": [],
+                "option_types": [],
+            }
 
     if selected_category:
         cat_qs = Category.objects.filter(is_active=True, parent_id=selected_category.id).order_by("name")
@@ -1096,11 +1264,21 @@ def product_facets(
     cat_ids = list(cat_qs.values_list("id", flat=True))
     if cat_ids:
         # Category facet should include children even if products are in deeper descendants.
-        product_category_ids = set(
-            Product.objects.filter(is_active=True, id__in=product_ids)
-            .exclude(category_id__isnull=True)
-            .values_list("category_id", flat=True)
-        )
+        if meili_dist is not None:
+            raw = meili_dist.get("category_id") or {}
+            product_category_ids: set[int] = set()
+            if isinstance(raw, dict):
+                for k in raw.keys():
+                    try:
+                        product_category_ids.add(int(k))
+                    except Exception:
+                        continue
+        else:
+            product_category_ids = set(
+                Product.objects.filter(is_active=True, id__in=product_ids)
+                .exclude(category_id__isnull=True)
+                .values_list("category_id", flat=True)
+            )
         allowed: set[int] = set()
         for child_id in cat_ids:
             desc_ids = set(_descendant_category_ids(root_id=int(child_id)))
@@ -1125,73 +1303,148 @@ def product_facets(
                 }
             )
 
-    brands_qs = (
-        Brand.objects.filter(is_active=True, products__id__in=product_ids)
-        .distinct()
-        .order_by("name")
-    )
-    groups_qs = (
-        ProductGroup.objects.filter(is_active=True, products__id__in=product_ids)
-        .distinct()
-        .order_by("name")
-    )
+    if meili_dist is not None:
+        raw = meili_dist.get("brand_id") or {}
+        brand_ids = []
+        if isinstance(raw, dict):
+            for k in raw.keys():
+                try:
+                    brand_ids.append(int(k))
+                except Exception:
+                    continue
+        brands_qs = Brand.objects.filter(is_active=True, id__in=brand_ids).order_by("name")
 
-    feature_ids = list(
-        ProductFeatureValue.objects.filter(product_id__in=product_ids)
-        .values_list("feature_id", flat=True)
-        .distinct()
-    )
-    features_qs = (
-        Feature.objects.filter(is_active=True, is_filterable=True, id__in=feature_ids)
-        .prefetch_related("values")
-        .order_by("sort_order", "code")
-    )
+        raw = meili_dist.get("group_id") or {}
+        group_ids = []
+        if isinstance(raw, dict):
+            for k in raw.keys():
+                try:
+                    group_ids.append(int(k))
+                except Exception:
+                    continue
+        groups_qs = ProductGroup.objects.filter(is_active=True, id__in=group_ids).order_by("name")
+    else:
+        brands_qs = (
+            Brand.objects.filter(is_active=True, products__id__in=product_ids)
+            .distinct()
+            .order_by("name")
+        )
+        groups_qs = (
+            ProductGroup.objects.filter(is_active=True, products__id__in=product_ids)
+            .distinct()
+            .order_by("name")
+        )
+
     features_out: list[FeatureOut] = []
-    for f in features_qs:
-        used_vals = set(
-            ProductFeatureValue.objects.filter(product_id__in=product_ids, feature_id=f.id)
-            .values_list("feature_value__value", flat=True)
-        )
-        vals = [v for v in f.values.all() if v.is_active and v.value in used_vals]
-        vals.sort(key=lambda v: (v.sort_order, v.value, v.id))
-        features_out.append(
-            {
-                "id": f.id,
-                "code": f.code,
-                "name": f.name,
-                "values": [{"id": v.id, "value": v.value} for v in vals],
-            }
-        )
-
-    option_type_ids = list(
-        VariantOptionValue.objects.filter(variant__product_id__in=product_ids)
-        .values_list("option_type_id", flat=True)
-        .distinct()
-    )
-    option_types_qs = (
-        OptionType.objects.filter(is_active=True, id__in=option_type_ids)
-        .prefetch_related("values")
-        .order_by("sort_order", "code")
-    )
-    option_types_out: list[OptionTypeOut] = []
-    for t in option_types_qs:
-        used_codes = set(
-            VariantOptionValue.objects.filter(variant__product_id__in=product_ids, option_type_id=t.id)
-            .values_list("option_value__code", flat=True)
+    if meili_dist is not None:
+        raw = meili_dist.get("feature_value_ids") or {}
+        fv_ids: list[int] = []
+        if isinstance(raw, dict):
+            for k in raw.keys():
+                try:
+                    fv_ids.append(int(k))
+                except Exception:
+                    continue
+        fvs = FeatureValue.objects.filter(id__in=fv_ids, is_active=True, feature__is_active=True, feature__is_filterable=True).select_related("feature")
+        by_feature: dict[int, dict] = {}
+        for fv in fvs:
+            fid = int(fv.feature_id)
+            block = by_feature.get(fid)
+            if block is None:
+                block = {
+                    "id": fid,
+                    "code": fv.feature.code,
+                    "name": fv.feature.name,
+                    "values": [],
+                }
+                by_feature[fid] = block
+            block["values"].append({"id": int(fv.id), "value": str(fv.value)})
+        features_out = list(by_feature.values())
+    else:
+        feature_ids = list(
+            ProductFeatureValue.objects.filter(product_id__in=product_ids)
+            .values_list("feature_id", flat=True)
             .distinct()
         )
-        vals = [v for v in t.values.all() if v.is_active and v.code in used_codes]
-        vals.sort(key=lambda v: (v.sort_order, v.label, v.id))
-        option_types_out.append(
-            {
-                "id": t.id,
-                "code": t.code,
-                "name": t.name,
-                "display_type": t.display_type,
-                "swatch_type": t.swatch_type,
-                "values": [{"id": v.id, "code": v.code, "label": v.label} for v in vals],
-            }
+        features_qs = (
+            Feature.objects.filter(is_active=True, is_filterable=True, id__in=feature_ids)
+            .prefetch_related("values")
+            .order_by("sort_order", "code")
         )
+        for f in features_qs:
+            used_vals = set(
+                ProductFeatureValue.objects.filter(product_id__in=product_ids, feature_id=f.id)
+                .values_list("feature_value__value", flat=True)
+            )
+            vals = [v for v in f.values.all() if v.is_active and v.value in used_vals]
+            vals.sort(key=lambda v: (v.sort_order, v.value, v.id))
+            features_out.append(
+                {
+                    "id": f.id,
+                    "code": f.code,
+                    "name": f.name,
+                    "values": [{"id": v.id, "value": v.value} for v in vals],
+                }
+            )
+
+    option_types_out: list[OptionTypeOut] = []
+    if meili_dist is not None:
+        opt_field = "option_value_ids_in_stock_outlet" if channel == "outlet" else "option_value_ids_in_stock_normal"
+        raw = meili_dist.get(opt_field) or {}
+        ov_ids: list[int] = []
+        if isinstance(raw, dict):
+            for k in raw.keys():
+                try:
+                    ov_ids.append(int(k))
+                except Exception:
+                    continue
+        ovs = OptionValue.objects.filter(id__in=ov_ids, is_active=True, option_type__is_active=True).select_related("option_type")
+        by_type: dict[int, dict] = {}
+        for ov in ovs:
+            tid = int(ov.option_type_id)
+            block = by_type.get(tid)
+            if block is None:
+                t = ov.option_type
+                block = {
+                    "id": tid,
+                    "code": t.code,
+                    "name": t.name,
+                    "display_type": t.display_type,
+                    "swatch_type": t.swatch_type,
+                    "values": [],
+                }
+                by_type[tid] = block
+            block["values"].append({"id": int(ov.id), "code": ov.code, "label": ov.label})
+        option_types_out = list(by_type.values())
+    else:
+        option_type_ids = list(
+            VariantOptionValue.objects.filter(variant__product_id__in=product_ids)
+            .values_list("option_type_id", flat=True)
+            .distinct()
+        )
+        option_types_qs = (
+            OptionType.objects.filter(is_active=True, id__in=option_type_ids)
+            .prefetch_related("values")
+            .order_by("sort_order", "code")
+        )
+        for t in option_types_qs:
+            used_codes = set(
+                VariantOptionValue.objects.filter(variant__product_id__in=product_ids, option_type_id=t.id)
+                .values_list("option_value__code", flat=True)
+                .distinct()
+            )
+            vals = [v for v in t.values.all() if v.is_active and v.code in used_codes]
+            vals.sort(key=lambda v: (v.sort_order, v.label, v.id))
+            option_types_out.append(
+                {
+                    "id": t.id,
+                    "code": t.code,
+                    "name": t.name,
+                    "display_type": t.display_type,
+                    "swatch_type": t.swatch_type,
+                    "values": [{"id": v.id, "code": v.code, "label": v.label} for v in vals],
+                }
+            )
 
     return {
         "categories": categories_out,
