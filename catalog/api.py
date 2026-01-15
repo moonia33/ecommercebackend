@@ -18,7 +18,7 @@ from pricing.services import compute_vat, get_vat_rate
 from shipping.services import estimate_delivery_window
 
 from analytics.services import track_event
-from analytics.models import RecentlyViewedProduct
+from analytics.models import FavoriteProduct, RecentlyViewedProduct
 
 from search.meili import MeiliError
 from search.provider import search_products_facets, search_products_ids
@@ -140,6 +140,294 @@ def _descendant_ids_for_root(*, root_id: int, children: dict[int, list[int]] | N
         out.append(cid)
         stack.extend(children.get(cid, []))
     return out
+
+
+def _resolve_user_and_visitor_id(request):
+    user = None
+    u = getattr(request, "user", None)
+    if u is not None and getattr(u, "is_authenticated", False):
+        user = u
+    a = getattr(request, "auth", None)
+    if user is None and isinstance(a, User):
+        user = a
+    if user is None and a is not None and getattr(a, "is_authenticated", False):
+        user = a
+    if user is None:
+        try:
+            from accounts.jwt_utils import decode_token
+
+            cookie_name = getattr(settings, "AUTH_COOKIE_ACCESS_NAME", "access_token")
+            token = (request.COOKIES.get(cookie_name) or "").strip()
+            if token:
+                payload = decode_token(token)
+                if payload.get("type") == "access" and payload.get("sub"):
+                    user = User.objects.get(id=int(payload["sub"]), is_active=True)
+        except Exception:
+            user = None
+
+    try:
+        visitor_id = (request.COOKIES.get("vid") or "").strip()
+    except Exception:
+        visitor_id = ""
+
+    return user, visitor_id
+
+
+class FavoritesPagination(PageNumberPagination):
+    page_size = 24
+    max_page_size = 24
+
+
+@router.get("/favorites/ids", response=list[int])
+def favorite_ids(request):
+    site_id = _get_request_site_id(request)
+    if site_id is None:
+        return []
+
+    user, visitor_id = _resolve_user_and_visitor_id(request)
+    qs = FavoriteProduct.objects.filter(site_id=int(site_id))
+    if user is not None:
+        qs = qs.filter(user=user)
+    elif visitor_id:
+        qs = qs.filter(user__isnull=True, visitor_id=str(visitor_id))
+    else:
+        return []
+
+    ids = list(qs.order_by("-created_at").values_list("product_id", flat=True)[:96])
+    return [int(i) for i in ids]
+
+
+@router.get("/favorites", response=list[ProductListOut])
+@paginate(FavoritesPagination)
+def favorites(
+    request,
+    country_code: str = "LT",
+    channel: str = "normal",
+):
+    country_code = (country_code or "").strip().upper()
+    if len(country_code) != 2:
+        raise HttpError(400, "Invalid country_code")
+
+    channel = (channel or "normal").strip().lower()
+    if channel not in {"normal", "outlet"}:
+        raise HttpError(400, "Invalid channel")
+
+    site_id = _get_request_site_id(request)
+    if site_id is None:
+        return []
+
+    user, visitor_id = _resolve_user_and_visitor_id(request)
+    fav_qs = FavoriteProduct.objects.filter(site_id=int(site_id))
+    if user is not None:
+        fav_qs = fav_qs.filter(user=user)
+    elif visitor_id:
+        fav_qs = fav_qs.filter(user__isnull=True, visitor_id=str(visitor_id))
+    else:
+        return []
+
+    ids = list(fav_qs.order_by("-created_at").values_list("product_id", flat=True)[:96])
+    if not ids:
+        return []
+
+    visibility = (
+        InventoryItem.OfferVisibility.OUTLET
+        if channel == "outlet"
+        else InventoryItem.OfferVisibility.NORMAL
+    )
+
+    min_price_expr = Min("variants__price_eur", filter=Q(variants__is_active=True))
+    offer_price_expr = Case(
+        When(
+            variants__inventory_items__offer_price_override_eur__isnull=False,
+            then=F("variants__inventory_items__offer_price_override_eur"),
+        ),
+        When(
+            variants__inventory_items__offer_discount_percent__isnull=False,
+            then=ExpressionWrapper(
+                F("variants__price_eur")
+                * (Value(100) - F("variants__inventory_items__offer_discount_percent"))
+                / Value(100),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
+        ),
+        default=F("variants__price_eur"),
+        output_field=DecimalField(max_digits=12, decimal_places=2),
+    )
+    offer_filter = (
+        Q(variants__is_active=True)
+        & Q(variants__inventory_items__offer_visibility=visibility)
+        & Q(variants__inventory_items__qty_on_hand__gt=F("variants__inventory_items__qty_reserved"))
+    )
+    min_offer_price_expr = Min(offer_price_expr, filter=offer_filter)
+
+    products_qs = (
+        Product.objects.filter(is_active=True, id__in=ids)
+        .select_related("brand", "category", "tax_class")
+        .prefetch_related("images")
+        .annotate(_min_variant_price=min_price_expr)
+        .annotate(_min_offer_price=min_offer_price_expr)
+    )
+    products_qs = _apply_site_assortment_to_product_qs(qs=products_qs, site_id=site_id, selected_category_id=None)
+
+    product_by_id = {int(p.id): p for p in products_qs}
+    ordered = [product_by_id.get(int(pid)) for pid in ids]
+    ordered = [p for p in ordered if p is not None]
+
+    vat_cache: dict[int, Decimal] = {}
+
+    def vat_rate_for(product: Product) -> Decimal:
+        if not product.tax_class_id:
+            raise HttpError(400, "Product has no tax_class assigned")
+        key = int(product.tax_class_id)
+        if key in vat_cache:
+            return vat_cache[key]
+        try:
+            rate = get_vat_rate(country_code=country_code, tax_class=product.tax_class)
+        except LookupError:
+            raise HttpError(400, "VAT rate not configured for country/tax_class")
+        vat_cache[key] = Decimal(rate)
+        return vat_cache[key]
+
+    out: list[ProductListOut] = []
+    for p in ordered:
+        list_net = Decimal(p._min_variant_price if getattr(p, "_min_variant_price", None) is not None else 0)
+        if getattr(p, "_min_offer_price", None) is not None:
+            base_net = Decimal(p._min_offer_price)
+        else:
+            base_net = Decimal(list_net)
+        rate = vat_rate_for(p)
+
+        is_discounted_offer = bool(base_net and list_net and base_net < list_net)
+        allow_additional_promotions = not is_discounted_offer
+
+        sale_net, _rule = apply_promo_to_unit_net(
+            base_unit_net=base_net,
+            site_id=int(site_id),
+            channel=channel,
+            category_id=p.category_id,
+            brand_id=p.brand_id,
+            product_id=p.id,
+            variant_id=None,
+            customer_group_id=None,
+            allow_additional_promotions=allow_additional_promotions,
+            is_discounted_offer=is_discounted_offer,
+        )
+
+        compare_at_price = None
+        discount_percent = _discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
+        if discount_percent is not None:
+            compare_at_price = _money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
+
+        imgs = list(p.images.all())
+        imgs.sort(key=lambda i: (i.sort_order, i.id))
+        images_out = []
+        for img in imgs:
+            if not img.url:
+                continue
+            list_avif = img.listing_avif_url or None
+            list_webp = img.listing_webp_url or None
+            list_url = list_avif or list_webp or img.url
+            images_out.append(
+                {
+                    "avif_url": list_avif or (img.avif_url or None),
+                    "webp_url": list_webp or (img.webp_url or None),
+                    "url": list_url,
+                    "alt_text": img.alt_text,
+                    "sort_order": img.sort_order,
+                }
+            )
+            if len(images_out) >= 2:
+                break
+
+        out.append(
+            {
+                "id": p.id,
+                "sku": p.sku,
+                "slug": p.slug,
+                "name": p.name,
+                "is_active": bool(p.is_active),
+                "brand": {
+                    "id": p.brand.id,
+                    "slug": p.brand.slug,
+                    "name": p.brand.name,
+                }
+                if p.brand
+                else None,
+                "category": {
+                    "id": p.category.id,
+                    "slug": p.category.slug,
+                    "name": p.category.name,
+                }
+                if p.category
+                else None,
+                "images": images_out,
+                "price": _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
+                "compare_at_price": compare_at_price,
+                "discount_percent": discount_percent,
+            }
+        )
+
+    return out
+
+
+@router.post("/favorites/{product_id}")
+def favorite_add(request, product_id: int):
+    site_id = _get_request_site_id(request)
+    if site_id is None:
+        raise HttpError(400, "Site is not resolved")
+
+    user, visitor_id = _resolve_user_and_visitor_id(request)
+    if user is None and not visitor_id:
+        raise HttpError(400, "Missing visitor id")
+
+    if not Product.objects.filter(id=int(product_id), is_active=True).exists():
+        raise HttpError(404, "Product not found")
+
+    if user is not None:
+        FavoriteProduct.objects.get_or_create(site_id=int(site_id), user=user, product_id=int(product_id), defaults={"visitor_id": ""})
+        ids_to_keep = list(
+            FavoriteProduct.objects.filter(site_id=int(site_id), user=user)
+            .order_by("-created_at")
+            .values_list("id", flat=True)[:96]
+        )
+        FavoriteProduct.objects.filter(site_id=int(site_id), user=user).exclude(id__in=ids_to_keep).delete()
+    else:
+        FavoriteProduct.objects.get_or_create(
+            site_id=int(site_id),
+            user=None,
+            visitor_id=str(visitor_id),
+            product_id=int(product_id),
+            defaults={},
+        )
+        ids_to_keep = list(
+            FavoriteProduct.objects.filter(site_id=int(site_id), user__isnull=True, visitor_id=str(visitor_id))
+            .order_by("-created_at")
+            .values_list("id", flat=True)[:96]
+        )
+        FavoriteProduct.objects.filter(site_id=int(site_id), user__isnull=True, visitor_id=str(visitor_id)).exclude(
+            id__in=ids_to_keep
+        ).delete()
+
+    return {"status": "ok"}
+
+
+@router.delete("/favorites/{product_id}")
+def favorite_remove(request, product_id: int):
+    site_id = _get_request_site_id(request)
+    if site_id is None:
+        raise HttpError(400, "Site is not resolved")
+
+    user, visitor_id = _resolve_user_and_visitor_id(request)
+    qs = FavoriteProduct.objects.filter(site_id=int(site_id), product_id=int(product_id))
+    if user is not None:
+        qs = qs.filter(user=user)
+    elif visitor_id:
+        qs = qs.filter(user__isnull=True, visitor_id=str(visitor_id))
+    else:
+        return {"status": "ok"}
+
+    qs.delete()
+    return {"status": "ok"}
 
 
 def _ancestor_ids_for_ids(*, ids: set[int]) -> set[int]:
@@ -1650,16 +1938,20 @@ def product_detail(
         raise HttpError(404, "Product not found")
 
     try:
-        track_event(
-            request=request,
-            name="product_view",
-            object_type="product",
-            object_id=int(product.id),
-            payload={"slug": product.slug, "sku": product.sku},
-            country_code=country_code,
-            channel=channel,
-            language_code=(language_code or ""),
-        )
+        # Some frontends prefetch product detail endpoints (e.g. link/router prefetch).
+        # Do not treat prefetch requests as real product views.
+        purpose = str(request.headers.get("Purpose") or request.headers.get("Sec-Purpose") or "").strip().lower()
+        if purpose != "prefetch":
+            track_event(
+                request=request,
+                name="product_view",
+                object_type="product",
+                object_id=int(product.id),
+                payload={"slug": product.slug, "sku": product.sku},
+                country_code=country_code,
+                channel=channel,
+                language_code=(language_code or ""),
+            )
     except Exception:
         pass
 

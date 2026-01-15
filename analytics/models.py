@@ -131,3 +131,46 @@ class RecentlyViewedProduct(models.Model):
             models.Index(fields=["site", "visitor_id", "last_viewed_at"]),
             models.Index(fields=["product", "last_viewed_at"]),
         ]
+
+
+class FavoriteProduct(models.Model):
+    site = models.ForeignKey(
+        "api.Site",
+        on_delete=models.PROTECT,
+        related_name="favorite_products",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="favorite_products",
+    )
+    visitor_id = models.CharField(max_length=64, blank=True, default="")
+
+    product = models.ForeignKey(
+        "catalog.Product",
+        on_delete=models.CASCADE,
+        related_name="favorited_by",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["site", "user", "product"],
+                condition=models.Q(user__isnull=False),
+                name="analytics_fav_unique_user_product",
+            ),
+            models.UniqueConstraint(
+                fields=["site", "visitor_id", "product"],
+                condition=~models.Q(visitor_id=""),
+                name="analytics_fav_unique_visitor_product",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["site", "user", "created_at"]),
+            models.Index(fields=["site", "visitor_id", "created_at"]),
+            models.Index(fields=["product", "created_at"]),
+        ]

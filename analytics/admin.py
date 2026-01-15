@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.contrib import admin
 
-from .models import AnalyticsEvent, AnalyticsOutbox, RecentlyViewedProduct, VisitorLink
+from .models import AnalyticsEvent, AnalyticsOutbox, FavoriteProduct, RecentlyViewedProduct, VisitorLink
 
 
 @admin.register(AnalyticsEvent)
@@ -30,3 +30,11 @@ class RecentlyViewedProductAdmin(admin.ModelAdmin):
     list_display = ("site", "user", "visitor_id", "product", "last_viewed_at")
     search_fields = ("visitor_id", "user__email", "product__slug", "product__sku")
     list_filter = ("site", "last_viewed_at",)
+
+
+@admin.register(FavoriteProduct)
+class FavoriteProductAdmin(admin.ModelAdmin):
+    list_display = ("site", "user", "visitor_id", "product", "created_at")
+    search_fields = ("visitor_id", "user__email", "product__slug", "product__sku")
+    list_filter = ("site", "created_at")
+    ordering = ("-created_at",)

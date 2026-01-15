@@ -119,6 +119,93 @@ Response:
 
 - Grąžina `list[ProductListOut]` (tas pats formatas kaip `/api/v1/catalog/products`).
 
+## "Favorites" (mėgstamos prekės, be login)
+
+Tikslas: leisti vartotojui išsaugoti mėgstamas prekes ir jas parodyti atskiroje FE route (listing tipo vaizdas) **net jei user nėra prisijungęs**.
+
+### Kaip identifikuojama
+
+- Prisijungusiam vartotojui favorites pririšamos prie `user`.
+- Neprisijungusiam favorites pririšamos prie `vid` cookie (tas pats mechanizmas kaip "Recently viewed").
+
+Auth / cookies:
+
+- Endpointai veikia ir anon, ir prisijungus.
+- FE turi siųsti cookies (cookie-only auth):
+  - `fetch(..., { credentials: 'include' })`
+  - arba axios `withCredentials: true`
+
+### Cap (limit)
+
+- Maksimalus favoritų prekių kiekis: `96`.
+- Cap taikomas atskirai:
+  - prisijungusiam user’iui
+  - anoniminiam visitor’iui pagal `vid` cookie
+
+### FE API contract
+
+#### 1) ID sąrašas (greitam UI state)
+
+Endpoint:
+
+- `GET /api/v1/catalog/favorites/ids`
+
+Response:
+
+- `list[int]` sąrašas newest-first (iki 96).
+
+Pastaba:
+
+- Jei nėra nei auth user, nei `vid` cookie, grąžinamas tuščias sąrašas `[]`.
+
+#### 2) Favorites listing (PDP/route puslapiui)
+
+Endpoint:
+
+- `GET /api/v1/catalog/favorites?country_code=LT&channel=normal&page=1`
+
+Query parametrai:
+
+- `country_code` (privalomas, 2 raidės, pvz. `LT`) – reikalingas kainodarai/VAT.
+- `channel` (privalomas) – `normal` arba `outlet`.
+- `page` (optional) – DRF page number pagination.
+
+Paginacija:
+
+- `24` prekės puslapyje.
+- Maksimaliai galima gauti `96` prekės (t.y. iki 4 puslapių).
+
+Response:
+
+- `list[ProductListOut]` (tas pats formatas kaip `/api/v1/catalog/products`).
+
+Pastabos:
+
+- Favorites atiduodamos newest-first (pagal pridėjimo laiką).
+- Jei dalis prekių nebeprieinamos per site assortment (nevisible), jos bus išfiltruotos.
+
+#### 3) Add to favorites
+
+Endpoint:
+
+- `POST /api/v1/catalog/favorites/{product_id}`
+
+Elgsena:
+
+- Jei prekė neegzistuoja arba neaktyvi – `404`.
+- Jei nėra nei user auth, nei `vid` cookie – `400`.
+- Jei jau yra favorite – veiksmas idempotent (status ok).
+
+#### 4) Remove from favorites
+
+Endpoint:
+
+- `DELETE /api/v1/catalog/favorites/{product_id}`
+
+Elgsena:
+
+- Jei favorite neegzistuoja – grąžina `{"status":"ok"}` (idempotent).
+
 ### Jei visgi reikia FE event endpoint’o
 
 Suderinsime endpointą (pavyzdys):
