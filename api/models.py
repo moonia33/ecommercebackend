@@ -37,6 +37,9 @@ class SiteConfig(models.Model):
     site = models.OneToOneField(Site, on_delete=models.CASCADE, related_name="config")
 
     default_from_email = models.CharField(max_length=255, blank=True, default="")
+
+    default_language_code = models.CharField(max_length=8, blank=True, default="")
+    default_country_code = models.CharField(max_length=2, blank=True, default="")
     smtp_host = models.CharField(max_length=255, blank=True, default="")
     smtp_port = models.PositiveIntegerField(default=587)
     smtp_user = models.CharField(max_length=255, blank=True, default="")
@@ -45,8 +48,8 @@ class SiteConfig(models.Model):
     smtp_use_ssl = models.BooleanField(default=False)
     smtp_timeout = models.PositiveIntegerField(default=10)
 
-    terms_url = models.URLField(blank=True, default="")
-    privacy_url = models.URLField(blank=True, default="")
+    terms_url = models.CharField(max_length=255, blank=True, default="")
+    privacy_url = models.CharField(max_length=255, blank=True, default="")
     terms_version = models.CharField(max_length=50, blank=True, default="")
     privacy_version = models.CharField(max_length=50, blank=True, default="")
 

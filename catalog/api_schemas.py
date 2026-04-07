@@ -18,6 +18,13 @@ class BrandOut(Schema):
     slug: str
     name: str
 
+    description: str = ""
+    logo_url: str | None = None
+
+    seo_title: str = ""
+    seo_description: str = ""
+    seo_keywords: str = ""
+
 
 class BrandRefOut(Schema):
     id: int
@@ -154,6 +161,7 @@ class CategoryDetailOut(CategoryOut):
 class ProductGroupOut(Schema):
     id: int
     code: str
+    slug: str = ""
     name: str
     description: str = ""
 

@@ -188,3 +188,9 @@ Elgsena:
 - Dažniausiai FE daro 2 request’us: `/products` + `/products/facets`. Jei reikia optimizacijos, galima:
   - cache’inti facets per `q+filters` raktą
   - arba daryti facets rečiau (pvz. tik po debounce).
+
+## Docker paleidimas
+
+```bash
+docker run --name meilisearch -p 7700:7700 -e MEILI_MASTER_KEY=qF_Aw5hRIIFLE-PEC3J5to_VTehEEl4at_bETiwWHAo -v meili_data:/meili_data getmeili/meilisearch:latest
+```

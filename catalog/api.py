@@ -6,14 +6,22 @@ from django.conf import settings
 from django.db.models import Case, Count, DecimalField, ExpressionWrapper, F, IntegerField, Min, Q, Sum, Value, When
 from django.db.models.functions import Coalesce
 from django.core.exceptions import ValidationError
-from django.core.validators import validate_email
+from django.core.cache import cache
+from django.db.models import Prefetch
+
 from django.contrib.auth import get_user_model
+from django.core.validators import validate_email
 from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
-from api.i18n import get_request_language_code
+from api.i18n import (
+    get_request_country_code,
+    get_request_language_code,
+    normalize_country_code,
+    translation_fallback_chain,
+)
 from pricing.services import compute_vat, get_vat_rate
 from shipping.services import estimate_delivery_window
 
@@ -142,6 +150,68 @@ def _descendant_ids_for_root(*, root_id: int, children: dict[int, list[int]] | N
     return out
 
 
+def _get_language_code(request) -> str:
+    return get_request_language_code(request, query_param="language_code")
+
+
+def _pick_best_translation(*, translations, fallback_langs: list[str]):
+    order_index = {lang: i for i, lang in enumerate(fallback_langs)}
+    best = None
+    best_idx = 10_000
+    for t in translations:
+        idx = order_index.get((getattr(t, "language_code", "") or "").lower(), 10_000)
+        if idx < best_idx:
+            best = t
+            best_idx = idx
+    return best
+
+
+def _translations_of(instance, cls):
+    try:
+        rel = getattr(instance, "translations", None)
+        if rel is None:
+            return []
+        return [t for t in rel.all() if isinstance(t, cls)]
+    except Exception:
+        return []
+
+
+def _resolve_category_by_slug(request, slug: str):
+    from .models import CategoryTranslation
+
+    language_code = _get_language_code(request)
+    fallback_langs = translation_fallback_chain(language_code)
+
+    t = (
+        CategoryTranslation.objects.filter(language_code__in=fallback_langs, slug=str(slug))
+        .select_related("category")
+        .first()
+    )
+    if t is not None:
+        return t.category, t
+
+    c = Category.objects.filter(slug=str(slug), is_active=True).first()
+    return c, None
+
+
+def _resolve_brand_by_slug(request, slug: str):
+    from .models import BrandTranslation
+
+    language_code = _get_language_code(request)
+    fallback_langs = translation_fallback_chain(language_code)
+
+    t = (
+        BrandTranslation.objects.filter(language_code__in=fallback_langs, slug=str(slug))
+        .select_related("brand")
+        .first()
+    )
+    if t is not None:
+        return t.brand, t
+
+    b = Brand.objects.filter(slug=str(slug), is_active=True).first()
+    return b, None
+
+
 def _resolve_user_and_visitor_id(request):
     user = None
     u = getattr(request, "user", None)
@@ -201,12 +271,10 @@ def favorite_ids(request):
 @paginate(FavoritesPagination)
 def favorites(
     request,
-    country_code: str = "LT",
+    country_code: str | None = None,
     channel: str = "normal",
 ):
-    country_code = (country_code or "").strip().upper()
-    if len(country_code) != 2:
-        raise HttpError(400, "Invalid country_code")
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
 
     channel = (channel or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
@@ -582,13 +650,11 @@ def _parse_pairs(value: str | None) -> list[tuple[str, str]]:
 @router.get("/recently-viewed", response=list[ProductListOut])
 def recently_viewed(
     request,
-    country_code: str = "LT",
+    country_code: str | None = None,
     channel: str = "normal",
     limit: int | None = None,
 ):
-    country_code = (country_code or "").strip().upper()
-    if len(country_code) != 2:
-        raise HttpError(400, "Invalid country_code")
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
 
     channel = (channel or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
@@ -833,6 +899,9 @@ def _descendant_category_ids(*, root_id: int) -> list[int]:
 def categories(request):
     site_id = _get_request_site_id(request)
 
+    language_code = _get_language_code(request)
+    fallback_langs = translation_fallback_chain(language_code)
+
     allowed = None
     if site_id is not None:
         allowed = _get_site_allowed_category_ids(site_id=site_id)
@@ -841,22 +910,59 @@ def categories(request):
     if allowed is not None:
         allowed_with_ancestors = _ancestor_ids_for_ids(ids=set(allowed))
         qs = qs.filter(id__in=list(allowed_with_ancestors))
-    qs = qs.order_by("name")
-    return [
-        {
-            "id": c.id,
-            "slug": c.slug,
-            "name": c.name,
-            "parent_id": c.parent_id,
-            "description": c.description or "",
-            "hero_image_url": (c.hero_url or None),
-            "menu_icon_url": (c.menu_icon_url_resolved or None),
-            "seo_title": getattr(c, "seo_title", "") or "",
-            "seo_description": getattr(c, "seo_description", "") or "",
-            "seo_keywords": getattr(c, "seo_keywords", "") or "",
-        }
-        for c in qs
-    ]
+    qs = qs.order_by("tree_id", "lft")
+
+    categories_list = list(qs)
+    ids = [int(c.id) for c in categories_list]
+    from .models import CategoryTranslation
+
+    translations = list(
+        CategoryTranslation.objects.filter(
+            category_id__in=ids,
+            language_code__in=fallback_langs,
+        ).only(
+            "category_id",
+            "language_code",
+            "name",
+            "slug",
+            "description",
+            "seo_title",
+            "seo_description",
+            "seo_keywords",
+        )
+    )
+    by_category: dict[int, list] = {}
+    for t in translations:
+        by_category.setdefault(int(t.category_id), []).append(t)
+
+    out = []
+    for c in categories_list:
+        best = _pick_best_translation(translations=by_category.get(int(c.id), []), fallback_langs=fallback_langs)
+        out.append(
+            {
+                "id": c.id,
+                "slug": (getattr(best, "slug", "") or c.slug),
+                "name": (getattr(best, "name", "") or c.name),
+                "parent_id": c.parent_id,
+                "description": (getattr(best, "description", "") or c.description or ""),
+                "hero_image_url": (
+                    (c.hero_image.url if getattr(c, "hero_image", None) else "")
+                    or (getattr(c, "hero_image_url", "") or "")
+                    or None
+                ),
+                "menu_icon_url": (
+                    (c.menu_icon.url if getattr(c, "menu_icon", None) else "")
+                    or (getattr(c, "menu_icon_url", "") or "")
+                    or None
+                ),
+                "seo_title": (getattr(best, "seo_title", "") or getattr(c, "seo_title", "") or ""),
+                "seo_description": (
+                    getattr(best, "seo_description", "") or getattr(c, "seo_description", "") or ""
+                ),
+                "seo_keywords": (getattr(best, "seo_keywords", "") or getattr(c, "seo_keywords", "") or ""),
+            }
+        )
+    return out
 
 
 @router.get("/categories/{slug}", response=CategoryDetailOut)
@@ -866,11 +972,11 @@ def category_detail(request, slug: str):
     if site_id is not None:
         allowed = _get_site_allowed_category_ids(site_id=site_id)
 
-    c = (
-        Category.objects.filter(slug=slug, is_active=True)
-        .select_related("parent")
-        .first()
-    )
+    c, t = _resolve_category_by_slug(request, slug)
+    if not c:
+        raise HttpError(404, "Category not found")
+
+    c = Category.objects.filter(id=int(c.id), is_active=True).select_related("parent").first()
     if not c:
         raise HttpError(404, "Category not found")
 
@@ -878,15 +984,23 @@ def category_detail(request, slug: str):
         raise HttpError(404, "Category not found")
     return {
         "id": c.id,
-        "slug": c.slug,
-        "name": c.name,
+        "slug": (getattr(t, "slug", "") or c.slug),
+        "name": (getattr(t, "name", "") or c.name),
         "parent_id": c.parent_id,
-        "description": c.description or "",
-        "hero_image_url": (c.hero_url or None),
-        "menu_icon_url": (c.menu_icon_url_resolved or None),
-        "seo_title": getattr(c, "seo_title", "") or "",
-        "seo_description": getattr(c, "seo_description", "") or "",
-        "seo_keywords": getattr(c, "seo_keywords", "") or "",
+        "description": (getattr(t, "description", "") or c.description or ""),
+        "hero_image_url": (
+            (c.hero_image.url if getattr(c, "hero_image", None) else "")
+            or (getattr(c, "hero_image_url", "") or "")
+            or None
+        ),
+        "menu_icon_url": (
+            (c.menu_icon.url if getattr(c, "menu_icon", None) else "")
+            or (getattr(c, "menu_icon_url", "") or "")
+            or None
+        ),
+        "seo_title": (getattr(t, "seo_title", "") or getattr(c, "seo_title", "") or ""),
+        "seo_description": (getattr(t, "seo_description", "") or getattr(c, "seo_description", "") or ""),
+        "seo_keywords": (getattr(t, "seo_keywords", "") or getattr(c, "seo_keywords", "") or ""),
     }
 
 
@@ -895,6 +1009,9 @@ def brands(request):
     site_id = _get_request_site_id(request)
     allowed = None
     excluded = set()
+
+    language_code = _get_language_code(request)
+    fallback_langs = translation_fallback_chain(language_code)
     if site_id is not None:
         allowed = _get_site_allowed_category_ids(site_id=site_id)
         excluded = _get_site_excluded_brand_ids(site_id=site_id)
@@ -906,7 +1023,45 @@ def brands(request):
         qs = qs.filter(products__is_active=True, products__category_id__in=list(allowed)).distinct()
 
     qs = qs.order_by("name")
-    return [{"id": b.id, "slug": b.slug, "name": b.name} for b in qs]
+    brands_list = list(qs)
+    ids = [int(b.id) for b in brands_list]
+    from .models import BrandTranslation
+
+    translations = list(
+        BrandTranslation.objects.filter(
+            brand_id__in=ids,
+            language_code__in=fallback_langs,
+        ).only(
+            "brand_id",
+            "language_code",
+            "name",
+            "slug",
+            "description",
+            "seo_title",
+            "seo_description",
+            "seo_keywords",
+        )
+    )
+    by_brand: dict[int, list] = {}
+    for t in translations:
+        by_brand.setdefault(int(t.brand_id), []).append(t)
+
+    out = []
+    for b in brands_list:
+        best = _pick_best_translation(translations=by_brand.get(int(b.id), []), fallback_langs=fallback_langs)
+        out.append(
+            {
+                "id": b.id,
+                "slug": (getattr(best, "slug", "") or b.slug),
+                "name": (getattr(best, "name", "") or b.name),
+                "description": (getattr(best, "description", "") or getattr(b, "description", "") or ""),
+                "logo_url": (getattr(b, "logo_url_resolved", "") or None),
+                "seo_title": (getattr(best, "seo_title", "") or getattr(b, "seo_title", "") or ""),
+                "seo_description": (getattr(best, "seo_description", "") or getattr(b, "seo_description", "") or ""),
+                "seo_keywords": (getattr(best, "seo_keywords", "") or getattr(b, "seo_keywords", "") or ""),
+            }
+        )
+    return out
 
 
 @router.get("/brands/{slug}", response=BrandOut)
@@ -916,54 +1071,107 @@ def brand_detail(request, slug: str):
     if site_id is not None:
         excluded = _get_site_excluded_brand_ids(site_id=site_id)
 
-    b = Brand.objects.filter(slug=slug, is_active=True).first()
+    b, t = _resolve_brand_by_slug(request, slug)
+    if not b:
+        raise HttpError(404, "Brand not found")
+
+    b = Brand.objects.filter(id=int(b.id), is_active=True).first()
     if not b:
         raise HttpError(404, "Brand not found")
 
     if excluded and int(b.id) in excluded:
         raise HttpError(404, "Brand not found")
-    return {"id": b.id, "slug": b.slug, "name": b.name}
+    return {
+        "id": b.id,
+        "slug": (getattr(t, "slug", "") or b.slug),
+        "name": (getattr(t, "name", "") or b.name),
+        "description": (getattr(t, "description", "") or getattr(b, "description", "") or ""),
+        "logo_url": (getattr(b, "logo_url_resolved", "") or None),
+        "seo_title": (getattr(t, "seo_title", "") or getattr(b, "seo_title", "") or ""),
+        "seo_description": (getattr(t, "seo_description", "") or getattr(b, "seo_description", "") or ""),
+        "seo_keywords": (getattr(t, "seo_keywords", "") or getattr(b, "seo_keywords", "") or ""),
+    }
 
 
 @router.get("/product-groups", response=list[ProductGroupOut])
 def product_groups(request):
-    qs = ProductGroup.objects.filter(is_active=True).order_by("name")
-    return [
-        {
-            "id": g.id,
-            "code": g.code,
-            "name": g.name,
-            "description": g.description or "",
-        }
-        for g in qs
-    ]
+    from .models import ProductGroupTranslation
+
+    language_code = _get_language_code(request)
+    fallback_langs = translation_fallback_chain(language_code)
+
+    qs = (
+        ProductGroup.objects.filter(is_active=True)
+        .prefetch_related("translations")
+        .order_by("name")
+    )
+    out: list[ProductGroupOut] = []
+    for g in qs:
+        translations = [t for t in getattr(g, "translations", []).all() if isinstance(t, ProductGroupTranslation)]
+        t = _pick_best_translation(translations=translations, fallback_langs=fallback_langs)
+        out.append(
+            {
+                "id": g.id,
+                "code": g.code,
+                "slug": (getattr(t, "slug", "") or getattr(g, "slug", "") or ""),
+                "name": (getattr(t, "name", "") or g.name),
+                "description": (getattr(t, "description", "") or (g.description or "")),
+            }
+        )
+    return out
 
 
 @router.get("/product-groups/{code}", response=ProductGroupOut)
 def product_group_detail(request, code: str):
-    g = ProductGroup.objects.filter(code=code, is_active=True).first()
+    from .models import ProductGroupTranslation
+
+    language_code = _get_language_code(request)
+    fallback_langs = translation_fallback_chain(language_code)
+
+    g = ProductGroup.objects.filter(code=code, is_active=True).prefetch_related("translations").first()
     if not g:
         raise HttpError(404, "Product group not found")
-    return {"id": g.id, "code": g.code, "name": g.name, "description": g.description or ""}
+    translations = [t for t in getattr(g, "translations", []).all() if isinstance(t, ProductGroupTranslation)]
+    t = _pick_best_translation(translations=translations, fallback_langs=fallback_langs)
+    return {
+        "id": g.id,
+        "code": g.code,
+        "slug": (getattr(t, "slug", "") or getattr(g, "slug", "") or ""),
+        "name": (getattr(t, "name", "") or g.name),
+        "description": (getattr(t, "description", "") or (g.description or "")),
+    }
 
 
 @router.get("/features", response=list[FeatureOut])
 def features(request):
+    from .models import FeatureTranslation, FeatureValueTranslation
+
+    language_code = _get_language_code(request)
+    fallback_langs = translation_fallback_chain(language_code)
+
     qs = (
         Feature.objects.filter(is_active=True, is_filterable=True)
-        .prefetch_related("values")
+        .prefetch_related("values", "translations", "values__translations")
         .order_by("sort_order", "code")
     )
     out: list[FeatureOut] = []
     for f in qs:
+        f_translations = [t for t in getattr(f, "translations", []).all() if isinstance(t, FeatureTranslation)]
+        ft = _pick_best_translation(translations=f_translations, fallback_langs=fallback_langs)
+
         vals = [v for v in f.values.all() if v.is_active]
         vals.sort(key=lambda v: (v.sort_order, v.value, v.id))
+        values_out = []
+        for v in vals:
+            v_translations = [t for t in getattr(v, "translations", []).all() if isinstance(t, FeatureValueTranslation)]
+            vt = _pick_best_translation(translations=v_translations, fallback_langs=fallback_langs)
+            values_out.append({"id": v.id, "value": (getattr(vt, "value", "") or v.value)})
         out.append(
             {
                 "id": f.id,
                 "code": f.code,
-                "name": f.name,
-                "values": [{"id": v.id, "value": v.value} for v in vals],
+                "name": (getattr(ft, "name", "") or f.name),
+                "values": values_out,
             }
         )
     return out
@@ -971,23 +1179,36 @@ def features(request):
 
 @router.get("/option-types", response=list[OptionTypeOut])
 def option_types(request):
+    from .models import OptionTypeTranslation, OptionValueTranslation
+
+    language_code = _get_language_code(request)
+    fallback_langs = translation_fallback_chain(language_code)
+
     qs = (
         OptionType.objects.filter(is_active=True)
-        .prefetch_related("values")
+        .prefetch_related("values", "translations", "values__translations")
         .order_by("sort_order", "code")
     )
     out: list[OptionTypeOut] = []
     for t in qs:
+        t_translations = [x for x in getattr(t, "translations", []).all() if isinstance(x, OptionTypeTranslation)]
+        tt = _pick_best_translation(translations=t_translations, fallback_langs=fallback_langs)
+
         vals = [v for v in t.values.all() if v.is_active]
         vals.sort(key=lambda v: (v.sort_order, v.label, v.id))
+        values_out = []
+        for v in vals:
+            v_translations = [x for x in getattr(v, "translations", []).all() if isinstance(x, OptionValueTranslation)]
+            vt = _pick_best_translation(translations=v_translations, fallback_langs=fallback_langs)
+            values_out.append({"id": v.id, "code": v.code, "label": (getattr(vt, "label", "") or v.label)})
         out.append(
             {
                 "id": t.id,
                 "code": t.code,
-                "name": t.name,
+                "name": (getattr(tt, "name", "") or t.name),
                 "display_type": t.display_type,
                 "swatch_type": t.swatch_type,
-                "values": [{"id": v.id, "code": v.code, "label": v.label} for v in vals],
+                "values": values_out,
             }
         )
     return out
@@ -997,7 +1218,7 @@ def option_types(request):
 @paginate(ProductPagination)
 def products(
     request,
-    country_code: str = "LT",
+    country_code: str | None = None,
     channel: str = "normal",
     q: str | None = None,
     category_slug: str | None = None,
@@ -1008,9 +1229,7 @@ def products(
     sort: str | None = None,
     in_stock_only: bool = False,
 ):
-    country_code = (country_code or "").strip().upper()
-    if len(country_code) != 2:
-        raise HttpError(400, "Invalid country_code")
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
 
     channel = (channel or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
@@ -1374,7 +1593,7 @@ def products(
 @router.get("/products/facets", response=CatalogFacetsOut)
 def product_facets(
     request,
-    country_code: str = "LT",
+    country_code: str | None = None,
     channel: str = "normal",
     q: str | None = None,
     category_slug: str | None = None,
@@ -1383,9 +1602,7 @@ def product_facets(
     feature: str | None = None,
     option: str | None = None,
 ):
-    country_code = (country_code or "").strip().upper()
-    if len(country_code) != 2:
-        raise HttpError(400, "Invalid country_code")
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
 
     channel = (channel or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
@@ -1583,8 +1800,16 @@ def product_facets(
                     "name": c.name,
                     "parent_id": c.parent_id,
                     "description": c.description or "",
-                    "hero_image_url": (c.hero_url or None),
-                    "menu_icon_url": (c.menu_icon_url_resolved or None),
+                    "hero_image_url": (
+                        (c.hero_image.url if getattr(c, "hero_image", None) else "")
+                        or (getattr(c, "hero_image_url", "") or "")
+                        or None
+                    ),
+                    "menu_icon_url": (
+                        (c.menu_icon.url if getattr(c, "menu_icon", None) else "")
+                        or (getattr(c, "menu_icon_url", "") or "")
+                        or None
+                    ),
                     "seo_title": getattr(c, "seo_title", "") or "",
                     "seo_description": getattr(c, "seo_description", "") or "",
                     "seo_keywords": getattr(c, "seo_keywords", "") or "",
@@ -1751,7 +1976,7 @@ def product_facets(
 def category_products(
     request,
     slug: str,
-    country_code: str = "LT",
+    country_code: str | None = None,
     channel: str = "normal",
     q: str | None = None,
     brand_slug: str | None = None,
@@ -1781,7 +2006,7 @@ def category_products(
 def brand_products(
     request,
     slug: str,
-    country_code: str = "LT",
+    country_code: str | None = None,
     channel: str = "normal",
     q: str | None = None,
     category_slug: str | None = None,
@@ -1811,7 +2036,7 @@ def brand_products(
 def product_group_products(
     request,
     code: str,
-    country_code: str = "LT",
+    country_code: str | None = None,
     channel: str = "normal",
     q: str | None = None,
     category_slug: str | None = None,
@@ -1899,19 +2124,28 @@ def back_in_stock_subscribe(request, payload: BackInStockSubscribeIn):
 def product_detail(
     request,
     slug: str,
-    country_code: str = "LT",
+    country_code: str | None = None,
     channel: str = "normal",
     language_code: str | None = None,
 ):
-    country_code = (country_code or "").strip().upper()
-    if len(country_code) != 2:
-        raise HttpError(400, "Invalid country_code")
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
 
     channel = (channel or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
         raise HttpError(400, "Invalid channel")
 
     site_id = _get_request_site_id(request)
+
+    from .models import (
+        FeatureTranslation,
+        FeatureValueTranslation,
+        OptionTypeTranslation,
+        OptionValueTranslation,
+        ProductTranslation,
+    )
+
+    language_code = language_code or _get_language_code(request)
+    fallback_langs = translation_fallback_chain(language_code)
 
     product_qs = Product.objects.filter(slug=slug, is_active=True)
     product_qs = _apply_site_assortment_to_product_qs(
@@ -1925,11 +2159,16 @@ def product_detail(
         .select_related("brand", "category", "tax_class")
         .prefetch_related(
             "images",
+            "translations",
             "feature_values__feature",
             "feature_values__feature_value",
+            "feature_values__feature__translations",
+            "feature_values__feature_value__translations",
             "variants",
             "variants__option_values__option_type",
             "variants__option_values__option_value",
+            "variants__option_values__option_type__translations",
+            "variants__option_values__option_value__translations",
             "variants__inventory_items",
         )
         .first()
@@ -2061,6 +2300,19 @@ def product_detail(
         options.sort(key=lambda r: (
             r.option_type.sort_order, r.option_type.code))
 
+        option_type_name_by_id = {}
+        option_value_label_by_id = {}
+        for r in options:
+            if r.option_type_id and r.option_type_id not in option_type_name_by_id:
+                ot_translations = _translations_of(r.option_type, OptionTypeTranslation)
+                ott = _pick_best_translation(translations=ot_translations, fallback_langs=fallback_langs)
+                option_type_name_by_id[r.option_type_id] = (getattr(ott, "name", "") or r.option_type.name)
+
+            if r.option_value_id and r.option_value_id not in option_value_label_by_id:
+                ov_translations = _translations_of(r.option_value, OptionValueTranslation)
+                ovt = _pick_best_translation(translations=ov_translations, fallback_langs=fallback_langs)
+                option_value_label_by_id[r.option_value_id] = (getattr(ovt, "label", "") or r.option_value.label)
+
         variants.append(
             {
                 "id": v.id,
@@ -2083,9 +2335,9 @@ def product_detail(
                 "options": [
                     {
                         "option_type_code": r.option_type.code,
-                        "option_type_name": r.option_type.name,
+                        "option_type_name": option_type_name_by_id.get(r.option_type_id) or r.option_type.name,
                         "option_value_code": r.option_value.code,
-                        "option_value_label": r.option_value.label,
+                        "option_value_label": option_value_label_by_id.get(r.option_value_id) or r.option_value.label,
                     }
                     for r in options
                 ],
@@ -2097,13 +2349,26 @@ def product_detail(
         .select_related("feature", "feature_value")
         .order_by("feature__sort_order", "feature__code", "feature_value__sort_order", "feature_value__value")
     )
+
+    feature_name_by_id = {}
+    feature_value_by_id = {}
+    for r in feature_rows:
+        if r.feature_id not in feature_name_by_id:
+            f_translations = _translations_of(r.feature, FeatureTranslation)
+            ft = _pick_best_translation(translations=f_translations, fallback_langs=fallback_langs)
+            feature_name_by_id[r.feature_id] = (getattr(ft, "name", "") or r.feature.name)
+        if r.feature_value_id not in feature_value_by_id:
+            v_translations = _translations_of(r.feature_value, FeatureValueTranslation)
+            vt = _pick_best_translation(translations=v_translations, fallback_langs=fallback_langs)
+            feature_value_by_id[r.feature_value_id] = (getattr(vt, "value", "") or r.feature_value.value)
+
     features_out = [
         {
             "feature_id": r.feature_id,
             "feature_code": r.feature.code,
-            "feature_name": r.feature.name,
+            "feature_name": feature_name_by_id.get(r.feature_id) or r.feature.name,
             "value_id": r.feature_value_id,
-            "value": r.feature_value.value,
+            "value": feature_value_by_id.get(r.feature_value_id) or r.feature_value.value,
         }
         for r in feature_rows
     ]
@@ -2122,16 +2387,19 @@ def product_detail(
         language_code=language_code,
     )
 
+    p_translations = _translations_of(product, ProductTranslation)
+    pt = _pick_best_translation(translations=p_translations, fallback_langs=fallback_langs)
+
     return {
         "id": product.id,
         "sku": product.sku,
-        "slug": product.slug,
-        "name": product.name,
-        "description": product.description,
+        "slug": (getattr(pt, "slug", "") or product.slug),
+        "name": (getattr(pt, "name", "") or product.name),
+        "description": (getattr(pt, "description", "") or product.description),
         "is_active": bool(product.is_active),
-        "seo_title": getattr(product, "seo_title", "") or "",
-        "seo_description": getattr(product, "seo_description", "") or "",
-        "seo_keywords": getattr(product, "seo_keywords", "") or "",
+        "seo_title": (getattr(pt, "seo_title", "") or getattr(product, "seo_title", "") or ""),
+        "seo_description": (getattr(pt, "seo_description", "") or getattr(product, "seo_description", "") or ""),
+        "seo_keywords": (getattr(pt, "seo_keywords", "") or getattr(product, "seo_keywords", "") or ""),
         "brand": {
             "id": product.brand.id,
             "slug": product.brand.slug,

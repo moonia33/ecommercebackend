@@ -7,6 +7,8 @@ from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import models
 
+from mptt.models import MPTTModel, TreeForeignKey
+
 from api.models import get_default_site_id
 
 
@@ -61,10 +63,10 @@ class TaxRate(models.Model):
         return f"{self.country_code}:{self.tax_class.code}={self.rate}"
 
 
-class Category(models.Model):
+class Category(MPTTModel):
     name = models.CharField(max_length=200)
     slug = models.SlugField(max_length=200, unique=True)
-    parent = models.ForeignKey(
+    parent = TreeForeignKey(
         "self",
         null=True,
         blank=True,
@@ -98,33 +100,93 @@ class Category(models.Model):
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        ordering = ["name"]
+        ordering = ["tree_id", "lft"]
 
     def __str__(self) -> str:
         return self.name
 
-    @property
-    def hero_url(self) -> str:
-        if self.hero_image:
-            try:
-                return self.hero_image.url
-            except Exception:
-                return ""
-        return self.hero_image_url
 
-    @property
-    def menu_icon_url_resolved(self) -> str:
-        if self.menu_icon:
-            try:
-                return self.menu_icon.url
-            except Exception:
-                return ""
-        return self.menu_icon_url
+class CategoryTranslation(models.Model):
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+
+    name = models.CharField(max_length=200, blank=True, default="")
+    slug = models.SlugField(max_length=200)
+    description = models.TextField(blank=True, default="")
+
+    seo_title = models.CharField(max_length=255, blank=True, default="")
+    seo_description = models.CharField(max_length=320, blank=True, default="")
+    seo_keywords = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["category", "language_code"],
+                name="uniq_category_translation",
+            ),
+            models.UniqueConstraint(
+                fields=["language_code", "slug"],
+                name="uniq_category_translation_slug",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.category_id}:{self.language_code}"
+
+
+class BrandTranslation(models.Model):
+    brand = models.ForeignKey(
+        "Brand",
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+
+    name = models.CharField(max_length=200, blank=True, default="")
+    slug = models.SlugField(max_length=200)
+    description = models.TextField(blank=True, default="")
+
+    seo_title = models.CharField(max_length=255, blank=True, default="")
+    seo_description = models.CharField(max_length=320, blank=True, default="")
+    seo_keywords = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["brand", "language_code"],
+                name="uniq_brand_translation",
+            ),
+            models.UniqueConstraint(
+                fields=["language_code", "slug"],
+                name="uniq_brand_translation_slug",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.brand_id}:{self.language_code}"
 
 
 class Brand(models.Model):
     name = models.CharField(max_length=200)
     slug = models.SlugField(max_length=200, unique=True)
+
+    description = models.TextField(blank=True, default="")
+
+    logo = models.ImageField(
+        upload_to="brand-logos/%Y/%m/",
+        null=True,
+        blank=True,
+    )
+    logo_url = models.URLField(blank=True, default="")
+    logo_alt = models.CharField(max_length=255, blank=True)
+
+    seo_title = models.CharField(max_length=255, blank=True)
+    seo_description = models.CharField(max_length=320, blank=True)
+    seo_keywords = models.CharField(max_length=255, blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -132,6 +194,15 @@ class Brand(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    @property
+    def logo_url_resolved(self) -> str:
+        if self.logo:
+            try:
+                return self.logo.url
+            except Exception:
+                return ""
+        return self.logo_url
 
 
 class SiteCategoryVisibility(models.Model):
@@ -276,6 +347,38 @@ class Product(models.Model):
 
     def __str__(self) -> str:
         return f"{self.sku} - {self.name}"
+
+
+class ProductTranslation(models.Model):
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+
+    name = models.CharField(max_length=255, blank=True, default="")
+    slug = models.SlugField(max_length=255)
+    description = models.TextField(blank=True, default="")
+
+    seo_title = models.CharField(max_length=255, blank=True, default="")
+    seo_description = models.CharField(max_length=320, blank=True, default="")
+    seo_keywords = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "language_code"],
+                name="uniq_product_translation",
+            ),
+            models.UniqueConstraint(
+                fields=["language_code", "slug"],
+                name="uniq_product_translation_slug",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.product_id}:{self.language_code}"
 
 
 class ProductImage(models.Model):
@@ -823,6 +926,7 @@ class EnrichmentMatch(models.Model):
 
 class ProductGroup(models.Model):
     code = models.SlugField(max_length=100, unique=True)
+    slug = models.SlugField(max_length=200, null=True, blank=True, unique=True)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
@@ -832,6 +936,38 @@ class ProductGroup(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class ProductGroupTranslation(models.Model):
+    product_group = models.ForeignKey(
+        ProductGroup,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+
+    name = models.CharField(max_length=255, blank=True, default="")
+    slug = models.SlugField(max_length=200)
+    description = models.TextField(blank=True, default="")
+
+    seo_title = models.CharField(max_length=255, blank=True, default="")
+    seo_description = models.CharField(max_length=320, blank=True, default="")
+    seo_keywords = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product_group", "language_code"],
+                name="uniq_product_group_translation",
+            ),
+            models.UniqueConstraint(
+                fields=["language_code", "slug"],
+                name="uniq_product_group_translation_slug",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.product_group_id}:{self.language_code}"
 
 
 class Feature(models.Model):
@@ -847,6 +983,27 @@ class Feature(models.Model):
 
     def __str__(self) -> str:
         return self.code
+
+
+class FeatureTranslation(models.Model):
+    feature = models.ForeignKey(
+        Feature,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+    name = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["feature", "language_code"],
+                name="uniq_feature_translation",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.feature_id}:{self.language_code}"
 
 
 class FeatureValue(models.Model):
@@ -867,6 +1024,27 @@ class FeatureValue(models.Model):
 
     def __str__(self) -> str:
         return f"{self.feature.code}:{self.value}"
+
+
+class FeatureValueTranslation(models.Model):
+    feature_value = models.ForeignKey(
+        FeatureValue,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+    value = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["feature_value", "language_code"],
+                name="uniq_feature_value_translation",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.feature_value_id}:{self.language_code}"
 
 
 class ProductFeatureValue(models.Model):
@@ -925,6 +1103,27 @@ class OptionType(models.Model):
         return self.code
 
 
+class OptionTypeTranslation(models.Model):
+    option_type = models.ForeignKey(
+        OptionType,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+    name = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["option_type", "language_code"],
+                name="uniq_option_type_translation",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.option_type_id}:{self.language_code}"
+
+
 class OptionValue(models.Model):
     option_type = models.ForeignKey(
         OptionType, on_delete=models.CASCADE, related_name="values")
@@ -944,6 +1143,27 @@ class OptionValue(models.Model):
 
     def __str__(self) -> str:
         return f"{self.option_type.code}:{self.label}"
+
+
+class OptionValueTranslation(models.Model):
+    option_value = models.ForeignKey(
+        OptionValue,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+    label = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["option_value", "language_code"],
+                name="uniq_option_value_translation",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.option_value_id}:{self.language_code}"
 
 
 class BackInStockSubscription(models.Model):

@@ -22,9 +22,12 @@ from django.urls import include, path
 
 from api.api import api
 
+api_urls = api.urls
+
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path(f"{settings.API_BASE_PATH}/v1/", api.urls),
+    path(f"{settings.API_BASE_PATH}/v1/<str:language_code>/", api_urls),
+    path(f"{settings.API_BASE_PATH}/v1/", api_urls),
 ]
 
 if settings.DEBUG:

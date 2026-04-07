@@ -22,6 +22,8 @@ from shipping.services import estimate_delivery_window
 
 from analytics.services import track_event
 
+from api.i18n import get_request_country_code, normalize_country_code
+
 from .models import Cart, CartItem, Order, OrderConsent, OrderDiscount, OrderFee, OrderLine, PaymentIntent
 from .schemas import (
     CartItemAddIn,
@@ -339,17 +341,15 @@ def checkout_consents(request):
 
 
 @router.get("/payment-methods", response=list[PaymentMethodOut], auth=_auth)
-def payment_methods(request, country_code: str = "LT"):
+def payment_methods(request, country_code: str | None = None):
     _require_user(request)
-    country_code = (country_code or "").strip().upper() or "LT"
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
     try:
         from payments.models import PaymentMethod
 
         methods = list(
             PaymentMethod.objects.filter(is_active=True)
-            .filter(
-                models.Q(country_code="") | models.Q(country_code=country_code)
-            )
+            .filter(models.Q(country_code="") | models.Q(country_code=country_code))
             .order_by("sort_order", "code")
         )
     except Exception:
@@ -399,9 +399,9 @@ def payment_methods(request, country_code: str = "LT"):
 
 
 @router.get("/payment-options", response=list[PaymentOptionOut], auth=_auth)
-def payment_options(request, country_code: str = "LT"):
+def payment_options(request, country_code: str | None = None):
     _require_user(request)
-    country_code = (country_code or "").strip().upper() or "LT"
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
 
     # 1) Base payment methods from DB (or fallback)
     base = payment_methods(request, country_code=country_code)
@@ -985,10 +985,8 @@ def _serialize_cart_items(
 
 
 @router.get("/cart", response=CartOut)
-def get_cart(request, country_code: str = "LT", channel: str = "normal"):
-    country_code = (country_code or "").strip().upper()
-    if len(country_code) != 2:
-        raise HttpError(400, "Invalid country_code")
+def get_cart(request, country_code: str | None = None, channel: str = "normal"):
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
 
     channel = (channel or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
@@ -1043,7 +1041,7 @@ def get_cart(request, country_code: str = "LT", channel: str = "normal"):
 
 
 @router.post("/cart/items", response=CartOut)
-def add_cart_item(request, payload: CartItemAddIn, country_code: str = "LT"):
+def add_cart_item(request, payload: CartItemAddIn, country_code: str | None = None):
     qty = int(payload.qty or 0)
     if qty <= 0:
         raise HttpError(400, "qty must be positive")
@@ -1086,6 +1084,8 @@ def add_cart_item(request, payload: CartItemAddIn, country_code: str = "LT"):
                 int(ii.id),
             )
         )
+
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
 
     cart = _get_cart_for_request(request, create=True)
     if cart is None:
@@ -1183,8 +1183,10 @@ def add_cart_item(request, payload: CartItemAddIn, country_code: str = "LT"):
 
 
 @router.patch("/cart/items/{item_id}", response=CartOut)
-def update_cart_item(request, item_id: int, payload: CartItemUpdateIn, country_code: str = "LT"):
+def update_cart_item(request, item_id: int, payload: CartItemUpdateIn, country_code: str | None = None):
     qty = int(payload.qty or 0)
+
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
 
     cart = _get_cart_for_request(request, create=False)
     if cart is None:
@@ -1253,7 +1255,9 @@ def update_cart_item(request, item_id: int, payload: CartItemUpdateIn, country_c
 
 
 @router.delete("/cart/items/{item_id}", response=CartOut)
-def delete_cart_item(request, item_id: int, country_code: str = "LT"):
+def delete_cart_item(request, item_id: int, country_code: str | None = None):
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
+
     cart = _get_cart_for_request(request, create=False)
     if cart is None:
         raise HttpError(404, "Cart item not found")
@@ -1293,11 +1297,9 @@ def delete_cart_item(request, item_id: int, country_code: str = "LT"):
 
 
 @router.get("/shipping-methods", response=list[ShippingMethodOut], auth=_auth)
-def shipping_methods(request, country_code: str = "LT"):
+def shipping_methods(request, country_code: str | None = None):
     _require_user(request)
-    country_code = (country_code or "").strip().upper()
-    if len(country_code) != 2:
-        raise HttpError(400, "Invalid country_code")
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
 
     from shipping.models import ShippingMethod, ShippingRate
     from django.db.models import Q

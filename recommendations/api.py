@@ -12,6 +12,8 @@ from catalog.models import InventoryItem, Product, Variant
 from promotions.services import apply_promo_to_unit_net
 from pricing.services import get_vat_rate
 
+from api.i18n import get_request_country_code, normalize_country_code
+
 from .models import RecommendationSetItem
 
 
@@ -394,9 +396,10 @@ def _upsell_recommendations(
 def product_recommendations(
     request,
     slug: str,
-    country_code: str = "LT",
+    country_code: str | None = None,
     channel: str = "normal",
 ):
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
     site_id = _get_request_site_id(request)
 
     product_qs = Product.objects.filter(slug=slug, is_active=True)

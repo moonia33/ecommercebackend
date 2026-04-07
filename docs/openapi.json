@@ -1,0 +1,6395 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Djengo e-commerce API",
+    "version": "1",
+    "description": ""
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "operationId": "api_api_health",
+        "summary": "Health",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/otp/request": {
+      "post": {
+        "operationId": "accounts_api_otp_request",
+        "summary": "Otp Request",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OTPRequestIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/v1/auth/otp/verify": {
+      "post": {
+        "operationId": "accounts_api_otp_verify",
+        "summary": "Otp Verify",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OTPVerifyIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "operationId": "accounts_api_register",
+        "summary": "Register",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "accounts_api_login",
+        "summary": "Login",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "operationId": "accounts_api_refresh",
+        "summary": "Refresh",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RefreshIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "required": false
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "accounts_api_logout",
+        "summary": "Logout",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "operationId": "accounts_api_me",
+        "summary": "Me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "accounts_api_update_me",
+        "summary": "Update Me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/MeUpdateIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "required": false
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/pickup-point": {
+      "put": {
+        "operationId": "accounts_api_set_pickup_point",
+        "summary": "Set Pickup Point",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickupPointSetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "accounts_api_delete_pickup_point",
+        "summary": "Delete Pickup Point",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/addresses": {
+      "get": {
+        "operationId": "accounts_api_list_addresses",
+        "summary": "List Addresses",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AddressOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "accounts_api_create_address",
+        "summary": "Create Address",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/addresses/{address_id}": {
+      "patch": {
+        "operationId": "accounts_api_update_address",
+        "summary": "Update Address",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address_id",
+            "schema": {
+              "title": "Address Id",
+              "type": "integer"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "accounts_api_delete_address",
+        "summary": "Delete Address",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address_id",
+            "schema": {
+              "title": "Address Id",
+              "type": "integer"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/consents": {
+      "put": {
+        "operationId": "accounts_api_update_consents",
+        "summary": "Update Consents",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsentUpdateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/catalog/ui": {
+      "get": {
+        "operationId": "catalog_api_ui_config",
+        "summary": "Ui Config",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "language_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Language Code"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UiConfigOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/favorites/ids": {
+      "get": {
+        "operationId": "catalog_api_favorite_ids",
+        "summary": "Favorite Ids",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/favorites": {
+      "get": {
+        "operationId": "catalog_api_favorites",
+        "summary": "Favorites",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "schema": {
+              "default": "normal",
+              "title": "Channel",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page Size"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedProductListOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/favorites/{product_id}": {
+      "post": {
+        "operationId": "catalog_api_favorite_add",
+        "summary": "Favorite Add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "schema": {
+              "title": "Product Id",
+              "type": "integer"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      },
+      "delete": {
+        "operationId": "catalog_api_favorite_remove",
+        "summary": "Favorite Remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "schema": {
+              "title": "Product Id",
+              "type": "integer"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/recently-viewed": {
+      "get": {
+        "operationId": "catalog_api_recently_viewed",
+        "summary": "Recently Viewed",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "schema": {
+              "default": "normal",
+              "title": "Channel",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProductListOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/categories": {
+      "get": {
+        "operationId": "catalog_api_categories",
+        "summary": "Categories",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CategoryOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/categories/{slug}": {
+      "get": {
+        "operationId": "catalog_api_category_detail",
+        "summary": "Category Detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryDetailOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/brands": {
+      "get": {
+        "operationId": "catalog_api_brands",
+        "summary": "Brands",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BrandOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/brands/{slug}": {
+      "get": {
+        "operationId": "catalog_api_brand_detail",
+        "summary": "Brand Detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/product-groups": {
+      "get": {
+        "operationId": "catalog_api_product_groups",
+        "summary": "Product Groups",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProductGroupOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/product-groups/{code}": {
+      "get": {
+        "operationId": "catalog_api_product_group_detail",
+        "summary": "Product Group Detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "schema": {
+              "title": "Code",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductGroupOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/features": {
+      "get": {
+        "operationId": "catalog_api_features",
+        "summary": "Features",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FeatureOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/option-types": {
+      "get": {
+        "operationId": "catalog_api_option_types",
+        "summary": "Option Types",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OptionTypeOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/products": {
+      "get": {
+        "operationId": "catalog_api_products",
+        "summary": "Products",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "schema": {
+              "default": "normal",
+              "title": "Channel",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "category_slug",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Slug"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "brand_slug",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand Slug"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "group_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Group Code"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "feature",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "option",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Option"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "in_stock_only",
+            "schema": {
+              "default": false,
+              "title": "In Stock Only",
+              "type": "boolean"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page Size"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedProductListOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/products/facets": {
+      "get": {
+        "operationId": "catalog_api_product_facets",
+        "summary": "Product Facets",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "schema": {
+              "default": "normal",
+              "title": "Channel",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "category_slug",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Slug"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "brand_slug",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand Slug"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "group_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Group Code"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "feature",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "option",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Option"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogFacetsOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/categories/{slug}/products": {
+      "get": {
+        "operationId": "catalog_api_category_products",
+        "summary": "Category Products",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "schema": {
+              "default": "normal",
+              "title": "Channel",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "brand_slug",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand Slug"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "group_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Group Code"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "feature",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "option",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Option"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "in_stock_only",
+            "schema": {
+              "default": false,
+              "title": "In Stock Only",
+              "type": "boolean"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page Size"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedProductListOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/brands/{slug}/products": {
+      "get": {
+        "operationId": "catalog_api_brand_products",
+        "summary": "Brand Products",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "schema": {
+              "default": "normal",
+              "title": "Channel",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "category_slug",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Slug"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "group_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Group Code"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "feature",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "option",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Option"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "in_stock_only",
+            "schema": {
+              "default": false,
+              "title": "In Stock Only",
+              "type": "boolean"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page Size"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedProductListOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/product-groups/{code}/products": {
+      "get": {
+        "operationId": "catalog_api_product_group_products",
+        "summary": "Product Group Products",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "schema": {
+              "title": "Code",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "schema": {
+              "default": "normal",
+              "title": "Channel",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "category_slug",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Slug"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "brand_slug",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Brand Slug"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "feature",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "option",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Option"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "in_stock_only",
+            "schema": {
+              "default": false,
+              "title": "In Stock Only",
+              "type": "boolean"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page Size"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedProductListOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/catalog/back-in-stock/subscribe": {
+      "post": {
+        "operationId": "catalog_api_back_in_stock_subscribe",
+        "summary": "Back In Stock Subscribe",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackInStockSubscribeOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackInStockSubscribeIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/v1/catalog/products/{slug}": {
+      "get": {
+        "operationId": "catalog_api_product_detail",
+        "summary": "Product Detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "schema": {
+              "default": "normal",
+              "title": "Channel",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "language_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Language Code"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetailOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "catalog"
+        ]
+      }
+    },
+    "/api/v1/pricing/quote": {
+      "get": {
+        "operationId": "pricing_api_quote",
+        "summary": "Quote",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "variant_id",
+            "schema": {
+              "title": "Variant Id",
+              "type": "integer"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "qty",
+            "schema": {
+              "default": 1,
+              "title": "Qty",
+              "type": "integer"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/api/v1/checkout/checkout/apply-pickup-point": {
+      "post": {
+        "operationId": "checkout_api_apply_pickup_point",
+        "summary": "Apply Pickup Point",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyPickupPointOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyPickupPointIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/checkout/consents": {
+      "get": {
+        "operationId": "checkout_api_checkout_consents",
+        "summary": "Checkout Consents",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsentDefinitionOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/checkout/payment-methods": {
+      "get": {
+        "operationId": "checkout_api_payment_methods",
+        "summary": "Payment Methods",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PaymentMethodOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/checkout/payment-options": {
+      "get": {
+        "operationId": "checkout_api_payment_options",
+        "summary": "Payment Options",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PaymentOptionOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/checkout/cart": {
+      "get": {
+        "operationId": "checkout_api_get_cart",
+        "summary": "Get Cart",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "schema": {
+              "default": "normal",
+              "title": "Channel",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ]
+      }
+    },
+    "/api/v1/checkout/cart/items": {
+      "post": {
+        "operationId": "checkout_api_add_cart_item",
+        "summary": "Add Cart Item",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartItemAddIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/v1/checkout/cart/items/{item_id}": {
+      "patch": {
+        "operationId": "checkout_api_update_cart_item",
+        "summary": "Update Cart Item",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartItemUpdateIn"
+              }
+            }
+          },
+          "required": true
+        }
+      },
+      "delete": {
+        "operationId": "checkout_api_delete_cart_item",
+        "summary": "Delete Cart Item",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ]
+      }
+    },
+    "/api/v1/checkout/shipping-methods": {
+      "get": {
+        "operationId": "checkout_api_shipping_methods",
+        "summary": "Shipping Methods",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ShippingMethodOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/checkout/checkout/preview": {
+      "post": {
+        "operationId": "checkout_api_checkout_preview",
+        "summary": "Checkout Preview",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutPreviewOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutPreviewIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/checkout/checkout/confirm": {
+      "post": {
+        "operationId": "checkout_api_checkout_confirm",
+        "summary": "Checkout Confirm",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutConfirmOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutConfirmIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/checkout/orders": {
+      "get": {
+        "operationId": "checkout_api_list_orders",
+        "summary": "List Orders",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 20,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OrderOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/checkout/orders/{order_id}": {
+      "get": {
+        "operationId": "checkout_api_get_order",
+        "summary": "Get Order",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "schema": {
+              "title": "Order Id",
+              "type": "integer"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "checkout"
+        ],
+        "security": [
+          {
+            "JWTAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/payments/neopay/callback": {
+      "post": {
+        "operationId": "payments_api_neopay_callback",
+        "summary": "Neopay Callback",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "tags": [
+          "payments"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NeopayCallbackIn"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/v1/payments/neopay/banks": {
+      "get": {
+        "operationId": "payments_api_neopay_banks",
+        "summary": "Neopay Banks",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NeopayBankOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "payments"
+        ]
+      }
+    },
+    "/api/v1/payments/neopay/countries": {
+      "get": {
+        "operationId": "payments_api_neopay_countries",
+        "summary": "Neopay Countries",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Country Code"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NeopayCountryOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "payments"
+        ]
+      }
+    },
+    "/api/v1/dpd/lockers": {
+      "get": {
+        "operationId": "dpd_api_list_lockers",
+        "summary": "List Lockers",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "city",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "City"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "locker_type",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Locker Type"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "postal_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Postal Code"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 1000,
+              "title": "Limit"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LockerOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "DPD"
+        ]
+      }
+    },
+    "/api/v1/dpd/status": {
+      "get": {
+        "operationId": "dpd_api_get_status",
+        "summary": "Get Status",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tracking_number",
+            "schema": {
+              "title": "Tracking Number",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "DPD"
+        ]
+      }
+    },
+    "/api/v1/unisend/terminals": {
+      "get": {
+        "operationId": "unisend_api_list_terminals",
+        "summary": "List Terminals",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "locality",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Locality"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "city",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "City"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "postal_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Postal Code"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 1000,
+              "title": "Limit"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TerminalOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Unisend"
+        ]
+      }
+    },
+    "/api/v1/cms/navigation/{code}": {
+      "get": {
+        "operationId": "cms_api_navigation",
+        "summary": "Navigation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "schema": {
+              "title": "Code",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "language_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Language Code"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NavigationOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "cms"
+        ]
+      }
+    },
+    "/api/v1/cms/pages/{slug}": {
+      "get": {
+        "operationId": "cms_api_cms_page_detail",
+        "summary": "Cms Page Detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "language_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Language Code"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CmsPageOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "cms"
+        ]
+      }
+    },
+    "/api/v1/shipping/countries": {
+      "get": {
+        "operationId": "shipping_api_shipping_countries",
+        "summary": "Shipping Countries",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "language_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Language Code"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ShippingCountryOut"
+                  },
+                  "title": "Response",
+                  "type": "array"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "shipping"
+        ]
+      }
+    },
+    "/api/v1/recommendations/products/{slug}": {
+      "get": {
+        "operationId": "recommendations_api_product_recommendations",
+        "summary": "Product Recommendations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "schema": {
+              "default": "normal",
+              "title": "Channel",
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductRecommendationsOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "recommendations"
+        ]
+      }
+    },
+    "/api/v1/home": {
+      "get": {
+        "operationId": "homebuilder_api_home",
+        "summary": "Home",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "country_code",
+            "schema": {
+              "default": "LT",
+              "title": "Country Code",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "schema": {
+              "default": "normal",
+              "title": "Channel",
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "in": "query",
+            "name": "language_code",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Language Code"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeOut"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "home"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "OTPRequestIn": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "OTPRequestIn",
+        "type": "object"
+      },
+      "StatusOut": {
+        "properties": {
+          "raw": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Raw",
+            "type": "array"
+          }
+        },
+        "required": [
+          "raw"
+        ],
+        "title": "StatusOut",
+        "type": "object"
+      },
+      "OTPVerifyIn": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "code"
+        ],
+        "title": "OTPVerifyIn",
+        "type": "object"
+      },
+      "RegisterIn": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "RegisterIn",
+        "type": "object"
+      },
+      "LoginIn": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "LoginIn",
+        "type": "object"
+      },
+      "RefreshIn": {
+        "properties": {
+          "refresh": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh"
+          }
+        },
+        "title": "RefreshIn",
+        "type": "object"
+      },
+      "AddressOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "company": {
+            "title": "Company",
+            "type": "string"
+          },
+          "company_reg_no": {
+            "title": "Company Reg No",
+            "type": "string"
+          },
+          "company_vat_no": {
+            "title": "Company Vat No",
+            "type": "string"
+          },
+          "line1": {
+            "title": "Line1",
+            "type": "string"
+          },
+          "city": {
+            "title": "City",
+            "type": "string"
+          },
+          "postal_code": {
+            "title": "Postal Code",
+            "type": "string"
+          },
+          "country_code": {
+            "title": "Country Code",
+            "type": "string"
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "is_default_shipping": {
+            "title": "Is Default Shipping",
+            "type": "boolean"
+          },
+          "is_default_billing": {
+            "title": "Is Default Billing",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "full_name",
+          "company",
+          "company_reg_no",
+          "company_vat_no",
+          "line1",
+          "city",
+          "postal_code",
+          "country_code",
+          "phone",
+          "is_default_shipping",
+          "is_default_billing"
+        ],
+        "title": "AddressOut",
+        "type": "object"
+      },
+      "ConsentOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          },
+          "accepted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "required",
+          "accepted"
+        ],
+        "title": "ConsentOut",
+        "type": "object"
+      },
+      "CustomerGroupOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "integer"
+          },
+          "pricing_type": {
+            "title": "Pricing Type",
+            "type": "string"
+          },
+          "allow_additional_discounts": {
+            "title": "Allow Additional Discounts",
+            "type": "boolean"
+          },
+          "allow_coupons": {
+            "title": "Allow Coupons",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "priority",
+          "pricing_type",
+          "allow_additional_discounts",
+          "allow_coupons"
+        ],
+        "title": "CustomerGroupOut",
+        "type": "object"
+      },
+      "MeOut": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "first_name": {
+            "title": "First Name",
+            "type": "string"
+          },
+          "last_name": {
+            "title": "Last Name",
+            "type": "string"
+          },
+          "customer_groups": {
+            "items": {
+              "$ref": "#/components/schemas/CustomerGroupOut"
+            },
+            "title": "Customer Groups",
+            "type": "array"
+          },
+          "primary_customer_group": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CustomerGroupOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "consents": {
+            "items": {
+              "$ref": "#/components/schemas/ConsentOut"
+            },
+            "title": "Consents",
+            "type": "array"
+          },
+          "phones": {
+            "items": {
+              "$ref": "#/components/schemas/PhoneOut"
+            },
+            "title": "Phones",
+            "type": "array"
+          },
+          "addresses": {
+            "items": {
+              "$ref": "#/components/schemas/AddressOut"
+            },
+            "title": "Addresses",
+            "type": "array"
+          },
+          "primary_pickup_point": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PickupPointOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "email",
+          "first_name",
+          "last_name",
+          "customer_groups",
+          "consents",
+          "phones",
+          "addresses"
+        ],
+        "title": "MeOut",
+        "type": "object"
+      },
+      "PhoneOut": {
+        "properties": {
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "is_primary": {
+            "title": "Is Primary",
+            "type": "boolean"
+          },
+          "is_verified": {
+            "title": "Is Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "phone",
+          "label",
+          "is_primary",
+          "is_verified"
+        ],
+        "title": "PhoneOut",
+        "type": "object"
+      },
+      "PickupPointOut": {
+        "properties": {
+          "shipping_method_code": {
+            "title": "Shipping Method Code",
+            "type": "string"
+          },
+          "pickup_point_id": {
+            "title": "Pickup Point Id",
+            "type": "string"
+          },
+          "pickup_point_name": {
+            "title": "Pickup Point Name",
+            "type": "string"
+          },
+          "pickup_point_raw": {
+            "additionalProperties": true,
+            "title": "Pickup Point Raw",
+            "type": "object"
+          },
+          "country_code": {
+            "title": "Country Code",
+            "type": "string"
+          },
+          "shipping_method_image_url": {
+            "default": "",
+            "title": "Shipping Method Image Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "shipping_method_code",
+          "pickup_point_id",
+          "pickup_point_name",
+          "pickup_point_raw",
+          "country_code"
+        ],
+        "title": "PickupPointOut",
+        "type": "object"
+      },
+      "MeUpdateIn": {
+        "properties": {
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          }
+        },
+        "title": "MeUpdateIn",
+        "type": "object"
+      },
+      "PickupPointSetIn": {
+        "properties": {
+          "shipping_method_code": {
+            "title": "Shipping Method Code",
+            "type": "string"
+          },
+          "pickup_point_id": {
+            "title": "Pickup Point Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "shipping_method_code",
+          "pickup_point_id"
+        ],
+        "title": "PickupPointSetIn",
+        "type": "object"
+      },
+      "AddressCreateIn": {
+        "properties": {
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
+          },
+          "full_name": {
+            "default": "",
+            "title": "Full Name",
+            "type": "string"
+          },
+          "company": {
+            "default": "",
+            "title": "Company",
+            "type": "string"
+          },
+          "company_reg_no": {
+            "default": "",
+            "title": "Company Reg No",
+            "type": "string"
+          },
+          "company_vat_no": {
+            "default": "",
+            "title": "Company Vat No",
+            "type": "string"
+          },
+          "line1": {
+            "title": "Line1",
+            "type": "string"
+          },
+          "city": {
+            "title": "City",
+            "type": "string"
+          },
+          "postal_code": {
+            "title": "Postal Code",
+            "type": "string"
+          },
+          "country_code": {
+            "default": "LT",
+            "title": "Country Code",
+            "type": "string"
+          },
+          "phone": {
+            "default": "",
+            "title": "Phone",
+            "type": "string"
+          },
+          "is_default_shipping": {
+            "default": false,
+            "title": "Is Default Shipping",
+            "type": "boolean"
+          },
+          "is_default_billing": {
+            "default": false,
+            "title": "Is Default Billing",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "line1",
+          "city",
+          "postal_code"
+        ],
+        "title": "AddressCreateIn",
+        "type": "object"
+      },
+      "AddressUpdateIn": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "company_reg_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Reg No"
+          },
+          "company_vat_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Vat No"
+          },
+          "line1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line1"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "country_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Code"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "is_default_shipping": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default Shipping"
+          },
+          "is_default_billing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default Billing"
+          }
+        },
+        "title": "AddressUpdateIn",
+        "type": "object"
+      },
+      "ConsentUpdateIn": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsentUpdateItemIn"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ConsentUpdateIn",
+        "type": "object"
+      },
+      "ConsentUpdateItemIn": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "accepted"
+        ],
+        "title": "ConsentUpdateItemIn",
+        "type": "object"
+      },
+      "ContentBlockOut": {
+        "properties": {
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "ContentBlockOut",
+        "type": "object"
+      },
+      "UiConfigOut": {
+        "properties": {
+          "blocks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ContentBlockOut"
+            },
+            "title": "Blocks",
+            "type": "array"
+          }
+        },
+        "title": "UiConfigOut",
+        "type": "object"
+      },
+      "Input": {
+        "properties": {
+          "page": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Size"
+          }
+        },
+        "title": "Input",
+        "type": "object"
+      },
+      "BrandRefOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name"
+        ],
+        "title": "BrandRefOut",
+        "type": "object"
+      },
+      "CategoryRefOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name"
+        ],
+        "title": "CategoryRefOut",
+        "type": "object"
+      },
+      "MoneyOut": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "net": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Net",
+            "type": "string"
+          },
+          "vat_rate": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Vat Rate",
+            "type": "string"
+          },
+          "vat": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Vat",
+            "type": "string"
+          },
+          "gross": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Gross",
+            "type": "string"
+          }
+        },
+        "required": [
+          "currency",
+          "net",
+          "vat_rate",
+          "vat",
+          "gross"
+        ],
+        "title": "MoneyOut",
+        "type": "object"
+      },
+      "PagedProductListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProductListOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "count"
+        ],
+        "title": "PagedProductListOut",
+        "type": "object"
+      },
+      "ProductImageOut": {
+        "properties": {
+          "avif_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avif Url"
+          },
+          "webp_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webp Url"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "alt_text": {
+            "title": "Alt Text",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "url",
+          "alt_text",
+          "sort_order"
+        ],
+        "title": "ProductImageOut",
+        "type": "object"
+      },
+      "ProductListOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "brand": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrandRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CategoryRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/ProductImageOut"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "price": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "compare_at_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "discount_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Percent"
+          }
+        },
+        "required": [
+          "id",
+          "sku",
+          "slug",
+          "name",
+          "is_active",
+          "images",
+          "price"
+        ],
+        "title": "ProductListOut",
+        "type": "object"
+      },
+      "CategoryOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "hero_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hero Image Url"
+          },
+          "menu_icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Icon Url"
+          },
+          "seo_title": {
+            "default": "",
+            "title": "Seo Title",
+            "type": "string"
+          },
+          "seo_description": {
+            "default": "",
+            "title": "Seo Description",
+            "type": "string"
+          },
+          "seo_keywords": {
+            "default": "",
+            "title": "Seo Keywords",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name"
+        ],
+        "title": "CategoryOut",
+        "type": "object"
+      },
+      "CategoryDetailOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "hero_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hero Image Url"
+          },
+          "menu_icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Menu Icon Url"
+          },
+          "seo_title": {
+            "default": "",
+            "title": "Seo Title",
+            "type": "string"
+          },
+          "seo_description": {
+            "default": "",
+            "title": "Seo Description",
+            "type": "string"
+          },
+          "seo_keywords": {
+            "default": "",
+            "title": "Seo Keywords",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name"
+        ],
+        "title": "CategoryDetailOut",
+        "type": "object"
+      },
+      "BrandOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name"
+        ],
+        "title": "BrandOut",
+        "type": "object"
+      },
+      "ProductGroupOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name"
+        ],
+        "title": "ProductGroupOut",
+        "type": "object"
+      },
+      "FeatureOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "values": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FeatureValueOut"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name"
+        ],
+        "title": "FeatureOut",
+        "type": "object"
+      },
+      "FeatureValueOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "value"
+        ],
+        "title": "FeatureValueOut",
+        "type": "object"
+      },
+      "OptionTypeOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "display_type": {
+            "default": "radio",
+            "title": "Display Type",
+            "type": "string"
+          },
+          "swatch_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Swatch Type"
+          },
+          "values": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OptionValueOut"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name"
+        ],
+        "title": "OptionTypeOut",
+        "type": "object"
+      },
+      "OptionValueOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "label"
+        ],
+        "title": "OptionValueOut",
+        "type": "object"
+      },
+      "CatalogFacetsOut": {
+        "properties": {
+          "categories": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CategoryOut"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "brands": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BrandOut"
+            },
+            "title": "Brands",
+            "type": "array"
+          },
+          "product_groups": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ProductGroupOut"
+            },
+            "title": "Product Groups",
+            "type": "array"
+          },
+          "features": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FeatureOut"
+            },
+            "title": "Features",
+            "type": "array"
+          },
+          "option_types": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OptionTypeOut"
+            },
+            "title": "Option Types",
+            "type": "array"
+          }
+        },
+        "title": "CatalogFacetsOut",
+        "type": "object"
+      },
+      "BackInStockSubscribeOut": {
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "BackInStockSubscribeOut",
+        "type": "object"
+      },
+      "BackInStockSubscribeIn": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "product_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Id"
+          },
+          "variant_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Id"
+          },
+          "channel": {
+            "default": "normal",
+            "title": "Channel",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "BackInStockSubscribeIn",
+        "type": "object"
+      },
+      "DeliveryWindowOut": {
+        "properties": {
+          "min_date": {
+            "title": "Min Date",
+            "type": "string"
+          },
+          "max_date": {
+            "title": "Max Date",
+            "type": "string"
+          },
+          "kind": {
+            "default": "estimated",
+            "title": "Kind",
+            "type": "string"
+          },
+          "rule_code": {
+            "default": "",
+            "title": "Rule Code",
+            "type": "string"
+          },
+          "source": {
+            "default": "",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "min_date",
+          "max_date"
+        ],
+        "title": "DeliveryWindowOut",
+        "type": "object"
+      },
+      "ProductDetailOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "seo_title": {
+            "default": "",
+            "title": "Seo Title",
+            "type": "string"
+          },
+          "seo_description": {
+            "default": "",
+            "title": "Seo Description",
+            "type": "string"
+          },
+          "seo_keywords": {
+            "default": "",
+            "title": "Seo Keywords",
+            "type": "string"
+          },
+          "brand": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrandRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CategoryRefOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/ProductImageOut"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "features": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ProductFeatureOut"
+            },
+            "title": "Features",
+            "type": "array"
+          },
+          "delivery_window": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryWindowOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "content_blocks": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ContentBlockOut"
+            },
+            "title": "Content Blocks",
+            "type": "array"
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/VariantOut"
+            },
+            "title": "Variants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "sku",
+          "slug",
+          "name",
+          "description",
+          "is_active",
+          "images",
+          "variants"
+        ],
+        "title": "ProductDetailOut",
+        "type": "object"
+      },
+      "ProductFeatureOut": {
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "integer"
+          },
+          "feature_code": {
+            "title": "Feature Code",
+            "type": "string"
+          },
+          "feature_name": {
+            "title": "Feature Name",
+            "type": "string"
+          },
+          "value_id": {
+            "title": "Value Id",
+            "type": "integer"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_code",
+          "feature_name",
+          "value_id",
+          "value"
+        ],
+        "title": "ProductFeatureOut",
+        "type": "object"
+      },
+      "VariantOptionOut": {
+        "properties": {
+          "option_type_code": {
+            "title": "Option Type Code",
+            "type": "string"
+          },
+          "option_type_name": {
+            "title": "Option Type Name",
+            "type": "string"
+          },
+          "option_value_code": {
+            "title": "Option Value Code",
+            "type": "string"
+          },
+          "option_value_label": {
+            "title": "Option Value Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "option_type_code",
+          "option_type_name",
+          "option_value_code",
+          "option_value_label"
+        ],
+        "title": "VariantOptionOut",
+        "type": "object"
+      },
+      "VariantOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "barcode": {
+            "title": "Barcode",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "stock_available": {
+            "title": "Stock Available",
+            "type": "integer"
+          },
+          "price": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "compare_at_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Id"
+          },
+          "offer_label": {
+            "default": "",
+            "title": "Offer Label",
+            "type": "string"
+          },
+          "condition_grade": {
+            "default": "",
+            "title": "Condition Grade",
+            "type": "string"
+          },
+          "offer_visibility": {
+            "default": "",
+            "title": "Offer Visibility",
+            "type": "string"
+          },
+          "discount_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Percent"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/VariantOptionOut"
+            },
+            "title": "Options",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "sku",
+          "barcode",
+          "name",
+          "is_active",
+          "stock_available",
+          "price",
+          "options"
+        ],
+        "title": "VariantOut",
+        "type": "object"
+      },
+      "QuoteOut": {
+        "properties": {
+          "variant_id": {
+            "title": "Variant Id",
+            "type": "integer"
+          },
+          "country_code": {
+            "title": "Country Code",
+            "type": "string"
+          },
+          "unit_net": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Unit Net",
+            "type": "string"
+          },
+          "vat_rate": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Vat Rate",
+            "type": "string"
+          },
+          "unit_vat": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Unit Vat",
+            "type": "string"
+          },
+          "unit_gross": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Unit Gross",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "total_net": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total Net",
+            "type": "string"
+          },
+          "total_vat": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total Vat",
+            "type": "string"
+          },
+          "total_gross": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total Gross",
+            "type": "string"
+          }
+        },
+        "required": [
+          "variant_id",
+          "country_code",
+          "unit_net",
+          "vat_rate",
+          "unit_vat",
+          "unit_gross",
+          "qty",
+          "total_net",
+          "total_vat",
+          "total_gross"
+        ],
+        "title": "QuoteOut",
+        "type": "object"
+      },
+      "ApplyPickupPointOut": {
+        "properties": {
+          "shipping_address_id": {
+            "title": "Shipping Address Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "shipping_address_id"
+        ],
+        "title": "ApplyPickupPointOut",
+        "type": "object"
+      },
+      "ApplyPickupPointIn": {
+        "properties": {
+          "shipping_method": {
+            "title": "Shipping Method",
+            "type": "string"
+          },
+          "pickup_point_id": {
+            "title": "Pickup Point Id",
+            "type": "string"
+          },
+          "set_as_primary_pickup_point": {
+            "default": true,
+            "title": "Set As Primary Pickup Point",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "shipping_method",
+          "pickup_point_id"
+        ],
+        "title": "ApplyPickupPointIn",
+        "type": "object"
+      },
+      "ConsentDefinitionOut": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "document_version": {
+            "title": "Document Version",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "url": {
+            "default": "",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "document_version"
+        ],
+        "title": "ConsentDefinitionOut",
+        "type": "object"
+      },
+      "PaymentMethodOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "provider": {
+            "default": "",
+            "title": "Provider",
+            "type": "string"
+          },
+          "instructions": {
+            "default": "",
+            "title": "Instructions",
+            "type": "string"
+          },
+          "logo_url": {
+            "default": "",
+            "title": "Logo Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "kind"
+        ],
+        "title": "PaymentMethodOut",
+        "type": "object"
+      },
+      "PaymentOptionOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "provider": {
+            "default": "",
+            "title": "Provider",
+            "type": "string"
+          },
+          "instructions": {
+            "default": "",
+            "title": "Instructions",
+            "type": "string"
+          },
+          "logo_url": {
+            "default": "",
+            "title": "Logo Url",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "default": {
+
+            },
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title"
+        ],
+        "title": "PaymentOptionOut",
+        "type": "object"
+      },
+      "CartItemOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "variant_id": {
+            "title": "Variant Id",
+            "type": "integer"
+          },
+          "offer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Id"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "stock_available": {
+            "title": "Stock Available",
+            "type": "integer"
+          },
+          "unit_price": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "compare_at_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "discount_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Percent"
+          },
+          "line_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "delivery_window": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryWindowOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "variant_id",
+          "sku",
+          "name",
+          "qty",
+          "stock_available",
+          "unit_price",
+          "line_total"
+        ],
+        "title": "CartItemOut",
+        "type": "object"
+      },
+      "CartOut": {
+        "properties": {
+          "currency": {
+            "default": "EUR",
+            "title": "Currency",
+            "type": "string"
+          },
+          "country_code": {
+            "title": "Country Code",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CartItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "items_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "delivery_window": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryWindowOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "country_code",
+          "items",
+          "items_total"
+        ],
+        "title": "CartOut",
+        "type": "object"
+      },
+      "CartItemAddIn": {
+        "properties": {
+          "variant_id": {
+            "title": "Variant Id",
+            "type": "integer"
+          },
+          "offer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Id"
+          },
+          "qty": {
+            "default": 1,
+            "title": "Qty",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "variant_id"
+        ],
+        "title": "CartItemAddIn",
+        "type": "object"
+      },
+      "CartItemUpdateIn": {
+        "properties": {
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "qty"
+        ],
+        "title": "CartItemUpdateIn",
+        "type": "object"
+      },
+      "ShippingMethodOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "carrier_code": {
+            "default": "",
+            "title": "Carrier Code",
+            "type": "string"
+          },
+          "requires_pickup_point": {
+            "default": false,
+            "title": "Requires Pickup Point",
+            "type": "boolean"
+          },
+          "image_url": {
+            "default": "",
+            "title": "Image Url",
+            "type": "string"
+          },
+          "pickup_points_url": {
+            "default": "",
+            "title": "Pickup Points Url",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/MoneyOut"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "price"
+        ],
+        "title": "ShippingMethodOut",
+        "type": "object"
+      },
+      "CheckoutPreviewOut": {
+        "properties": {
+          "currency": {
+            "default": "EUR",
+            "title": "Currency",
+            "type": "string"
+          },
+          "country_code": {
+            "title": "Country Code",
+            "type": "string"
+          },
+          "shipping_method": {
+            "title": "Shipping Method",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CartItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "delivery_window": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryWindowOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "discount_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "shipping_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "fees_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "fees": {
+            "items": {
+              "$ref": "#/components/schemas/FeeOut"
+            },
+            "title": "Fees",
+            "type": "array"
+          },
+          "order_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          }
+        },
+        "required": [
+          "country_code",
+          "shipping_method",
+          "items",
+          "items_total",
+          "discount_total",
+          "shipping_total",
+          "fees_total",
+          "fees",
+          "order_total"
+        ],
+        "title": "CheckoutPreviewOut",
+        "type": "object"
+      },
+      "FeeOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/MoneyOut"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "amount"
+        ],
+        "title": "FeeOut",
+        "type": "object"
+      },
+      "CheckoutPreviewIn": {
+        "properties": {
+          "shipping_address_id": {
+            "title": "Shipping Address Id",
+            "type": "integer"
+          },
+          "shipping_method": {
+            "default": "unisend_pickup",
+            "title": "Shipping Method",
+            "type": "string"
+          },
+          "pickup_point_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pickup Point Id"
+          },
+          "payment_method": {
+            "default": "klix",
+            "title": "Payment Method",
+            "type": "string"
+          },
+          "neopay_bank_bic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Neopay Bank Bic"
+          },
+          "channel": {
+            "default": "normal",
+            "title": "Channel",
+            "type": "string"
+          },
+          "coupon_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coupon Code"
+          }
+        },
+        "required": [
+          "shipping_address_id"
+        ],
+        "title": "CheckoutPreviewIn",
+        "type": "object"
+      },
+      "CheckoutConfirmOut": {
+        "properties": {
+          "order_id": {
+            "title": "Order Id",
+            "type": "integer"
+          },
+          "payment_provider": {
+            "title": "Payment Provider",
+            "type": "string"
+          },
+          "payment_status": {
+            "title": "Payment Status",
+            "type": "string"
+          },
+          "redirect_url": {
+            "default": "",
+            "title": "Redirect Url",
+            "type": "string"
+          },
+          "payment_instructions": {
+            "default": "",
+            "title": "Payment Instructions",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id",
+          "payment_provider",
+          "payment_status"
+        ],
+        "title": "CheckoutConfirmOut",
+        "type": "object"
+      },
+      "CheckoutConfirmIn": {
+        "properties": {
+          "shipping_address_id": {
+            "title": "Shipping Address Id",
+            "type": "integer"
+          },
+          "shipping_method": {
+            "default": "unisend_pickup",
+            "title": "Shipping Method",
+            "type": "string"
+          },
+          "pickup_point_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pickup Point Id"
+          },
+          "payment_method": {
+            "default": "klix",
+            "title": "Payment Method",
+            "type": "string"
+          },
+          "neopay_bank_bic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Neopay Bank Bic"
+          },
+          "channel": {
+            "default": "normal",
+            "title": "Channel",
+            "type": "string"
+          },
+          "coupon_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coupon Code"
+          },
+          "consents": {
+            "items": {
+              "$ref": "#/components/schemas/OrderConsentIn"
+            },
+            "title": "Consents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "shipping_address_id",
+          "consents"
+        ],
+        "title": "CheckoutConfirmIn",
+        "type": "object"
+      },
+      "OrderConsentIn": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "document_version": {
+            "title": "Document Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "document_version"
+        ],
+        "title": "OrderConsentIn",
+        "type": "object"
+      },
+      "OrderLineOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "sku": {
+            "title": "Sku",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "qty": {
+            "title": "Qty",
+            "type": "integer"
+          },
+          "unit_price": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "compare_at_unit_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "discount_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Percent"
+          },
+          "line_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "compare_at_line_total": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MoneyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delivery_window": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryWindowOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "sku",
+          "name",
+          "qty",
+          "unit_price",
+          "line_total"
+        ],
+        "title": "OrderLineOut",
+        "type": "object"
+      },
+      "OrderOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "status_label": {
+            "default": "",
+            "title": "Status Label",
+            "type": "string"
+          },
+          "delivery_status": {
+            "title": "Delivery Status",
+            "type": "string"
+          },
+          "delivery_status_label": {
+            "default": "",
+            "title": "Delivery Status Label",
+            "type": "string"
+          },
+          "fulfillment_mode": {
+            "default": "",
+            "title": "Fulfillment Mode",
+            "type": "string"
+          },
+          "fulfillment_mode_label": {
+            "default": "",
+            "title": "Fulfillment Mode Label",
+            "type": "string"
+          },
+          "supplier_reservation_status": {
+            "default": "",
+            "title": "Supplier Reservation Status",
+            "type": "string"
+          },
+          "supplier_reservation_status_label": {
+            "default": "",
+            "title": "Supplier Reservation Status Label",
+            "type": "string"
+          },
+          "supplier_reserved_at": {
+            "default": "",
+            "title": "Supplier Reserved At",
+            "type": "string"
+          },
+          "supplier_reference": {
+            "default": "",
+            "title": "Supplier Reference",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "country_code": {
+            "title": "Country Code",
+            "type": "string"
+          },
+          "shipping_method": {
+            "title": "Shipping Method",
+            "type": "string"
+          },
+          "carrier_code": {
+            "default": "",
+            "title": "Carrier Code",
+            "type": "string"
+          },
+          "tracking_number": {
+            "default": "",
+            "title": "Tracking Number",
+            "type": "string"
+          },
+          "payment_provider": {
+            "default": "",
+            "title": "Payment Provider",
+            "type": "string"
+          },
+          "payment_provider_label": {
+            "default": "",
+            "title": "Payment Provider Label",
+            "type": "string"
+          },
+          "payment_status": {
+            "default": "",
+            "title": "Payment Status",
+            "type": "string"
+          },
+          "payment_status_label": {
+            "default": "",
+            "title": "Payment Status Label",
+            "type": "string"
+          },
+          "payment_redirect_url": {
+            "default": "",
+            "title": "Payment Redirect Url",
+            "type": "string"
+          },
+          "payment_instructions": {
+            "default": "",
+            "title": "Payment Instructions",
+            "type": "string"
+          },
+          "neopay_bank_bic": {
+            "default": "",
+            "title": "Neopay Bank Bic",
+            "type": "string"
+          },
+          "neopay_bank_name": {
+            "default": "",
+            "title": "Neopay Bank Name",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderLineOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "delivery_window": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryWindowOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "items_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "discount_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "shipping_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "fees_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "fees": {
+            "items": {
+              "$ref": "#/components/schemas/FeeOut"
+            },
+            "title": "Fees",
+            "type": "array"
+          },
+          "order_total": {
+            "$ref": "#/components/schemas/MoneyOut"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "delivery_status",
+          "currency",
+          "country_code",
+          "shipping_method",
+          "items",
+          "items_total",
+          "discount_total",
+          "shipping_total",
+          "fees_total",
+          "fees",
+          "order_total",
+          "created_at"
+        ],
+        "title": "OrderOut",
+        "type": "object"
+      },
+      "NeopayCallbackIn": {
+        "properties": {
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "NeopayCallbackIn",
+        "type": "object"
+      },
+      "NeopayBankOut": {
+        "properties": {
+          "country_code": {
+            "title": "Country Code",
+            "type": "string"
+          },
+          "bic": {
+            "title": "Bic",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "service_types": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Service Types",
+            "type": "array"
+          },
+          "logo_url": {
+            "default": "",
+            "title": "Logo Url",
+            "type": "string"
+          },
+          "is_operating": {
+            "default": true,
+            "title": "Is Operating",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "country_code",
+          "bic",
+          "name"
+        ],
+        "title": "NeopayBankOut",
+        "type": "object"
+      },
+      "NeopayCountryOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "currency": {
+            "default": "",
+            "title": "Currency",
+            "type": "string"
+          },
+          "default_language": {
+            "default": "",
+            "title": "Default Language",
+            "type": "string"
+          },
+          "languages": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Languages",
+            "type": "array"
+          },
+          "rules": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {
+
+            },
+            "title": "Rules",
+            "type": "object"
+          },
+          "aspsps": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NeopayBankOut"
+            },
+            "title": "Aspsps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "NeopayCountryOut",
+        "type": "object"
+      },
+      "LockerOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "lockerType": {
+            "default": "",
+            "title": "Lockertype",
+            "type": "string"
+          },
+          "countryCode": {
+            "default": "",
+            "title": "Countrycode",
+            "type": "string"
+          },
+          "city": {
+            "default": "",
+            "title": "City",
+            "type": "string"
+          },
+          "street": {
+            "default": "",
+            "title": "Street",
+            "type": "string"
+          },
+          "postalCode": {
+            "default": "",
+            "title": "Postalcode",
+            "type": "string"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "LockerOut",
+        "type": "object"
+      },
+      "TerminalOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "countryCode": {
+            "default": "",
+            "title": "Countrycode",
+            "type": "string"
+          },
+          "city": {
+            "default": "",
+            "title": "City",
+            "type": "string"
+          },
+          "locality": {
+            "default": "",
+            "title": "Locality",
+            "type": "string"
+          },
+          "street": {
+            "default": "",
+            "title": "Street",
+            "type": "string"
+          },
+          "postalCode": {
+            "default": "",
+            "title": "Postalcode",
+            "type": "string"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "TerminalOut",
+        "type": "object"
+      },
+      "NavigationItemOut": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
+          },
+          "href": {
+            "default": "",
+            "title": "Href",
+            "type": "string"
+          },
+          "link_type": {
+            "title": "Link Type",
+            "type": "string"
+          },
+          "icon": {
+            "default": "",
+            "title": "Icon",
+            "type": "string"
+          },
+          "image_src": {
+            "default": "",
+            "title": "Image Src",
+            "type": "string"
+          },
+          "badge": {
+            "default": "",
+            "title": "Badge",
+            "type": "string"
+          },
+          "badge_kind": {
+            "default": "",
+            "title": "Badge Kind",
+            "type": "string"
+          },
+          "open_in_new_tab": {
+            "default": false,
+            "title": "Open In New Tab",
+            "type": "boolean"
+          },
+          "children": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NavigationItemOut"
+            },
+            "title": "Children",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "link_type"
+        ],
+        "title": "NavigationItemOut",
+        "type": "object"
+      },
+      "NavigationOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NavigationItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "NavigationOut",
+        "type": "object"
+      },
+      "CmsPageOut": {
+        "properties": {
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "seo_title": {
+            "default": "",
+            "title": "Seo Title",
+            "type": "string"
+          },
+          "seo_description": {
+            "default": "",
+            "title": "Seo Description",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "content_blocks": {
+            "items": {
+              "$ref": "#/components/schemas/ContentBlockOut"
+            },
+            "title": "Content Blocks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "slug",
+          "updated_at",
+          "content_blocks"
+        ],
+        "title": "CmsPageOut",
+        "type": "object"
+      },
+      "ShippingCountryOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "ShippingCountryOut",
+        "type": "object"
+      },
+      "ProductRecommendationsOut": {
+        "properties": {
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/RecommendationBlockOut"
+            },
+            "title": "Blocks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "title": "ProductRecommendationsOut",
+        "type": "object"
+      },
+      "RecommendationBlockOut": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProductListOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "items"
+        ],
+        "title": "RecommendationBlockOut",
+        "type": "object"
+      },
+      "HomeOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "seo_title": {
+            "default": "",
+            "title": "Seo Title",
+            "type": "string"
+          },
+          "seo_description": {
+            "default": "",
+            "title": "Seo Description",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/HomeSectionOut"
+            },
+            "title": "Sections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "updated_at",
+          "sections"
+        ],
+        "title": "HomeOut",
+        "type": "object"
+      },
+      "HomeSectionOut": {
+        "properties": {
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "HomeSectionOut",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "JWTAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "servers": []
+}

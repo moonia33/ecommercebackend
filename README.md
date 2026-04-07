@@ -145,15 +145,20 @@ Default kalba yra `lt` (konfigūruojama per `.env` `LANGUAGE_CODE`).
 
 Kalba parenkama vieningu principu per visą API:
 
-- Jei yra `?lang=...` query param (konfigūruojama per `LANGUAGE_QUERY_PARAM`, default `lang`) – jis turi prioritetą.
-- Jei nėra `?lang=...`, kalba bandoma nustatyti iš `Accept-Language` headerio.
-- Jei nei vienas netinka – naudojamas `LANGUAGE_CODE`.
+- Jei kvietimas eina per `/{API_BASE_PATH}/v1/{language_code}/...` prefiksą, `language_code` iš kelio turi prioritetą.
+- Kitu atveju, jei yra `?lang=...` query param (konfigūruojama per `LANGUAGE_QUERY_PARAM`, default `lang`) – jis turi prioritetą.
+- Kai kuriems endpointams (pvz. `catalog`) naudojamas query param `language_code` (backward-compatible su `?lang`).
+- Jei nėra query param, kalba bandoma nustatyti iš `Accept-Language` headerio.
+- Jei nei vienas netinka, bandoma `request.site.default_language_code` / `request.site.config.default_language_code`.
+- Jei ir tada nieko nėra – naudojamas `LANGUAGE_CODE`.
 
 Single-language mode:
 
 - Jei `LANGUAGES` turi tik vieną kalbą, `Accept-Language` ir `?lang` praktiškai nieko nekeičia (visada bus naudojamas default).
 
 Pastaba: `?lang` yra skirtas patogiam testavimui/preview, rekomenduojamas standartinis kelias – `Accept-Language`.
+
+Pilnas FE kontraktas katalogui (localized slug, endpointai, fallback) aprašytas `docs/i18n_catalog.md`.
 
 ## Catalog (MVP)
 

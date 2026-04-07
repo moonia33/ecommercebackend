@@ -5,7 +5,7 @@ from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
 
-from api.i18n import get_request_language_code
+from api.i18n import get_request_country_code, get_request_language_code, normalize_country_code
 
 from catalog.home_services import get_products_by_slugs_for_grid, get_products_for_grid
 from catalog.models import Category
@@ -69,10 +69,11 @@ def _pick_best_translation(*, qs, language_code: str | None):
 @router.get("/home", response=HomeOut)
 def home(
     request,
-    country_code: str = "LT",
+    country_code: str | None = None,
     channel: str = "normal",
     language_code: str | None = None,
 ):
+    country_code = normalize_country_code(country_code) or get_request_country_code(request)
     if language_code is None:
         language_code = get_request_language_code(request)
 

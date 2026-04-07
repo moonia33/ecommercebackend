@@ -167,6 +167,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "corsheaders",
+    "mptt",
     "api",
     "accounts",
     "notifications",
@@ -253,24 +254,38 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-LANGUAGE_CODE = (env("LANGUAGE_CODE", default="lt") or "lt").split("-")[0].strip().lower()
-LANGUAGES = [
-    ("lt", "Lithuanian"),
-]
-SUPPORTED_LANGUAGE_CODES = [c for c, _name in LANGUAGES]
-LANGUAGE_QUERY_PARAM = env("LANGUAGE_QUERY_PARAM", default="lang")
-TIME_ZONE = env("TIME_ZONE", default="UTC")
+LANGUAGE_CODE = env("LANGUAGE_CODE", default="lt")
+TIME_ZONE = env("TIME_ZONE", default="Europe/Vilnius")
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+DEFAULT_COUNTRY_CODE = env("DEFAULT_COUNTRY_CODE", default="LT")
 
+LANGUAGES = [
+    ("lt", "Lithuanian"),
+    ("lv", "Latvian"),
+    ("et", "Estonian"),
+    ("pl", "Polish"),
+    ("en", "English"),
+]
+
+_supported_language_codes_env = env("SUPPORTED_LANGUAGE_CODES", default="")
+SUPPORTED_LANGUAGE_CODES = [
+    c.strip().lower()
+    for c in (_supported_language_codes_env or "").split(",")
+    if c.strip()
+]
+
+if not SUPPORTED_LANGUAGE_CODES:
+    SUPPORTED_LANGUAGE_CODES = None
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Media uploads (product images, etc.)
 MEDIA_URL = env("MEDIA_URL", default="/media/")
 MEDIA_ROOT = BASE_DIR / "media"
+
+STATIC_URL = env("STATIC_URL", default="/static/")
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 THUMB_SIZE = env.int("THUMB_SIZE", default=150)
 MEDIUM_SIZE = env.int("MEDIUM_SIZE", default=300)

@@ -79,12 +79,33 @@ Minimalus MVP laukai:
 - Email:
   - `default_from_email`
   - `smtp_host`, `smtp_port`, `smtp_user`, `smtp_password`, `smtp_use_tls`
+- Locale:
+  - `default_language_code`
+  - `default_country_code` (pvz. `LT`, `LV`, `EE`, `PL`)
 - Checkout/legal:
   - `terms_url`, `privacy_url`, `terms_version`, `privacy_version`
+
+Pastaba: `terms_url` / `privacy_url` yra laikomi kaip tekstas ir gali būti:
+
+- pilnas URL (pvz. `https://example.com/terms`)
+- santykinis kelias (pvz. `/terms`)
+
+FE turi rodyti šias reikšmes „as-is“ (jei prasideda `/`, tai yra kelias tame pačiame domene).
 - Payments:
   - `neopay_project_id`, `neopay_project_key`
   - `neopay_client_redirect_url`
   - `neopay_enable_bank_preselect`
+
+### PVM (VAT) parinkimas per site
+
+PVM tarifas yra parenkamas per `country_code` + `product.tax_class` (žr. `pricing.services.get_vat_rate`).
+
+`country_code` resolvinimas (kai FE nepaduoda):
+
+1) `?country_code=...` query param
+2) `request.site.default_country_code`
+3) `request.site.config.default_country_code`
+4) `settings.DEFAULT_COUNTRY_CODE` (default `LT`)
 
 Integracijos taškai:
 

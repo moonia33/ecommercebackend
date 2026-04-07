@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests
+from requests import RequestException
 from django.conf import settings
 
 
@@ -39,18 +40,24 @@ class MeiliClient:
     def health(self) -> dict[str, Any]:
         if not self.cfg.host:
             raise MeiliError("MEILI_HOST is not configured")
-        r = requests.get(f"{self.cfg.host}/health", headers=self._headers(), timeout=10)
+        try:
+            r = requests.get(f"{self.cfg.host}/health", headers=self._headers(), timeout=10)
+        except RequestException as e:
+            raise MeiliError(f"Meili health request failed: {e}") from e
         if r.status_code >= 400:
             raise MeiliError(f"Meili health failed: {r.status_code} {r.text[:300]}")
         return r.json()
 
     def create_index(self, *, uid: str, primary_key: str = "id") -> dict[str, Any]:
-        r = requests.post(
-            f"{self.cfg.host}/indexes",
-            json={"uid": uid, "primaryKey": primary_key},
-            headers=self._headers(),
-            timeout=30,
-        )
+        try:
+            r = requests.post(
+                f"{self.cfg.host}/indexes",
+                json={"uid": uid, "primaryKey": primary_key},
+                headers=self._headers(),
+                timeout=30,
+            )
+        except RequestException as e:
+            raise MeiliError(f"Meili create index request failed: {e}") from e
         if r.status_code in {200, 201, 202}:
             return r.json()
         if r.status_code == 409:
@@ -58,33 +65,42 @@ class MeiliClient:
         raise MeiliError(f"Meili create index failed: {r.status_code} {r.text[:300]}")
 
     def update_settings(self, *, uid: str, settings_payload: dict[str, Any]) -> dict[str, Any]:
-        r = requests.patch(
-            f"{self.cfg.host}/indexes/{uid}/settings",
-            json=settings_payload,
-            headers=self._headers(),
-            timeout=60,
-        )
+        try:
+            r = requests.patch(
+                f"{self.cfg.host}/indexes/{uid}/settings",
+                json=settings_payload,
+                headers=self._headers(),
+                timeout=60,
+            )
+        except RequestException as e:
+            raise MeiliError(f"Meili update settings request failed: {e}") from e
         if r.status_code >= 400:
             raise MeiliError(f"Meili update settings failed: {r.status_code} {r.text[:300]}")
         return r.json()
 
     def add_documents(self, *, uid: str, documents: list[dict[str, Any]]) -> dict[str, Any]:
-        r = requests.post(
-            f"{self.cfg.host}/indexes/{uid}/documents",
-            json=documents,
-            headers=self._headers(),
-            timeout=120,
-        )
+        try:
+            r = requests.post(
+                f"{self.cfg.host}/indexes/{uid}/documents",
+                json=documents,
+                headers=self._headers(),
+                timeout=120,
+            )
+        except RequestException as e:
+            raise MeiliError(f"Meili add documents request failed: {e}") from e
         if r.status_code >= 400:
             raise MeiliError(f"Meili add documents failed: {r.status_code} {r.text[:300]}")
         return r.json()
 
     def delete_all_documents(self, *, uid: str) -> dict[str, Any]:
-        r = requests.delete(
-            f"{self.cfg.host}/indexes/{uid}/documents",
-            headers=self._headers(),
-            timeout=60,
-        )
+        try:
+            r = requests.delete(
+                f"{self.cfg.host}/indexes/{uid}/documents",
+                headers=self._headers(),
+                timeout=60,
+            )
+        except RequestException as e:
+            raise MeiliError(f"Meili delete documents request failed: {e}") from e
         if r.status_code >= 400:
             raise MeiliError(f"Meili delete documents failed: {r.status_code} {r.text[:300]}")
         return r.json()
@@ -95,11 +111,14 @@ class MeiliClient:
         deadline = time.time() + max(1, int(timeout_seconds))
         last = None
         while time.time() < deadline:
-            r = requests.get(
-                f"{self.cfg.host}/tasks/{int(task_uid)}",
-                headers=self._headers(),
-                timeout=20,
-            )
+            try:
+                r = requests.get(
+                    f"{self.cfg.host}/tasks/{int(task_uid)}",
+                    headers=self._headers(),
+                    timeout=20,
+                )
+            except RequestException as e:
+                raise MeiliError(f"Meili task status request failed: {e}") from e
             if r.status_code >= 400:
                 raise MeiliError(f"Meili task status failed: {r.status_code} {r.text[:300]}")
             last = r.json()
@@ -110,12 +129,15 @@ class MeiliClient:
         return last or {}
 
     def search(self, *, uid: str, payload: dict[str, Any]) -> dict[str, Any]:
-        r = requests.post(
-            f"{self.cfg.host}/indexes/{uid}/search",
-            json=payload,
-            headers=self._headers(),
-            timeout=30,
-        )
+        try:
+            r = requests.post(
+                f"{self.cfg.host}/indexes/{uid}/search",
+                json=payload,
+                headers=self._headers(),
+                timeout=30,
+            )
+        except RequestException as e:
+            raise MeiliError(f"Meili search request failed: {e}") from e
         if r.status_code >= 400:
             raise MeiliError(f"Meili search failed: {r.status_code} {r.text[:300]}")
         return r.json()

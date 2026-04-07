@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django import forms
 from django.contrib import admin
 from django.contrib.admin.helpers import ActionForm
@@ -9,6 +10,7 @@ from django.db.models import F, IntegerField, Sum, Value
 from django.db.models.functions import Coalesce
 from django.forms.models import BaseInlineFormSet
 
+from mptt.admin import DraggableMPTTAdmin
 
 from api.models import Site
 
@@ -16,17 +18,25 @@ from .widgets import TableEditorWidget, ToastUIMarkdownWidget
 
 from .models import (
     Brand,
+    BrandTranslation,
     Category,
+    CategoryTranslation,
     ContentBlock,
     ContentBlockTranslation,
     ContentRule,
     Feature,
+    FeatureTranslation,
     FeatureValue,
+    FeatureValueTranslation,
     OptionType,
+    OptionTypeTranslation,
     OptionValue,
+    OptionValueTranslation,
     Product,
+    ProductTranslation,
     ProductFeatureValue,
     ProductGroup,
+    ProductGroupTranslation,
     ProductImage,
     ProductOptionType,
     TaxClass,
@@ -45,9 +55,23 @@ from .models import (
 )
 
 
+def _supported_language_code_choices():
+    raw = getattr(settings, "SUPPORTED_LANGUAGE_CODES", None)
+    if raw:
+        out = []
+        for c in raw:
+            c = (c or "").strip().lower()
+            if not c:
+                continue
+            out.append((c, c.upper()))
+        return out
+    return [(c, name) for c, name in getattr(settings, "LANGUAGES", [])]
+
+
 @admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "parent", "is_active")
+class CategoryAdmin(DraggableMPTTAdmin):
+    mptt_indent_field = "name"
+    list_display = ("tree_actions", "indented_title", "slug", "is_active")
     list_filter = ("is_active",)
     search_fields = ("name", "slug")
     prepopulated_fields = {"slug": ("name",)}
@@ -115,6 +139,25 @@ class CategoryAdmin(admin.ModelAdmin):
 
     form = Form
 
+    class TranslationInline(admin.TabularInline):
+        model = CategoryTranslation
+        extra = 0
+
+        class Form(forms.ModelForm):
+            language_code = forms.ChoiceField(choices=_supported_language_code_choices())
+            description = forms.CharField(
+                required=False,
+                widget=ToastUIMarkdownWidget(mode="wysiwyg", height="360px"),
+            )
+
+            class Meta:
+                model = CategoryTranslation
+                fields = "__all__"
+
+        form = Form
+
+    inlines = (TranslationInline,)
+
     fieldsets = (
         (None, {"fields": ("name", "slug", "parent", "is_active")}),
         ("Turinys", {"fields": ("description",)}),
@@ -170,6 +213,25 @@ class BrandAdmin(admin.ModelAdmin):
     list_display = ("name", "slug", "is_active")
     list_filter = ("is_active",)
     search_fields = ("name", "slug")
+
+    class TranslationInline(admin.TabularInline):
+        model = BrandTranslation
+        extra = 0
+
+        class Form(forms.ModelForm):
+            language_code = forms.ChoiceField(choices=_supported_language_code_choices())
+            description = forms.CharField(
+                required=False,
+                widget=ToastUIMarkdownWidget(mode="wysiwyg", height="320px"),
+            )
+
+            class Meta:
+                model = BrandTranslation
+                fields = "__all__"
+
+        form = Form
+
+    inlines = (TranslationInline,)
     prepopulated_fields = {"slug": ("name",)}
 
 
@@ -446,7 +508,38 @@ class ProductAdmin(admin.ModelAdmin):
     search_fields = ("sku", "name", "slug")
     prepopulated_fields = {"slug": ("name",)}
     autocomplete_fields = ("tax_class",)
+
+    class TranslationInline(admin.StackedInline):
+        model = ProductTranslation
+        extra = 0
+        classes = ("collapse",)
+        show_change_link = True
+        fields = (
+            "language_code",
+            "name",
+            "slug",
+            "description",
+            "seo_title",
+            "seo_description",
+            "seo_keywords",
+        )
+        prepopulated_fields = {"slug": ("name",)}
+
+        class Form(forms.ModelForm):
+            language_code = forms.ChoiceField(choices=_supported_language_code_choices())
+            description = forms.CharField(
+                required=False,
+                widget=ToastUIMarkdownWidget(mode="wysiwyg", height="360px"),
+            )
+
+            class Meta:
+                model = ProductTranslation
+                fields = "__all__"
+
+        form = Form
+
     inlines = (
+        TranslationInline,
         ProductImageInline,
         ProductFeatureValueInline,
         ProductOptionTypeInline,
@@ -500,6 +593,34 @@ class FeatureValueInline(admin.TabularInline):
     extra = 0
 
 
+class FeatureTranslationInline(admin.TabularInline):
+    model = FeatureTranslation
+    extra = 0
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=_supported_language_code_choices())
+
+        class Meta:
+            model = FeatureTranslation
+            fields = "__all__"
+
+    form = Form
+
+
+class FeatureValueTranslationInline(admin.TabularInline):
+    model = FeatureValueTranslation
+    extra = 0
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=_supported_language_code_choices())
+
+        class Meta:
+            model = FeatureValueTranslation
+            fields = "__all__"
+
+    form = Form
+
+
 @admin.register(Feature)
 class FeatureAdmin(admin.ModelAdmin):
     list_display = ("code", "name", "is_filterable",
@@ -507,12 +628,50 @@ class FeatureAdmin(admin.ModelAdmin):
     list_filter = ("is_filterable", "allows_multiple", "is_active")
     search_fields = ("code", "name")
     ordering = ("sort_order", "code")
-    inlines = (FeatureValueInline,)
+    inlines = (FeatureTranslationInline, FeatureValueInline)
+
+
+@admin.register(FeatureValue)
+class FeatureValueAdmin(admin.ModelAdmin):
+    list_display = ("feature", "value", "sort_order", "is_active")
+    list_filter = ("feature", "is_active")
+    search_fields = ("feature__code", "feature__name", "value")
+    ordering = ("feature__code", "sort_order", "value")
+    autocomplete_fields = ("feature",)
+    inlines = (FeatureValueTranslationInline,)
 
 
 class OptionValueInline(admin.TabularInline):
     model = OptionValue
     extra = 0
+
+
+class OptionTypeTranslationInline(admin.TabularInline):
+    model = OptionTypeTranslation
+    extra = 0
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=_supported_language_code_choices())
+
+        class Meta:
+            model = OptionTypeTranslation
+            fields = "__all__"
+
+    form = Form
+
+
+class OptionValueTranslationInline(admin.TabularInline):
+    model = OptionValueTranslation
+    extra = 0
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=_supported_language_code_choices())
+
+        class Meta:
+            model = OptionValueTranslation
+            fields = "__all__"
+
+    form = Form
 
 
 @admin.register(OptionType)
@@ -521,7 +680,17 @@ class OptionTypeAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("code", "name")
     ordering = ("sort_order", "code")
-    inlines = (OptionValueInline,)
+    inlines = (OptionTypeTranslationInline, OptionValueInline)
+
+
+@admin.register(OptionValue)
+class OptionValueAdmin(admin.ModelAdmin):
+    list_display = ("option_type", "code", "label", "sort_order", "is_active")
+    list_filter = ("option_type", "is_active")
+    search_fields = ("option_type__code", "option_type__name", "code", "label")
+    ordering = ("option_type__code", "sort_order", "label")
+    autocomplete_fields = ("option_type",)
+    inlines = (OptionValueTranslationInline,)
 
 
 class VariantOptionValueInline(admin.TabularInline):
@@ -654,6 +823,21 @@ class ProductGroupAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("code", "name")
 
+    class TranslationInline(admin.TabularInline):
+        model = ProductGroupTranslation
+        extra = 0
+
+        class Form(forms.ModelForm):
+            language_code = forms.ChoiceField(choices=_supported_language_code_choices())
+
+            class Meta:
+                model = ProductGroupTranslation
+                fields = "__all__"
+
+        form = Form
+
+    inlines = (TranslationInline,)
+
 
 @admin.register(BackInStockSubscription)
 class BackInStockSubscriptionAdmin(admin.ModelAdmin):
@@ -674,6 +858,7 @@ class ContentBlockTranslationInline(admin.StackedInline):
     )
 
     class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=_supported_language_code_choices())
         markdown = forms.CharField(
             required=False,
             widget=ToastUIMarkdownWidget(mode="wysiwyg", height="360px"),
@@ -735,6 +920,7 @@ class ContentBlockTranslationAdmin(admin.ModelAdmin):
     autocomplete_fields = ("content_block",)
 
     class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=_supported_language_code_choices())
         markdown = forms.CharField(
             required=False,
             widget=ToastUIMarkdownWidget(mode="wysiwyg", height="520px"),

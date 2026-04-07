@@ -23,6 +23,8 @@ class SiteConfigAdmin(admin.ModelAdmin):
     list_display = (
         "site",
         "default_from_email",
+        "default_language_code",
+        "default_country_code",
         "smtp_host",
         "smtp_port",
         "smtp_use_tls",
@@ -35,6 +37,7 @@ class SiteConfigAdmin(admin.ModelAdmin):
 
     fieldsets = (
         (None, {"fields": ("site",)}),
+        ("Locale", {"fields": ("default_language_code", "default_country_code")}),
         (
             "Email",
             {
