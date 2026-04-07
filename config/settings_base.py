@@ -55,9 +55,6 @@ env = environ.Env(
     LISTING_IMAGE_SIZE=(int, 300),
     LISTING_TRIM_TOLERANCE=(int, 18),
 
-    ZB_PRODUCTS_FEED_URL=(str, ""),
-    ZB_STOCKS_FEED_URL=(str, ""),
-
     # Shipping (MVP)
     LPEXPRESS_SHIPPING_NET_EUR=(str, "0.00"),
     DEFAULT_SHIPPING_TAX_CLASS_CODE=(str, "standard"),
@@ -161,7 +158,6 @@ INSTALLED_APPS = [
     "catalog.apps.CatalogConfig",
     "cms.apps.CmsConfig",
     "homebuilder.apps.HomebuilderConfig",
-    "zaliuojibanga",
     "shipping",
     "payments",
     "checkout",
@@ -257,9 +253,6 @@ LARGE_SIZE = env.int("LARGE_SIZE", default=600)
 
 LISTING_IMAGE_SIZE = env.int("LISTING_IMAGE_SIZE", default=MEDIUM_SIZE)
 LISTING_TRIM_TOLERANCE = env.int("LISTING_TRIM_TOLERANCE", default=18)
-
-ZB_PRODUCTS_FEED_URL = env("ZB_PRODUCTS_FEED_URL", default="")
-ZB_STOCKS_FEED_URL = env("ZB_STOCKS_FEED_URL", default="")
 
 LPEXPRESS_SHIPPING_NET_EUR = env("LPEXPRESS_SHIPPING_NET_EUR", default="0.00")
 DEFAULT_SHIPPING_TAX_CLASS_CODE = env(

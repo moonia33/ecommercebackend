@@ -1,6 +1,6 @@
 # Djengo ecommerce backend
 
-Django + Django Ninja e‑commerce backend API su PostgreSQL. Šiuo metu įgyvendinta: auth (email OTP + JWT), katalogas (categories/brands/products), kainodara su PVM (VAT), supplier importai (Žalioji banga), ir MVP checkout (cart → checkout → orders) su vienu pristatymo metodu.
+Django + Django Ninja e‑commerce backend API su PostgreSQL. Šiuo metu įgyvendinta: auth (email OTP + JWT), katalogas (categories/brands/products), kainodara su PVM (VAT), ir MVP checkout (cart → checkout → orders) su vienu pristatymo metodu.
 
 ## Statusas
 
@@ -782,18 +782,6 @@ Admin'e (debug): `Checkout -> Carts / Orders / Payment intents`.
   - jei orderis atšaukiamas (`CANCELLED`) – rezervacija atlaisvinama.
 - Admin:
   - order detalėje matosi `OrderDiscount` (coupon/promo) breakdown per inline.
-
-## Supplier importai (Žalioji banga)
-
-### Katalogas (products)
-
-- Komanda: `manage.py import_zb_catalog [--dry-run] [--limit N]`
-- `.env`: `ZB_PRODUCTS_FEED_URL`
-
-### Likučiai (stocks)
-
-- Komanda: `manage.py update_zb_stock [--dry-run] [--limit N]`
-- `.env`: `ZB_STOCKS_FEED_URL`
 
 ## Toliau
 
