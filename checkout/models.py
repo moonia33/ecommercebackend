@@ -491,12 +491,28 @@ class OrderLine(models.Model):
                 self.sku = self.variant.sku
             if not self.name:
                 self.name = getattr(self.variant.product, "name", "")
+            if self.unit_net in (None, ""):
+                self.unit_net = getattr(self.variant, "price_eur", Decimal("0"))
 
-            if self.vat_rate is None and getattr(self.variant.product, "tax_class", None):
-                self.vat_rate = get_vat_rate(
-                    country_code=self.order.country_code,
-                    tax_class=self.variant.product.tax_class,
-                )
+            order_country_code = ""
+            if self.order_id:
+                try:
+                    order_country_code = (self.order.country_code or "").strip().upper()
+                except Order.DoesNotExist:
+                    order_country_code = ""
+
+            if (
+                self.vat_rate is None
+                and order_country_code
+                and getattr(self.variant.product, "tax_class", None)
+            ):
+                try:
+                    self.vat_rate = get_vat_rate(
+                        country_code=order_country_code,
+                        tax_class=self.variant.product.tax_class,
+                    )
+                except Exception:
+                    self.vat_rate = Decimal("0")
 
         if self.vat_rate is None:
             self.vat_rate = Decimal("0")

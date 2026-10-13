@@ -41,6 +41,7 @@ class OrderLineInline(admin.TabularInline):
     class Form(forms.ModelForm):
         sku = forms.CharField(required=False)
         name = forms.CharField(required=False)
+        unit_net = forms.DecimalField(required=False)
         vat_rate = forms.DecimalField(required=False)
 
         class Meta:
@@ -55,13 +56,29 @@ class OrderLineInline(admin.TabularInline):
                     cleaned["sku"] = variant.sku
                 if not cleaned.get("name"):
                     cleaned["name"] = getattr(variant.product, "name", "")
-                if cleaned.get("vat_rate") is None and getattr(variant.product, "tax_class", None):
+                if cleaned.get("unit_net") is None:
+                    cleaned["unit_net"] = getattr(variant, "price_eur", None)
+                order_country_code = ""
+                if getattr(self.instance, "order_id", None):
+                    try:
+                        order_country_code = (self.instance.order.country_code or "").strip().upper()
+                    except Order.DoesNotExist:
+                        order_country_code = ""
+
+                if (
+                    cleaned.get("vat_rate") is None
+                    and order_country_code
+                    and getattr(variant.product, "tax_class", None)
+                ):
                     from pricing.services import get_vat_rate
 
-                    cleaned["vat_rate"] = get_vat_rate(
-                        country_code=self.instance.order.country_code,
-                        tax_class=variant.product.tax_class,
-                    )
+                    try:
+                        cleaned["vat_rate"] = get_vat_rate(
+                            country_code=order_country_code,
+                            tax_class=variant.product.tax_class,
+                        )
+                    except Exception:
+                        cleaned["vat_rate"] = 0
             if cleaned.get("vat_rate") is None:
                 cleaned["vat_rate"] = 0
             return cleaned

@@ -4,7 +4,7 @@ from django.test import Client, RequestFactory, TestCase, override_settings
 from accounts.jwt_utils import issue_access_token
 from api.i18n import get_request_language_code, translation_fallback_chain
 from api.models import Shop, ShopLanguage
-from checkout.models import Cart, OpsJob, Order, PaymentIntent
+from checkout.models import Cart, OpsJob, Order, OrderLine, PaymentIntent
 from catalog.models import Brand, Category, InventoryItem, Product, TaxClass, Variant, Warehouse
 from cms.models import CmsPage, CmsPageTranslation
 from homebuilder.models import HomePage, HomePageTranslation
@@ -330,3 +330,40 @@ class OpsOrderSearchTests(TestCase):
         self.assertEqual(upd_price.status_code, 200)
         self.variant.refresh_from_db()
         self.assertEqual(str(self.variant.price_eur), "12.50")
+
+    def test_order_line_without_order_raises_integrity_not_related_object_error(self):
+        line = OrderLine(
+            variant=self.variant,
+            sku="",
+            name="",
+            unit_net="10.00",
+            vat_rate=None,
+            unit_vat="0.00",
+            unit_gross="0.00",
+            qty=1,
+            total_net="0.00",
+            total_vat="0.00",
+            total_gross="0.00",
+        )
+        with self.assertRaises(IntegrityError):
+            line.save()
+
+    def test_order_line_autofills_unit_net_from_variant_price(self):
+        line = OrderLine(
+            order=self.order,
+            variant=self.variant,
+            sku="",
+            name="",
+            unit_net=None,
+            vat_rate=None,
+            unit_vat="0.00",
+            unit_gross="0.00",
+            qty=1,
+            total_net="0.00",
+            total_vat="0.00",
+            total_gross="0.00",
+        )
+        line.save()
+        self.assertEqual(str(line.unit_net), str(self.variant.price_eur))
+        self.assertEqual(line.sku, self.variant.sku)
+        self.assertEqual(line.name, self.variant.product.name)

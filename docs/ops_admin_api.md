@@ -24,16 +24,19 @@ Base path: `/api/v1/ops`
 ## GET `/api/v1/ops/orders`
 
 Puslapiuotas užsakymų sąrašas su kritine paieška pagal:
+
 - prekę (`product_q`),
 - tiekėją/sandėlį (`supplier_code`),
 - gamintoją (`manufacturer_q`),
 - bei jų AND kombinacijomis.
 
 ### Query
+
 - baziniai: `status`, `payment_status`, `shipping_type`, `assignee`, `date_from`, `date_to`, `q`, `page`, `page_size`
 - tiekimo paieška: `product_q`, `supplier_code`, `manufacturer_q`, `remote_only`, `eta_from`, `eta_to`
 
 ### Response
+
 - `page`, `page_size`, `total_count`
 - `results[]` su:
   - bazinė order būsena (`status`, `delivery_status`, `fulfillment_mode`, ...)
@@ -48,32 +51,38 @@ Vieno užsakymo detalė su tokia pačia OPS struktūra kaip `results[]`.
 ## POST `/api/v1/ops/orders/{order_id}/actions/confirm`
 
 Request:
+
 ```json
 { "note": "..." }
 ```
 
 Veiksmas:
+
 - jei `supplier_reservation_status=not_needed` -> `pending`
 - įrašo `OrderEvent(name="ops_confirmed")`
 
 ## POST `/api/v1/ops/orders/{order_id}/actions/assign`
 
 Request:
+
 ```json
 { "assignee": "operator-1", "note": "..." }
 ```
 
 Veiksmas:
+
 - įrašo `OrderEvent(name="ops_assigned", payload={assignee,...})`
 
 ## POST `/api/v1/ops/orders/{order_id}/actions/move-to-picking`
 
 Request:
+
 ```json
 { "note": "..." }
 ```
 
 Veiksmas:
+
 - `supplier_reservation_status=reserved`
 - `supplier_reserved_at=now` (jei buvo tuščias)
 - `OrderEvent(name="ops_moved_to_picking")`
@@ -81,6 +90,7 @@ Veiksmas:
 ## POST `/api/v1/ops/orders/actions/bulk`
 
 Request:
+
 ```json
 {
   "action": "move_to_picking",
@@ -91,6 +101,7 @@ Request:
 ```
 
 Veiksmas:
+
 - sukuria `OpsJob(job_type="orders_bulk_action")`
 - vykdo sinchroniškai ir grąžina job būseną
 
@@ -103,6 +114,7 @@ Veiksmas:
 Query: `status`, `shipping_method`, `page`, `page_size`.
 
 Grąžina order-level siuntų būsenas:
+
 - `delivery_status`, `shipping_method`
 - `carrier_code`, `carrier_shipment_id`, `tracking_number`
 - `label_generated_at`
@@ -110,21 +122,25 @@ Grąžina order-level siuntų būsenas:
 ## POST `/api/v1/ops/shipments/{order_id}/label`
 
 Generuoja vieno užsakymo lipduką:
+
 - DPD (`dpd_locker`, `dpd_courier`) -> DPD A6 generatorius
 - Unisend/LPExpress (`unisend_*`, `lpexpress*`) -> Unisend 10x15 generatorius
 
 Po sėkmės:
+
 - atnaujina order carrier/label/tracking laukus (per esamas integracijas)
 - įrašo `OrderEvent(name="ops_label_generated")`
 
 ## POST `/api/v1/ops/shipments/labels/bulk`
 
 Request:
+
 ```json
 { "order_ids": [1452, 1453, 1454] }
 ```
 
 Veiksmas:
+
 - sukuria `OpsJob(job_type="shipment_labels_bulk")`
 - vykdo sinchroniškai (sėkmės/klaidos įrašomos `result_payload`)
 
@@ -135,12 +151,14 @@ Grąžina bulk lipdukų job būseną.
 ## POST `/api/v1/ops/shipments/{shipment_id}/mark-shipped`
 
 Veiksmas:
+
 - nustato `order.delivery_status = shipped`
 - `OrderEvent(name="ops_mark_shipped")`
 
 ## POST `/api/v1/ops/shipments/{shipment_id}/refresh-tracking`
 
 Veiksmas:
+
 - įrašo `OrderEvent(name="ops_refresh_tracking")` su esamais tracking duomenimis.
 
 ---
@@ -160,22 +178,26 @@ Vieno `PaymentIntent` detalė.
 ## POST `/api/v1/ops/payments/{payment_id}/reconcile`
 
 Request:
+
 ```json
 { "note": "manual reconciliation note" }
 ```
 
 Veiksmas:
+
 - įrašo reconcile informaciją į `raw_response.ops_reconcile`
 - `OrderEvent(name="ops_payment_reconciled")`
 
 ## POST `/api/v1/ops/payments/{payment_id}/mark-paid`
 
 Request:
+
 ```json
 { "note": "manual paid" }
 ```
 
 Veiksmas:
+
 - `PaymentIntent.status = succeeded`
 - `Order.status = paid`
 - kviečia `capture_inventory_for_order` ir `redeem_coupon_for_paid_order`
@@ -184,11 +206,13 @@ Veiksmas:
 ## POST `/api/v1/ops/payments/{payment_id}/refund`
 
 Request:
+
 ```json
 { "note": "customer return" }
 ```
 
 Veiksmas:
+
 - `PaymentIntent.status = cancelled`
 - `Order.status = cancelled`
 - kviečia `release_coupon_for_order` ir `release_inventory_for_order`
@@ -211,6 +235,7 @@ Query: `sku`, `product_q`, `warehouse_code`, `page`, `page_size`.
 ## POST `/api/v1/ops/inventory/items/{item_id}/adjust`
 
 Request:
+
 ```json
 {
   "delta": -2,
@@ -220,6 +245,7 @@ Request:
 ```
 
 Taisyklės:
+
 - negalima padaryti `qty_on_hand < 0`
 - negalima padaryti `qty_on_hand < qty_reserved`
 
@@ -240,6 +266,7 @@ Perjungia `is_active`.
 ## POST `/api/v1/ops/catalog/variants/{variant_id}/update-price`
 
 Request:
+
 ```json
 { "price_eur": "12.50" }
 ```
@@ -249,6 +276,7 @@ Atnaujina `Variant.price_eur`.
 ## POST `/api/v1/ops/catalog/offers/{inventory_item_id}/set-visibility`
 
 Request:
+
 ```json
 { "visibility": "OUTLET" }
 ```
@@ -258,6 +286,7 @@ Leidžiamos reikšmės: `NORMAL`, `OUTLET`.
 ## POST `/api/v1/ops/catalog/bulk-actions`
 
 Request:
+
 ```json
 {
   "action": "deactivate_products",
@@ -266,6 +295,7 @@ Request:
 ```
 
 Leidžiami action:
+
 - `activate_products`
 - `deactivate_products`
 
@@ -298,6 +328,7 @@ Vieno job detalė.
 Paleidžia job vykdymą iš naujo su tuo pačiu `request_payload`.
 
 Palaikomi job tipai:
+
 - `orders_bulk_action`
 - `shipment_labels_bulk`
 
@@ -513,6 +544,7 @@ Response:
 ## Jobs polling pattern (frontend)
 
 Po bulk operacijos:
+
 1. paimti `job.id` iš response;
 2. poll'inti `GET /api/v1/ops/jobs/{job_id}` kas 2-5 s;
 3. stabdyti poll'inimą kai `status in ["success", "failed"]`;
