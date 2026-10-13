@@ -9,6 +9,7 @@ from .models import (
     ShippingCountryTranslation,
     ShippingMethod,
     ShippingRate,
+    ShopShippingMethodPolicy,
 )
 
 
@@ -71,3 +72,11 @@ class DeliveryRuleAdmin(admin.ModelAdmin):
     search_fields = ("code", "name")
     autocomplete_fields = ("warehouse", "brand", "category", "product_group", "product")
     ordering = ("-priority", "code")
+
+
+@admin.register(ShopShippingMethodPolicy)
+class ShopShippingMethodPolicyAdmin(admin.ModelAdmin):
+    list_display = ("shop", "method", "country_code", "is_active", "net_eur_override", "sort_order_override")
+    list_filter = ("shop", "is_active", "country_code")
+    search_fields = ("shop__code", "method__code", "method__name")
+    autocomplete_fields = ("shop", "method")

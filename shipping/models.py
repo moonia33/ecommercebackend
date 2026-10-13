@@ -185,3 +185,31 @@ class DeliveryRule(models.Model):
 
     def __str__(self) -> str:
         return self.code
+
+
+class ShopShippingMethodPolicy(models.Model):
+    shop = models.ForeignKey("api.Shop", on_delete=models.CASCADE, related_name="shipping_policies")
+    method = models.ForeignKey(ShippingMethod, on_delete=models.CASCADE, related_name="shop_policies")
+    country_code = models.CharField(max_length=2, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    net_eur_override = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    sort_order_override = models.IntegerField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["shop", "method", "country_code"],
+                name="uniq_shop_shipping_policy",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["shop", "country_code", "is_active"]),
+            models.Index(fields=["shop", "method", "is_active"]),
+        ]
+
+    def __str__(self) -> str:
+        cc = self.country_code or "*"
+        return f"{self.shop.code}:{self.method.code}:{cc}"

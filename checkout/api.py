@@ -15,15 +15,18 @@ from ninja.errors import HttpError
 
 from accounts.auth import JWTAuth
 from accounts.models import UserAddress, UserPhone, UserPickupPoint
-from catalog.models import Category, InventoryItem, Variant
+from catalog.models import Category, InventoryItem, Product, Variant
 from pricing.services import get_vat_rate
 from promotions.models import Coupon
 from promotions.services import apply_promo_to_unit_net
 from shipping.services import estimate_delivery_window
 
 from analytics.services import track_event
+from api.shop_context import get_request_shop, shop_context_enabled, shop_context_strict
 
 from .models import Cart, CartItem, Order, OrderConsent, OrderDiscount, OrderFee, OrderLine, PaymentIntent
+from catalog.shop_pricing import resolve_shop_variant_price
+from catalog.shop_scope import apply_shop_product_scope
 from .schemas import (
     CartItemAddIn,
     CartItemOut,
@@ -60,6 +63,16 @@ router = Router(tags=["checkout"])
 
 
 logger = logging.getLogger(__name__)
+
+
+def _request_shop_id(request) -> int | None:
+    shop = get_request_shop(request)
+    return int(shop.id) if shop else None
+
+
+def _ensure_shop_context_if_strict(request) -> None:
+    if shop_context_enabled() and shop_context_strict() and get_request_shop(request) is None:
+        raise HttpError(404, "Shop not resolved for host")
 
 
 def _dw_value(dw, key: str):
@@ -143,6 +156,7 @@ def _pickup_point_address_fields(*, carrier_code: str, pickup_locker, pickup_sna
 
 @router.post("/checkout/apply-pickup-point", response=ApplyPickupPointOut, auth=_auth)
 def apply_pickup_point(request, payload: ApplyPickupPointIn):
+    _ensure_shop_context_if_strict(request)
     user = _require_user(request)
 
     shipping_method = (payload.shipping_method or "").strip()
@@ -308,11 +322,14 @@ def checkout_consents(request):
 
 @router.get("/payment-methods", response=list[PaymentMethodOut], auth=_auth)
 def payment_methods(request, country_code: str = "LT"):
+    _ensure_shop_context_if_strict(request)
     _require_user(request)
     country_code = (country_code or "").strip().upper() or "LT"
     try:
         from payments.models import PaymentMethod
+        from payments.models import ShopPaymentMethodPolicy
 
+        shop_id = _request_shop_id(request)
         methods = list(
             PaymentMethod.objects.filter(is_active=True)
             .filter(
@@ -320,6 +337,27 @@ def payment_methods(request, country_code: str = "LT"):
             )
             .order_by("sort_order", "code")
         )
+        if shop_id:
+            policy_rows = list(
+                ShopPaymentMethodPolicy.objects.filter(shop_id=shop_id, is_active=True).filter(
+                    models.Q(country_code="") | models.Q(country_code=country_code)
+                )
+            )
+            if policy_rows:
+                policy_by_method_id = {int(p.payment_method_id): p for p in policy_rows}
+                methods = [m for m in methods if int(m.id) in policy_by_method_id]
+                for m in methods:
+                    p = policy_by_method_id.get(int(m.id))
+                    if p and (p.name_override or "").strip():
+                        m.name = p.name_override
+                methods.sort(key=lambda m: (
+                    int(
+                        policy_by_method_id.get(int(m.id)).sort_order_override
+                        if policy_by_method_id.get(int(m.id)) and policy_by_method_id.get(int(m.id)).sort_order_override is not None
+                        else m.sort_order
+                    ),
+                    m.code,
+                ))
     except Exception:
         methods = []
 
@@ -368,6 +406,7 @@ def payment_methods(request, country_code: str = "LT"):
 
 @router.get("/payment-options", response=list[PaymentOptionOut], auth=_auth)
 def payment_options(request, country_code: str = "LT"):
+    _ensure_shop_context_if_strict(request)
     _require_user(request)
     country_code = (country_code or "").strip().upper() or "LT"
 
@@ -698,7 +737,9 @@ def _user_from_cookie_if_present(request):
 
 
 def _get_cart_for_request(request, *, create: bool) -> Cart | None:
+    _ensure_shop_context_if_strict(request)
     user = _user_from_cookie_if_present(request)
+    shop_id = _request_shop_id(request)
 
     session_key = ""
     if hasattr(request, "session"):
@@ -708,18 +749,30 @@ def _get_cart_for_request(request, *, create: bool) -> Cart | None:
             session_key = ""
 
     if user:
-        user_cart = getattr(user, "cart", None)
+        user_cart_qs = Cart.objects.filter(user=user)
+        if shop_id is not None:
+            user_cart_qs = user_cart_qs.filter(shop_id=shop_id)
+        else:
+            user_cart_qs = user_cart_qs.filter(shop__isnull=True)
+        user_cart = user_cart_qs.first()
 
         guest_cart = None
         if session_key:
-            guest_cart = Cart.objects.filter(
-                user=None, session_key=session_key).first()
+            guest_qs = Cart.objects.filter(user=None, session_key=session_key)
+            if shop_id is not None:
+                guest_qs = guest_qs.filter(shop_id=shop_id)
+            else:
+                guest_qs = guest_qs.filter(shop__isnull=True)
+            guest_cart = guest_qs.first()
 
         if not user_cart:
             # Allow merge on first GET after login if a guest cart exists.
             if create or guest_cart:
                 user_cart, _ = Cart.objects.get_or_create(
-                    user=user, defaults={"session_key": ""})
+                    user=user,
+                    shop_id=shop_id,
+                    defaults={"session_key": "", "shop_id": shop_id},
+                )
             else:
                 return None
 
@@ -763,9 +816,19 @@ def _get_cart_for_request(request, *, create: bool) -> Cart | None:
         return None
 
     if not create:
-        return Cart.objects.filter(user=None, session_key=session_key).first()
+        guest_qs = Cart.objects.filter(user=None, session_key=session_key)
+        if shop_id is not None:
+            guest_qs = guest_qs.filter(shop_id=shop_id)
+        else:
+            guest_qs = guest_qs.filter(shop__isnull=True)
+        return guest_qs.first()
 
-    cart, _ = Cart.objects.get_or_create(user=None, session_key=session_key)
+    cart, _ = Cart.objects.get_or_create(
+        user=None,
+        session_key=session_key,
+        shop_id=shop_id,
+        defaults={"shop_id": shop_id},
+    )
     return cart
 
 
@@ -920,6 +983,7 @@ def _cart_item_money(
     country_code: str,
     channel: str = "normal",
     customer_group_id: int | None = None,
+    shop_id: int | None = None,
 ) -> tuple[MoneyOut, MoneyOut, MoneyOut | None, int | None, Decimal]:
     v = item.variant
     product = v.product
@@ -934,7 +998,13 @@ def _cart_item_money(
     except ValueError as exc:
         raise HttpError(400, str(exc))
 
-    list_unit_net = Decimal(v.price_eur)
+    channel_type = "b2b" if customer_group_id else "retail"
+    list_unit_net = resolve_shop_variant_price(
+        variant=v,
+        shop_id=shop_id,
+        channel_type=channel_type,
+        customer_group_id=customer_group_id,
+    ).unit_net
     base_unit_net = (
         _effective_offer_unit_net(list_unit_net=list_unit_net, offer=item.offer)
         if getattr(item, "offer_id", None)
@@ -989,6 +1059,7 @@ def _serialize_cart_items(
     country_code: str,
     channel: str = "normal",
     customer_group_id: int | None = None,
+    shop_id: int | None = None,
 ) -> tuple[list[CartItemOut], MoneyOut, dict | None]:
     out_items: list[CartItemOut] = []
 
@@ -1007,6 +1078,7 @@ def _serialize_cart_items(
             country_code=country_code,
             channel=channel,
             customer_group_id=customer_group_id,
+            shop_id=shop_id,
         )
 
         if it.offer_id:
@@ -1090,6 +1162,7 @@ def _serialize_cart_items(
 
 @router.get("/cart", response=CartOut)
 def get_cart(request, country_code: str = "LT", channel: str = "normal"):
+    _ensure_shop_context_if_strict(request)
     country_code = (country_code or "").strip().upper()
     if len(country_code) != 2:
         raise HttpError(400, "Invalid country_code")
@@ -1129,6 +1202,7 @@ def get_cart(request, country_code: str = "LT", channel: str = "normal"):
                 country_code=country_code,
                 channel=channel,
                 language_code="",
+                shop_id=_request_shop_id(request),
             )
         except Exception:
             pass
@@ -1137,6 +1211,7 @@ def get_cart(request, country_code: str = "LT", channel: str = "normal"):
         items=items,
         country_code=country_code,
         channel=channel,
+        shop_id=_request_shop_id(request),
     )
     return CartOut(
         country_code=country_code,
@@ -1148,13 +1223,19 @@ def get_cart(request, country_code: str = "LT", channel: str = "normal"):
 
 @router.post("/cart/items", response=CartOut)
 def add_cart_item(request, payload: CartItemAddIn, country_code: str = "LT"):
+    _ensure_shop_context_if_strict(request)
     qty = int(payload.qty or 0)
     if qty <= 0:
         raise HttpError(400, "qty must be positive")
 
+    shop_id = _request_shop_id(request)
+    allowed_products = apply_shop_product_scope(
+        qs=Product.objects.filter(is_active=True),
+        shop_id=shop_id,
+    )
     variant = (
         Variant.objects.select_related("product", "product__tax_class")
-        .filter(id=payload.variant_id, is_active=True, product__is_active=True)
+        .filter(id=payload.variant_id, is_active=True, product__in=allowed_products)
         .first()
     )
     if not variant:
@@ -1279,6 +1360,7 @@ def add_cart_item(request, payload: CartItemAddIn, country_code: str = "LT"):
             },
             country_code=country_code,
             channel="normal",
+            shop_id=_request_shop_id(request),
         )
     except Exception:
         pass
@@ -1288,6 +1370,7 @@ def add_cart_item(request, payload: CartItemAddIn, country_code: str = "LT"):
 
 @router.patch("/cart/items/{item_id}", response=CartOut)
 def update_cart_item(request, item_id: int, payload: CartItemUpdateIn, country_code: str = "LT"):
+    _ensure_shop_context_if_strict(request)
     qty = int(payload.qty or 0)
 
     cart = _get_cart_for_request(request, create=False)
@@ -1349,6 +1432,7 @@ def update_cart_item(request, item_id: int, payload: CartItemUpdateIn, country_c
                 },
                 country_code=country_code,
                 channel="normal",
+                shop_id=_request_shop_id(request),
             )
     except Exception:
         pass
@@ -1358,6 +1442,7 @@ def update_cart_item(request, item_id: int, payload: CartItemUpdateIn, country_c
 
 @router.delete("/cart/items/{item_id}", response=CartOut)
 def delete_cart_item(request, item_id: int, country_code: str = "LT"):
+    _ensure_shop_context_if_strict(request)
     cart = _get_cart_for_request(request, create=False)
     if cart is None:
         raise HttpError(404, "Cart item not found")
@@ -1389,6 +1474,7 @@ def delete_cart_item(request, item_id: int, country_code: str = "LT"):
             },
             country_code=country_code,
             channel="normal",
+            shop_id=_request_shop_id(request),
         )
     except Exception:
         pass
@@ -1398,12 +1484,13 @@ def delete_cart_item(request, item_id: int, country_code: str = "LT"):
 
 @router.get("/shipping-methods", response=list[ShippingMethodOut], auth=_auth)
 def shipping_methods(request, country_code: str = "LT"):
+    _ensure_shop_context_if_strict(request)
     _require_user(request)
     country_code = (country_code or "").strip().upper()
     if len(country_code) != 2:
         raise HttpError(400, "Invalid country_code")
 
-    from shipping.models import ShippingMethod, ShippingRate
+    from shipping.models import ShippingMethod, ShippingRate, ShopShippingMethodPolicy
 
     tax_class = get_shipping_tax_class()
     if not tax_class:
@@ -1415,6 +1502,27 @@ def shipping_methods(request, country_code: str = "LT"):
         ShippingMethod.objects.filter(
             is_active=True).order_by("sort_order", "code")
     )
+    shop_id = _request_shop_id(request)
+    policy_by_method_id: dict[int, ShopShippingMethodPolicy] = {}
+    if shop_id:
+        pols = list(
+            ShopShippingMethodPolicy.objects.filter(shop_id=shop_id, is_active=True).filter(
+                models.Q(country_code="") | models.Q(country_code=country_code)
+            )
+        )
+        if pols:
+            policy_by_method_id = {int(p.method_id): p for p in pols}
+            methods = [m for m in methods if int(m.id) in policy_by_method_id]
+            methods.sort(
+                key=lambda m: (
+                    int(
+                        policy_by_method_id.get(int(m.id)).sort_order_override
+                        if policy_by_method_id.get(int(m.id)) and policy_by_method_id.get(int(m.id)).sort_order_override is not None
+                        else m.sort_order
+                    ),
+                    m.code,
+                )
+            )
     rates = {
         r.method_id: r
         for r in ShippingRate.objects.filter(
@@ -1435,6 +1543,9 @@ def shipping_methods(request, country_code: str = "LT"):
                 )
             except ValueError:
                 shipping_net = Decimal("0.00")
+        p = policy_by_method_id.get(int(m.id))
+        if p and p.net_eur_override is not None:
+            shipping_net = Decimal(p.net_eur_override)
 
         price = money_from_net(
             currency="EUR", unit_net=shipping_net, vat_rate=vat_rate, qty=1)
@@ -1486,6 +1597,7 @@ def shipping_methods(request, country_code: str = "LT"):
 
 @router.post("/checkout/preview", response=CheckoutPreviewOut, auth=_auth)
 def checkout_preview(request, payload: CheckoutPreviewIn):
+    _ensure_shop_context_if_strict(request)
     user = _require_user(request)
 
     addr = UserAddress.objects.filter(
@@ -1539,6 +1651,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
             country_code=country_code,
             channel=channel,
             language_code="",
+            shop_id=_request_shop_id(request),
         )
     except Exception:
         pass
@@ -1589,6 +1702,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         country_code=country_code,
         channel=channel,
         customer_group_id=customer_group_id,
+        shop_id=_request_shop_id(request),
     )
 
     if coupon:
@@ -1601,6 +1715,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
                 country_code=country_code,
                 channel=channel,
                 customer_group_id=customer_group_id,
+                shop_id=_request_shop_id(request),
             )
 
             if it.offer and bool(getattr(it.offer, "never_discount", False)):
@@ -1720,6 +1835,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
 
 @router.post("/checkout/confirm", response=CheckoutConfirmOut, auth=_auth)
 def checkout_confirm(request, payload: CheckoutConfirmIn):
+    _ensure_shop_context_if_strict(request)
     user = _require_user(request)
 
     addr = UserAddress.objects.filter(
@@ -1747,9 +1863,14 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         raise HttpError(400, "Invalid channel")
     coupon_code = (getattr(payload, "coupon_code", None) or "").strip().lower() or None
 
+    shop_id = _request_shop_id(request)
     if idem_key:
-        existing = Order.objects.filter(
-            user=user, idempotency_key=idem_key).first()
+        existing_qs = Order.objects.filter(user=user, idempotency_key=idem_key)
+        if shop_id is not None:
+            existing_qs = existing_qs.filter(shop_id=shop_id)
+        else:
+            existing_qs = existing_qs.filter(shop__isnull=True)
+        existing = existing_qs.first()
         if existing:
             pi = getattr(existing, "payment_intent", None)
             return CheckoutConfirmOut(
@@ -1853,6 +1974,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
 
         order = Order.objects.create(
             user=user,
+            shop_id=_request_shop_id(request),
             status=Order.Status.PENDING_PAYMENT,
             idempotency_key=idem_key or "",
             currency="EUR",
@@ -1934,6 +2056,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 country_code=country_code,
                 channel=channel,
                 customer_group_id=customer_group_id,
+                shop_id=_request_shop_id(request),
             )
 
             lines.append(
@@ -2073,6 +2196,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             },
             country_code=str(order.country_code or ""),
             channel=str(channel or ""),
+            shop_id=_request_shop_id(request),
             outbox_providers=["newsman"],
         )
     except Exception:
@@ -2093,11 +2217,19 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
 
 @router.get("/orders", response=list[OrderOut], auth=_auth)
 def list_orders(request, limit: int = 20):
+    _ensure_shop_context_if_strict(request)
     user = _require_user(request)
     limit = max(1, min(int(limit or 20), 50))
+    shop_id = _request_shop_id(request)
+
+    order_qs = Order.objects.filter(user=user)
+    if shop_id is not None:
+        order_qs = order_qs.filter(shop_id=shop_id)
+    else:
+        order_qs = order_qs.filter(shop__isnull=True)
 
     orders = (
-        Order.objects.filter(user=user)
+        order_qs
         .select_related("payment_intent")
         .prefetch_related("lines", "fees", "discounts")
         .order_by("-created_at")[:limit]
@@ -2342,10 +2474,18 @@ def list_orders(request, limit: int = 20):
 
 @router.get("/orders/{order_id}", response=OrderOut, auth=_auth)
 def get_order(request, order_id: int):
+    _ensure_shop_context_if_strict(request)
     user = _require_user(request)
+    shop_id = _request_shop_id(request)
+
+    order_qs = Order.objects.filter(user=user, id=order_id)
+    if shop_id is not None:
+        order_qs = order_qs.filter(shop_id=shop_id)
+    else:
+        order_qs = order_qs.filter(shop__isnull=True)
 
     o = (
-        Order.objects.filter(user=user, id=order_id)
+        order_qs
         .select_related("payment_intent")
         .prefetch_related("lines", "fees", "discounts")
         .first()

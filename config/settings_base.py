@@ -85,6 +85,8 @@ env = environ.Env(
 
     # Promotions/Coupons policy
     COUPON_ALLOWED_CHANNELS=(list, ["normal"]),
+    SHOP_CONTEXT_ENABLED=(bool, True),
+    SHOP_CONTEXT_STRICT=(bool, False),
 )
 
 # Loads variables from .env if present (dev convenience). In prod use real env vars.
@@ -151,6 +153,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "corsheaders",
+    "mptt",
     "api",
     "accounts",
     "notifications",
@@ -187,6 +190,7 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "api.middleware.ShopResolverMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -316,3 +320,5 @@ API_BASE_PATH = env("API_BASE_PATH", default=env(
 
 # --- Promotions/Coupons policy ---
 COUPON_ALLOWED_CHANNELS = [c.strip().lower() for c in env.list("COUPON_ALLOWED_CHANNELS", default=["normal"]) if c.strip()]
+SHOP_CONTEXT_ENABLED = env.bool("SHOP_CONTEXT_ENABLED", default=True)
+SHOP_CONTEXT_STRICT = env.bool("SHOP_CONTEXT_STRICT", default=False)

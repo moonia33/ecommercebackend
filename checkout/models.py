@@ -7,12 +7,19 @@ from django.db import models
 
 
 class Cart(models.Model):
-    user = models.OneToOneField(
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
         blank=True,
         on_delete=models.CASCADE,
-        related_name="cart",
+        related_name="carts",
+    )
+    shop = models.ForeignKey(
+        "api.Shop",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="carts",
     )
     # Anonymous carts are stored per Django session.
     session_key = models.CharField(max_length=40, blank=True, default="")
@@ -27,9 +34,14 @@ class Cart(models.Model):
                 name="chk_cart_user_or_session",
             ),
             models.UniqueConstraint(
-                fields=["session_key"],
+                fields=["user", "shop"],
+                condition=models.Q(user__isnull=False),
+                name="uniq_cart_user_shop",
+            ),
+            models.UniqueConstraint(
+                fields=["session_key", "shop"],
                 condition=~models.Q(session_key=""),
-                name="uniq_cart_session_key",
+                name="uniq_cart_session_shop_key",
             ),
         ]
 
@@ -108,6 +120,13 @@ class Order(models.Model):
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="orders",
+    )
+    shop = models.ForeignKey(
+        "api.Shop",
+        null=True,
+        blank=True,
         on_delete=models.PROTECT,
         related_name="orders",
     )
@@ -215,6 +234,7 @@ class Order(models.Model):
 
     class Meta:
         indexes = [
+            models.Index(fields=["shop", "-created_at"]),
             models.Index(fields=["user", "-created_at"]),
             models.Index(fields=["status", "-created_at"]),
             models.Index(fields=["carrier_code", "tracking_number"]),
@@ -222,9 +242,9 @@ class Order(models.Model):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "idempotency_key"],
+                fields=["user", "shop", "idempotency_key"],
                 condition=~models.Q(idempotency_key=""),
-                name="uniq_order_idempotency_key_per_user",
+                name="uniq_order_idempotency_key_per_user_shop",
             )
         ]
         ordering = ["-created_at", "-id"]

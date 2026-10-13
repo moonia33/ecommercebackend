@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.contrib import admin
 
-from .models import NeopayBank, NeopayConfig, PaymentMethod
+from .models import NeopayBank, NeopayConfig, PaymentMethod, ShopPaymentMethodPolicy
 
 
 @admin.register(PaymentMethod)
@@ -53,3 +53,11 @@ class NeopayBankAdmin(admin.ModelAdmin):
     list_filter = ("country_code", "is_enabled", "is_operating")
     search_fields = ("bic", "name")
     ordering = ("country_code", "sort_order", "name")
+
+
+@admin.register(ShopPaymentMethodPolicy)
+class ShopPaymentMethodPolicyAdmin(admin.ModelAdmin):
+    list_display = ("shop", "payment_method", "country_code", "is_active", "name_override", "sort_order_override")
+    list_filter = ("shop", "is_active", "country_code")
+    search_fields = ("shop__code", "payment_method__code", "payment_method__name")
+    autocomplete_fields = ("shop", "payment_method")

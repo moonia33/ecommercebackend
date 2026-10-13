@@ -127,3 +127,35 @@ class NeopayBank(models.Model):
 
     def __str__(self) -> str:
         return f"{self.country_code}:{self.bic}"
+
+
+class ShopPaymentMethodPolicy(models.Model):
+    shop = models.ForeignKey("api.Shop", on_delete=models.CASCADE, related_name="payment_policies")
+    payment_method = models.ForeignKey(
+        PaymentMethod,
+        on_delete=models.CASCADE,
+        related_name="shop_policies",
+    )
+    country_code = models.CharField(max_length=2, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    sort_order_override = models.IntegerField(null=True, blank=True)
+    name_override = models.CharField(max_length=200, blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["shop", "payment_method", "country_code"],
+                name="uniq_shop_payment_policy",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["shop", "country_code", "is_active"]),
+            models.Index(fields=["shop", "payment_method", "is_active"]),
+        ]
+
+    def __str__(self) -> str:
+        cc = self.country_code or "*"
+        return f"{self.shop.code}:{self.payment_method.code}:{cc}"

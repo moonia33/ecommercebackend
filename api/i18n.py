@@ -66,6 +66,15 @@ def get_request_language_code(
         if hdr and hdr in get_supported_language_codes():
             return hdr
 
+    # Shop-level fallback (per-domain locale baseline)
+    try:
+        shop = getattr(request, "shop", None)
+        shop_lang = normalize_language_code(getattr(shop, "default_language_code", ""))
+        if shop_lang and shop_lang in get_supported_language_codes():
+            return shop_lang
+    except Exception:
+        pass
+
     return get_default_language_code()
 
 

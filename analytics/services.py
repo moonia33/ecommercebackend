@@ -155,6 +155,7 @@ def track_event(
     country_code: str = "",
     channel: str = "",
     language_code: str = "",
+    shop_id: int | None = None,
     outbox_providers: list[str] | None = None,
 ):
     now = timezone.now()
@@ -163,7 +164,13 @@ def track_event(
     visitor_id = _get_visitor_id_from_request(request)
     user = _get_user_from_request(request)
 
-    raw_key = f"{name}:u:{getattr(user, 'id', 0)}:v:{visitor_id}:o:{object_type}:{object_id}:cc:{country_code}:ch:{channel}:lc:{language_code}"
+    if shop_id is None:
+        try:
+            shop_id = int(getattr(getattr(request, "shop", None), "id"))
+        except Exception:
+            shop_id = None
+
+    raw_key = f"{name}:u:{getattr(user, 'id', 0)}:v:{visitor_id}:o:{object_type}:{object_id}:cc:{country_code}:ch:{channel}:lc:{language_code}:s:{shop_id or 0}"
 
     if name == AnalyticsEvent.Name.PRODUCT_VIEW:
         w = _product_view_window_index(now)
@@ -184,6 +191,7 @@ def track_event(
             country_code=(country_code or ""),
             channel=(channel or ""),
             language_code=(language_code or ""),
+            shop_id=shop_id,
             payload=payload,
             idempotency_key=idempotency_key,
         )

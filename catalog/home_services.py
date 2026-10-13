@@ -11,22 +11,8 @@ from promotions.services import apply_promo_to_unit_net
 
 from .api_schemas import MoneyOut, ProductListOut
 from .models import Brand, Category, InventoryItem, Product, ProductGroup
-
-
-def _parse_pairs(value: str | None) -> list[tuple[str, str]]:
-    if not value:
-        return []
-    out: list[tuple[str, str]] = []
-    for part in [p.strip() for p in value.split(",") if p.strip()]:
-        if ":" not in part:
-            raise HttpError(400, "Invalid pair format; expected code:value")
-        k, v = part.split(":", 1)
-        k = k.strip()
-        v = v.strip()
-        if not k or not v:
-            raise HttpError(400, "Invalid pair format; expected code:value")
-        out.append((k, v))
-    return out
+from .services.catalog_core import descendant_category_ids, parse_pairs
+from .services.money import discount_percent as calc_discount_percent
 
 
 def _money_out(*, currency: str, unit_net: Decimal, vat_rate: Decimal) -> MoneyOut:
@@ -38,40 +24,6 @@ def _money_out(*, currency: str, unit_net: Decimal, vat_rate: Decimal) -> MoneyO
         "vat": b.unit_vat,
         "gross": b.unit_gross,
     }
-
-
-def _discount_percent(*, list_unit_net: Decimal, sale_unit_net: Decimal) -> int | None:
-    list_unit_net = Decimal(list_unit_net or 0)
-    sale_unit_net = Decimal(sale_unit_net or 0)
-    if list_unit_net <= 0:
-        return None
-    if sale_unit_net >= list_unit_net:
-        return None
-    pct = int(((list_unit_net - sale_unit_net) / list_unit_net) * Decimal(100))
-    return max(0, min(100, pct))
-
-
-def _descendant_category_ids(*, root_id: int) -> list[int]:
-    rows = Category.objects.filter(is_active=True).values("id", "parent_id")
-    children: dict[int, list[int]] = {}
-    for r in rows:
-        pid = int(r.get("parent_id") or 0)
-        cid = int(r["id"])
-        children.setdefault(pid, []).append(cid)
-
-    out: list[int] = []
-    stack = [int(root_id)]
-    seen: set[int] = set()
-    while stack:
-        cur = stack.pop()
-        if cur in seen:
-            continue
-        seen.add(cur)
-        out.append(cur)
-        for child in children.get(cur, []):
-            if child not in seen:
-                stack.append(child)
-    return out
 
 
 def get_products_by_slugs_for_grid(
@@ -195,7 +147,7 @@ def get_products_by_slugs_for_grid(
         )
 
         compare_at_price = None
-        discount_percent = _discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
+        discount_percent = calc_discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
         if discount_percent is not None:
             compare_at_price = _money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
 
@@ -329,7 +281,7 @@ def get_products_for_grid(
         c = Category.objects.filter(slug=category_slug, is_active=True).first()
         if not c:
             raise HttpError(404, "Category not found")
-        ids = _descendant_category_ids(root_id=int(c.id))
+        ids = descendant_category_ids(root_id=int(c.id))
         qs = qs.filter(category_id__in=ids)
 
     if brand_slug:
@@ -344,13 +296,13 @@ def get_products_for_grid(
             raise HttpError(404, "Product group not found")
         qs = qs.filter(group_id=g.id)
 
-    for f_code, f_val in _parse_pairs(feature):
+    for f_code, f_val in parse_pairs(feature):
         qs = qs.filter(
             feature_values__feature__code=f_code,
             feature_values__feature_value__value=f_val,
         )
 
-    for o_type, o_val in _parse_pairs(option):
+    for o_type, o_val in parse_pairs(option):
         qs = qs.filter(
             variants__option_values__option_type__code=o_type,
             variants__option_values__option_value__code=o_val,
@@ -454,7 +406,7 @@ def get_products_for_grid(
         )
 
         compare_at_price = None
-        discount_percent = _discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
+        discount_percent = calc_discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
         if discount_percent is not None:
             compare_at_price = _money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
 

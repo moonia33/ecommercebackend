@@ -1,0 +1,11 @@
+[
+{"type":"header","version":"5.2.3","comment":"Export to JSON plugin for phpMyAdmin"},
+{"type":"database","name":"baltxzvjbspsl24"},
+{"type":"table","name":"ps_supplier","database":"baltxzvjbspsl24","data":
+[
+{"id_supplier":"5","name":"Jobe","date_add":"2024-05-06 14:56:12","date_upd":"2024-05-06 14:56:12","active":"0"},
+{"id_supplier":"6","name":"MOSS","date_add":"2026-02-08 14:55:03","date_upd":"2026-03-31 10:24:35","active":"1"},
+{"id_supplier":"7","name":"Albatros","date_add":"2026-03-31 09:53:52","date_upd":"2026-03-31 10:23:57","active":"1"}
+]
+}
+]

@@ -129,6 +129,7 @@ class OrderDiscountInline(admin.TabularInline):
 class OrderAdmin(admin.ModelAdmin):
     list_display = (
         "id",
+        "shop",
         "user",
         "status",
         "delivery_status",
@@ -141,6 +142,7 @@ class OrderAdmin(admin.ModelAdmin):
         "created_at",
     )
     list_filter = (
+        "shop",
         "status",
         "delivery_status",
         "carrier_code",
@@ -171,6 +173,7 @@ class OrderAdmin(admin.ModelAdmin):
         "total_gross",
     )
     fields = (
+        "shop",
         "user",
         "status",
         "delivery_status",

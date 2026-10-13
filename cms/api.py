@@ -5,6 +5,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from api.i18n import get_request_language_code
+from api.shop_context import get_request_shop, shop_context_enabled, shop_context_strict
 
 from .models import CmsPage, CmsPageTranslation
 from .schemas import CmsPageOut
@@ -43,7 +44,17 @@ def cms_page_detail(request, slug: str, language_code: str | None = None):
     if language_code is None:
         language_code = get_request_language_code(request)
 
-    page = CmsPage.objects.filter(slug=slug, is_active=True).only("id", "slug", "updated_at").first()
+    shop = get_request_shop(request)
+    if shop_context_enabled() and shop_context_strict() and shop is None:
+        raise HttpError(404, "Shop not resolved for host")
+
+    page_qs = CmsPage.objects.filter(slug=slug, is_active=True)
+    if shop is not None:
+        page_qs = page_qs.filter(shop_id=shop.id)
+    else:
+        page_qs = page_qs.filter(shop__isnull=True)
+
+    page = page_qs.only("id", "slug", "updated_at").first()
     if page is None:
         raise HttpError(404, "Page not found")
 

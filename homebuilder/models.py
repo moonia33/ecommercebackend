@@ -6,7 +6,14 @@ from catalog.models import Brand, Category, Product, ProductGroup
 
 
 class HomePage(models.Model):
-    code = models.SlugField(max_length=64, unique=True, default="home")
+    code = models.SlugField(max_length=64, default="home")
+    shop = models.ForeignKey(
+        "api.Shop",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="home_pages",
+    )
     is_active = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -14,6 +21,10 @@ class HomePage(models.Model):
 
     class Meta:
         ordering = ["code"]
+        indexes = [models.Index(fields=["shop", "code", "is_active"])]
+        constraints = [
+            models.UniqueConstraint(fields=["shop", "code"], name="uniq_homepage_shop_code"),
+        ]
 
     def __str__(self) -> str:
         return self.code

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from django import forms
+from django.conf import settings
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.db.models import F, IntegerField, Sum, Value
 from django.db.models.functions import Coalesce
 from django.forms.models import BaseInlineFormSet
+from mptt.admin import DraggableMPTTAdmin
 
 
 from .widgets import TableEditorWidget, ToastUIMarkdownWidget
@@ -13,6 +15,7 @@ from .widgets import TableEditorWidget, ToastUIMarkdownWidget
 from .models import (
     Brand,
     Category,
+    CategoryTranslation,
     ContentBlock,
     ContentBlockTranslation,
     ContentRule,
@@ -35,15 +38,63 @@ from .models import (
     EnrichmentRule,
     EnrichmentRun,
     EnrichmentMatch,
+    ShopAssortmentRule,
+    ShopPriceList,
+    ShopPriceRule,
 )
 
 
+class CategoryTranslationInline(admin.StackedInline):
+    model = CategoryTranslation
+    extra = 0
+    show_change_link = True
+
+    fieldsets = (
+        (None, {"fields": ("language_code", "name", "slug")}),
+        ("Turinys", {"fields": ("description",)}),
+        ("SEO", {"fields": ("seo_title", "seo_description", "seo_keywords")}),
+    )
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+        description = forms.CharField(
+            required=False,
+            widget=ToastUIMarkdownWidget(mode="wysiwyg", height="280px"),
+        )
+
+        class Meta:
+            model = CategoryTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            allowed = list(getattr(settings, "LANGUAGES", []))
+            if len(allowed) <= 1:
+                allowed = [
+                    ("lt", "Lithuanian"),
+                    ("lv", "Latvian"),
+                    ("pl", "Polish"),
+                    ("et", "Estonian"),
+                    ("en", "English"),
+                ]
+            base_code = (getattr(settings, "LANGUAGE_CODE", "lt") or "lt").split("-")[0].strip().lower()
+            self.fields["language_code"].choices = [
+                ((code or "").strip().lower(), f"{name} ({(code or '').strip().lower()})")
+                for code, name in allowed
+                if ((code or "").strip().lower() and ((code or "").strip().lower() != base_code))
+            ]
+
+    form = Form
+
+
 @admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "parent", "is_active")
+class CategoryAdmin(DraggableMPTTAdmin):
+    list_display = ("tree_actions", "indented_title", "external_presta_id", "slug", "is_active")
+    list_display_links = ("indented_title",)
     list_filter = ("is_active",)
-    search_fields = ("name", "slug")
+    search_fields = ("name", "slug", "external_presta_id")
     prepopulated_fields = {"slug": ("name",)}
+    inlines = (CategoryTranslationInline,)
 
     class Form(forms.ModelForm):
         description = forms.CharField(
@@ -58,7 +109,7 @@ class CategoryAdmin(admin.ModelAdmin):
     form = Form
 
     fieldsets = (
-        (None, {"fields": ("name", "slug", "parent", "is_active")}),
+        (None, {"fields": ("external_presta_id", "name", "slug", "parent", "is_active")}),
         ("Turinys", {"fields": ("description",)}),
         (
             "Media",
@@ -79,9 +130,9 @@ class CategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Brand)
 class BrandAdmin(admin.ModelAdmin):
-    list_display = ("name", "slug", "is_active")
+    list_display = ("name", "external_presta_id", "slug", "is_active")
     list_filter = ("is_active",)
-    search_fields = ("name", "slug")
+    search_fields = ("name", "slug", "external_presta_id")
     prepopulated_fields = {"slug": ("name",)}
 
 
@@ -353,9 +404,9 @@ class VariantInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ("sku", "name", "brand", "category", "group", "is_active")
+    list_display = ("sku", "external_presta_id", "name", "brand", "category", "group", "is_active")
     list_filter = ("is_active", "brand", "category", "group")
-    search_fields = ("sku", "name", "slug")
+    search_fields = ("sku", "external_presta_id", "name", "slug")
     prepopulated_fields = {"slug": ("name",)}
     autocomplete_fields = ("tax_class",)
     inlines = (
@@ -378,7 +429,7 @@ class ProductAdmin(admin.ModelAdmin):
     form = Form
 
     fieldsets = (
-        (None, {"fields": ("sku", "name", "slug", "is_active")}),
+        (None, {"fields": ("external_presta_id", "sku", "name", "slug", "is_active")}),
         ("Klasifikacija", {
          "fields": ("brand", "category", "group", "tax_class")}),
         ("Turinys", {"fields": ("description",)}),
@@ -783,3 +834,35 @@ class EnrichmentMatchAdmin(admin.ModelAdmin):
         "extracted_value",
         "created_at",
     )
+
+
+@admin.register(ShopAssortmentRule)
+class ShopAssortmentRuleAdmin(admin.ModelAdmin):
+    list_display = ("shop", "scope", "priority", "is_active", "product", "category", "brand", "product_group")
+    list_filter = ("shop", "scope", "is_active")
+    search_fields = ("shop__code", "product__sku", "product__name", "category__name", "brand__name", "product_group__code")
+    autocomplete_fields = ("shop", "product", "category", "brand", "product_group")
+    ordering = ("shop", "-priority", "id")
+
+
+class ShopPriceRuleInline(admin.TabularInline):
+    model = ShopPriceRule
+    extra = 0
+    autocomplete_fields = ("product", "variant", "category", "brand", "product_group")
+
+
+@admin.register(ShopPriceList)
+class ShopPriceListAdmin(admin.ModelAdmin):
+    list_display = ("shop", "code", "name", "channel_type", "customer_group", "priority", "is_active")
+    list_filter = ("shop", "channel_type", "is_active")
+    search_fields = ("shop__code", "code", "name", "customer_group__code")
+    autocomplete_fields = ("shop", "customer_group")
+    inlines = (ShopPriceRuleInline,)
+
+
+@admin.register(ShopPriceRule)
+class ShopPriceRuleAdmin(admin.ModelAdmin):
+    list_display = ("price_list", "rule_type", "priority", "is_active", "variant", "product")
+    list_filter = ("price_list__shop", "price_list", "rule_type", "is_active")
+    search_fields = ("price_list__code", "variant__sku", "product__sku", "product__name")
+    autocomplete_fields = ("price_list", "product", "variant", "category", "brand", "product_group")

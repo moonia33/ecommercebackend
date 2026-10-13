@@ -4,7 +4,14 @@ from django.db import models
 
 
 class CmsPage(models.Model):
-    slug = models.SlugField(max_length=200, unique=True)
+    slug = models.SlugField(max_length=200)
+    shop = models.ForeignKey(
+        "api.Shop",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="cms_pages",
+    )
     is_active = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -12,6 +19,10 @@ class CmsPage(models.Model):
 
     class Meta:
         ordering = ["slug"]
+        indexes = [models.Index(fields=["shop", "slug", "is_active"])]
+        constraints = [
+            models.UniqueConstraint(fields=["shop", "slug"], name="uniq_cmspage_shop_slug"),
+        ]
 
     def __str__(self) -> str:
         return self.slug

@@ -31,6 +31,13 @@ class AnalyticsEvent(models.Model):
     country_code = models.CharField(max_length=2, blank=True, default="")
     channel = models.CharField(max_length=32, blank=True, default="")
     language_code = models.CharField(max_length=8, blank=True, default="")
+    shop = models.ForeignKey(
+        "api.Shop",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="analytics_events",
+    )
 
     payload = models.JSONField(blank=True, default=dict)
 
@@ -41,6 +48,7 @@ class AnalyticsEvent(models.Model):
             models.Index(fields=["name", "occurred_at"]),
             models.Index(fields=["user", "occurred_at"]),
             models.Index(fields=["visitor_id", "occurred_at"]),
+            models.Index(fields=["shop", "occurred_at"]),
             models.Index(fields=["object_type", "object_id"]),
         ]
 

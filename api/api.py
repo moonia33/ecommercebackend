@@ -13,6 +13,7 @@ from payments.api import router as payments_router
 from cms.api import router as cms_router
 from homebuilder.api import router as home_router
 from shipping.api import router as shipping_router
+from recommendations.api import router as recommendations_router
 
 docs_url = "/docs" if getattr(settings, "NINJA_ENABLE_DOCS", True) else None
 openapi_url = "/openapi.json" if getattr(settings,
@@ -34,6 +35,7 @@ api.add_router("/dpd", dpd_router)
 api.add_router("/unisend", unisend_router)
 api.add_router("/cms", cms_router)
 api.add_router("/shipping", shipping_router)
+api.add_router("/recommendations", recommendations_router)
 api.add_router("", home_router)
 
 

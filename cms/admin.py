@@ -28,7 +28,8 @@ class CmsPageTranslationInline(admin.StackedInline):
 
 @admin.register(CmsPage)
 class CmsPageAdmin(admin.ModelAdmin):
-    list_display = ("slug", "is_active", "updated_at")
-    list_filter = ("is_active",)
-    search_fields = ("slug",)
+    list_display = ("slug", "shop", "is_active", "updated_at")
+    list_filter = ("shop", "is_active")
+    search_fields = ("slug", "shop__code", "shop__name")
+    autocomplete_fields = ("shop",)
     inlines = [CmsPageTranslationInline]

@@ -6,6 +6,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from api.i18n import get_request_language_code
+from api.shop_context import get_request_shop, shop_context_enabled, shop_context_strict
 
 from catalog.home_services import get_products_by_slugs_for_grid, get_products_for_grid
 from catalog.models import Category
@@ -76,12 +77,23 @@ def home(
     if language_code is None:
         language_code = get_request_language_code(request)
 
-    cache_key = f"homebuilder:home:v1:cc:{(country_code or '').upper()}:ch:{(channel or '').lower()}:lang:{(language_code or '').lower()}"
+    shop = get_request_shop(request)
+    if shop_context_enabled() and shop_context_strict() and shop is None:
+        raise HttpError(404, "Shop not resolved for host")
+
+    shop_cache = str(int(shop.id)) if shop is not None else "global"
+    cache_key = f"homebuilder:home:v1:shop:{shop_cache}:cc:{(country_code or '').upper()}:ch:{(channel or '').lower()}:lang:{(language_code or '').lower()}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
-    page = HomePage.objects.filter(code="home", is_active=True).only("id", "code", "updated_at").first()
+    page_qs = HomePage.objects.filter(code="home", is_active=True)
+    if shop is not None:
+        page_qs = page_qs.filter(shop_id=shop.id)
+    else:
+        page_qs = page_qs.filter(shop__isnull=True)
+
+    page = page_qs.only("id", "code", "updated_at").first()
     if page is None:
         raise HttpError(404, "Home page not configured")
 
