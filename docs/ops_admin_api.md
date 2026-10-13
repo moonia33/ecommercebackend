@@ -32,17 +32,20 @@ Puslapiuotas užsakymų sąrašas su kritine paieška pagal:
 
 ### Query
 
-- baziniai: `status`, `payment_status`, `shipping_type`, `assignee`, `date_from`, `date_to`, `q`, `page`, `page_size`
+- baziniai: `shop_code`, `status`, `payment_status`, `shipping_type`, `assignee`, `date_from`, `date_to`, `q`, `page`, `page_size`
 - tiekimo paieška: `product_q`, `supplier_code`, `manufacturer_q`, `remote_only`, `eta_from`, `eta_to`
 
 ### Response
 
 - `page`, `page_size`, `total_count`
 - `results[]` su:
+  - `shop` (`id`, `code`, `name`, `primary_domain`)
+  - `customer` (`user_id`, `email`, `full_name`, `phone`, `company`, `is_guest`)
   - bazinė order būsena (`status`, `delivery_status`, `fulfillment_mode`, ...)
+  - `amount_gross`, `amount_currency`
   - `matched_items_count`
   - `matched_suppliers`
-  - `matched_lines[]` (kokios eilutės atitiko filtrą)
+  - `matched_lines[]` (kokios eilutės atitiko filtrą, su variantu/miniatiūra/sandėliu/kainomis)
 
 ## GET `/api/v1/ops/orders/{order_id}`
 

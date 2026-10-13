@@ -253,8 +253,25 @@ class OpsOrderSearchTests(TestCase):
         self.assertEqual(payload["total_count"], 1)
         self.assertEqual(len(payload["results"]), 1)
         self.assertEqual(payload["results"][0]["id"], self.order.id)
+        self.assertEqual(payload["results"][0]["shop"]["code"], "ops")
+        self.assertEqual(payload["results"][0]["customer"]["email"], self.staff_user.email)
+        self.assertEqual(payload["results"][0]["amount_currency"], "EUR")
+        self.assertEqual(payload["results"][0]["amount_gross"], "24.20")
         self.assertEqual(payload["results"][0]["matched_suppliers"], ["remote_wh_1"])
         self.assertEqual(payload["results"][0]["matched_items_count"], 1)
+        self.assertEqual(payload["results"][0]["matched_lines"][0]["warehouse_country"], "PL")
+
+    def test_staff_can_filter_orders_by_shop_code(self):
+        self._set_auth_cookie(self.staff_user)
+        res = self.client.get(
+            "/api/v1/ops/orders",
+            {"shop_code": "ops"},
+            HTTP_HOST="ops.local",
+        )
+        self.assertEqual(res.status_code, 200)
+        payload = res.json()
+        self.assertEqual(payload["total_count"], 1)
+        self.assertEqual(payload["results"][0]["shop"]["code"], "ops")
 
     def test_non_staff_is_forbidden(self):
         self._set_auth_cookie(self.non_staff_user)

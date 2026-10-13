@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Count, Prefetch, Q, Sum
 from django.utils import timezone
 from ninja import Query, Router, Schema
 from ninja.errors import HttpError
@@ -22,6 +22,7 @@ _auth = JWTAuth()
 
 
 class OpsOrderSearchIn(Schema):
+    shop_code: str = ""
     status: str = ""
     payment_status: str = ""
     shipping_type: str = ""
@@ -78,21 +79,48 @@ class OpsPaymentActionIn(Schema):
     note: str = ""
 
 
+class OpsShopOut(Schema):
+    id: int | None = None
+    code: str = ""
+    name: str = ""
+    primary_domain: str = ""
+
+
+class OpsCustomerOut(Schema):
+    user_id: int | None = None
+    email: str = ""
+    full_name: str = ""
+    phone: str = ""
+    company: str = ""
+    is_guest: bool = False
+
+
 class OpsOrderMatchLineOut(Schema):
     order_line_id: int
+    variant_id: int | None = None
+    variant_sku: str = ""
+    barcode: str = ""
     sku: str
     name: str
     qty: int
     product_id: int | None = None
     product_name: str = ""
     product_slug: str = ""
+    thumbnail_url: str = ""
     warehouse_code: str = ""
     warehouse_name: str = ""
+    warehouse_country: str = ""
     brand_name: str = ""
+    unit_net: str = "0"
+    unit_vat: str = "0"
+    unit_gross: str = "0"
+    line_total_gross: str = "0"
 
 
 class OpsOrderListItemOut(Schema):
     id: int
+    shop: OpsShopOut
+    customer: OpsCustomerOut
     status: str
     payment_status: str = ""
     delivery_status: str
@@ -101,9 +129,12 @@ class OpsOrderListItemOut(Schema):
     supplier_reference: str = ""
     country_code: str
     shipping_method: str
+    shipping_country_code: str = ""
     delivery_min_date: str = ""
     delivery_max_date: str = ""
     created_at: str
+    amount_gross: str = "0"
+    amount_currency: str = "EUR"
     matched_items_count: int
     matched_suppliers: list[str]
     matched_lines: list[OpsOrderMatchLineOut]
@@ -268,6 +299,62 @@ def _to_iso(v) -> str:
         return ""
 
 
+def _to_money_str(v) -> str:
+    if v is None:
+        return "0"
+    try:
+        return str(v)
+    except Exception:
+        return "0"
+
+
+def _customer_full_name(user, fallback: str = "") -> str:
+    if user is None:
+        return fallback or ""
+    first = (getattr(user, "first_name", "") or "").strip()
+    last = (getattr(user, "last_name", "") or "").strip()
+    full = " ".join([x for x in [first, last] if x]).strip()
+    if full:
+        return full
+    return fallback or (getattr(user, "email", "") or "")
+
+
+def _product_thumbnail_url(product) -> str:
+    if product is None:
+        return ""
+    try:
+        images = list(getattr(product, "images", []).all()[:1])
+    except Exception:
+        images = []
+    if not images:
+        return ""
+    img = images[0]
+    for candidate in [
+        getattr(img, "listing_webp_url", ""),
+        getattr(img, "listing_avif_url", ""),
+        getattr(img, "url", ""),
+    ]:
+        c = (candidate or "").strip()
+        if c:
+            return c
+    return ""
+
+
+def _effective_order_total_gross(order: Order) -> Decimal:
+    try:
+        current = Decimal(getattr(order, "total_gross", 0) or 0)
+    except Exception:
+        current = Decimal("0")
+    if current > 0:
+        return current
+    try:
+        agg = order.lines.aggregate(sum_gross=Sum("total_gross"))
+        summed = agg.get("sum_gross")
+        return Decimal(summed or 0)
+    except Exception:
+        return current
+
+
 def _track_order_event(*, order: Order, user, kind: str, name: str, payload: dict | None = None) -> None:
     OrderEvent.objects.create(
         order=order,
@@ -322,6 +409,10 @@ def _build_line_filter(filters: OpsOrderSearchIn, *, prefix: str = "") -> Q:
 def _build_order_filter(filters: OpsOrderSearchIn, *, shop_id: int | None) -> tuple[Q, Q]:
     order_q = Q()
     line_q = _build_line_filter(filters)
+
+    shop_code = (filters.shop_code or "").strip().lower()
+    if shop_code:
+        order_q &= Q(shop__code=shop_code)
 
     status = (filters.status or "").strip()
     if status:
@@ -385,6 +476,7 @@ def _serialize_ops_order(order: Order) -> OpsOrderListItemOut:
         brand = getattr(product, "brand", None) if product is not None else None
         offer = getattr(line, "offer", None)
         warehouse = getattr(offer, "warehouse", None) if offer is not None else None
+        thumbnail_url = _product_thumbnail_url(product)
 
         warehouse_code = (getattr(warehouse, "code", "") or "").strip()
         if warehouse_code and warehouse_code not in seen_suppliers:
@@ -394,21 +486,47 @@ def _serialize_ops_order(order: Order) -> OpsOrderListItemOut:
         matched_lines.append(
             OpsOrderMatchLineOut(
                 order_line_id=int(line.id),
+                variant_id=(int(variant.id) if variant is not None else None),
+                variant_sku=((getattr(variant, "sku", "") or "") if variant is not None else ""),
+                barcode=((getattr(variant, "barcode", "") or "") if variant is not None else ""),
                 sku=(line.sku or ""),
                 name=(line.name or ""),
                 qty=int(line.qty or 0),
                 product_id=(int(product.id) if product is not None else None),
                 product_name=((getattr(product, "name", "") or "") if product is not None else ""),
                 product_slug=((getattr(product, "slug", "") or "") if product is not None else ""),
+                thumbnail_url=thumbnail_url,
                 warehouse_code=warehouse_code,
                 warehouse_name=((getattr(warehouse, "name", "") or "") if warehouse is not None else ""),
+                warehouse_country=((getattr(warehouse, "country_code", "") or "") if warehouse is not None else ""),
                 brand_name=((getattr(brand, "name", "") or "") if brand is not None else ""),
+                unit_net=_to_money_str(getattr(line, "unit_net", None)),
+                unit_vat=_to_money_str(getattr(line, "unit_vat", None)),
+                unit_gross=_to_money_str(getattr(line, "unit_gross", None)),
+                line_total_gross=_to_money_str(getattr(line, "total_gross", None)),
             )
         )
 
     pi = getattr(order, "payment_intent", None)
+    shop = getattr(order, "shop", None)
+    user = getattr(order, "user", None)
+    amount_gross = _effective_order_total_gross(order)
     return OpsOrderListItemOut(
         id=int(order.id),
+        shop=OpsShopOut(
+            id=(int(shop.id) if shop is not None else None),
+            code=((getattr(shop, "code", "") or "") if shop is not None else ""),
+            name=((getattr(shop, "name", "") or "") if shop is not None else ""),
+            primary_domain=((getattr(shop, "primary_domain", "") or "") if shop is not None else ""),
+        ),
+        customer=OpsCustomerOut(
+            user_id=(int(user.id) if user is not None else None),
+            email=((getattr(user, "email", "") or "") if user is not None else ""),
+            full_name=_customer_full_name(user, fallback=(order.shipping_full_name or "")),
+            phone=(order.shipping_phone or ""),
+            company=(order.shipping_company or ""),
+            is_guest=(user is None),
+        ),
         status=(order.status or ""),
         payment_status=((getattr(pi, "status", "") or "") if pi is not None else ""),
         delivery_status=(order.delivery_status or ""),
@@ -417,9 +535,12 @@ def _serialize_ops_order(order: Order) -> OpsOrderListItemOut:
         supplier_reference=(order.supplier_reference or ""),
         country_code=(order.country_code or ""),
         shipping_method=(order.shipping_method or ""),
+        shipping_country_code=(order.shipping_country_code or ""),
         delivery_min_date=_to_iso(order.delivery_min_date),
         delivery_max_date=_to_iso(order.delivery_max_date),
         created_at=_to_iso(order.created_at),
+        amount_gross=_to_money_str(amount_gross),
+        amount_currency=(order.currency or "EUR"),
         matched_items_count=int(getattr(order, "matched_items_count", len(lines))),
         matched_suppliers=suppliers,
         matched_lines=matched_lines,
@@ -598,7 +719,7 @@ def ops_list_orders(request, filters: OpsOrderSearchIn = Query(...)):
         ]
     )
 
-    qs = Order.objects.filter(order_q).select_related("payment_intent")
+    qs = Order.objects.filter(order_q).select_related("payment_intent", "shop", "user")
     if has_line_filters:
         qs = qs.filter(order_line_q)
     qs = qs.distinct()
@@ -619,6 +740,7 @@ def ops_list_orders(request, filters: OpsOrderSearchIn = Query(...)):
             "variant__product__brand",
             "offer__warehouse",
         )
+        .prefetch_related("variant__product__images")
         .order_by("id")
     )
     if has_line_filters:
@@ -648,12 +770,14 @@ def ops_order_detail(request, order_id: int):
     order = _get_order_for_ops(order_id, shop_id=shop_id)
     order = (
         Order.objects.filter(id=order.id)
-        .select_related("payment_intent")
+        .select_related("payment_intent", "shop", "user")
         .annotate(matched_items_count=Count("lines", distinct=True))
         .prefetch_related(
             Prefetch(
                 "lines",
-                queryset=OrderLine.objects.select_related("variant__product__brand", "offer__warehouse").order_by("id"),
+                queryset=OrderLine.objects.select_related("variant__product__brand", "offer__warehouse")
+                .prefetch_related("variant__product__images")
+                .order_by("id"),
                 to_attr="ops_matched_lines",
             )
         )
