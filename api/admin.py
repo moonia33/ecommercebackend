@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from django import forms
 from django.contrib import admin
 
-from .models import Shop, ShopConfig, ShopEmailConfig
+from api.admin_i18n import apply_language_code_choices
+
+from .models import Shop, ShopConfig, ShopEmailConfig, ShopLanguage
 
 
 class ShopConfigInline(admin.StackedInline):
@@ -17,22 +20,42 @@ class ShopEmailConfigInline(admin.StackedInline):
     max_num = 1
 
 
+class ShopLanguageInline(admin.TabularInline):
+    model = ShopLanguage
+    extra = 0
+    fields = ("language_code", "is_active", "is_default", "sort_order")
+    ordering = ("-is_default", "sort_order", "language_code")
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = ShopLanguage
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=False)
+
+    form = Form
+
+
 @admin.register(Shop)
 class ShopAdmin(admin.ModelAdmin):
     list_display = (
         "code",
         "name",
         "primary_domain",
-        "default_language_code",
+        "resolved_default_language_code",
         "default_country_code",
         "currency",
         "is_active",
         "updated_at",
     )
-    list_filter = ("is_active", "default_language_code", "default_country_code", "currency")
+    list_filter = ("is_active", "default_country_code", "currency")
     search_fields = ("code", "name", "primary_domain", "additional_domains")
     ordering = ("code",)
-    inlines = (ShopConfigInline, ShopEmailConfigInline)
+    inlines = (ShopLanguageInline, ShopConfigInline, ShopEmailConfigInline)
 
     fieldsets = (
         ("Identity", {"fields": ("code", "name", "is_active")}),
@@ -42,11 +65,22 @@ class ShopAdmin(admin.ModelAdmin):
         ),
         (
             "Locale",
-            {"fields": ("default_language_code", "default_country_code", "timezone", "currency")},
+            {"fields": ("resolved_default_language_code", "default_country_code", "timezone", "currency")},
         ),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("resolved_default_language_code", "created_at", "updated_at")
+
+    @admin.display(description="Default language code")
+    def resolved_default_language_code(self, obj: Shop) -> str:
+        row = (
+            obj.languages.filter(is_active=True, is_default=True)
+            .only("language_code")
+            .first()
+        )
+        if row and (row.language_code or "").strip():
+            return row.language_code
+        return obj.default_language_code
 
 
 @admin.register(ShopConfig)

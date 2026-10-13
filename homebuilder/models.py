@@ -1,8 +1,21 @@
 from __future__ import annotations
 
+from django.core.exceptions import ValidationError
 from django.db import models
 
+from api.i18n import get_supported_language_codes, validate_supported_language_code
 from catalog.models import Brand, Category, Product, ProductGroup
+
+
+def _normalize_translation_language_code(value: str | None) -> str:
+    try:
+        return validate_supported_language_code(value)
+    except ValueError:
+        code = (value or "").strip().lower()
+        allowed = get_supported_language_codes()
+        raise ValidationError(
+            {"language_code": f"Neleistinas language_code '{code}'. Leidziami: {', '.join(sorted(allowed))}"}
+        )
 
 
 class HomePage(models.Model):
@@ -45,6 +58,10 @@ class HomePageTranslation(models.Model):
     def __str__(self) -> str:
         return f"{self.home_page.code} [{self.language_code}]"
 
+    def clean(self):
+        super().clean()
+        self.language_code = _normalize_translation_language_code(self.language_code)
+
 
 class HomeSection(models.Model):
     class Type(models.TextChoices):
@@ -79,6 +96,10 @@ class HomeSectionTranslation(models.Model):
     def __str__(self) -> str:
         return f"{self.home_section_id} [{self.language_code}]"
 
+    def clean(self):
+        super().clean()
+        self.language_code = _normalize_translation_language_code(self.language_code)
+
 
 class HeroSection(models.Model):
     home_section = models.OneToOneField(HomeSection, on_delete=models.CASCADE, related_name="hero")
@@ -109,6 +130,10 @@ class HeroSlideTranslation(models.Model):
     class Meta:
         unique_together = ("hero_slide", "language_code")
         indexes = [models.Index(fields=["hero_slide", "language_code"])]
+
+    def clean(self):
+        super().clean()
+        self.language_code = _normalize_translation_language_code(self.language_code)
 
 
 class ProductGridSection(models.Model):
@@ -177,6 +202,10 @@ class RichTextSectionTranslation(models.Model):
         unique_together = ("rich_text_section", "language_code")
         indexes = [models.Index(fields=["rich_text_section", "language_code"])]
 
+    def clean(self):
+        super().clean()
+        self.language_code = _normalize_translation_language_code(self.language_code)
+
 
 class NewsletterSection(models.Model):
     home_section = models.OneToOneField(HomeSection, on_delete=models.CASCADE, related_name="newsletter")
@@ -193,3 +222,7 @@ class NewsletterSectionTranslation(models.Model):
     class Meta:
         unique_together = ("newsletter_section", "language_code")
         indexes = [models.Index(fields=["newsletter_section", "language_code"])]
+
+    def clean(self):
+        super().clean()
+        self.language_code = _normalize_translation_language_code(self.language_code)

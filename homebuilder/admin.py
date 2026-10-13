@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from django import forms
 from django.contrib import admin
-from django.db import models
 
+from api.admin_i18n import apply_language_code_choices
 from catalog.widgets import ToastUIMarkdownWidget
 
 from .models import (
@@ -28,15 +29,54 @@ class HomePageTranslationInline(admin.StackedInline):
     model = HomePageTranslation
     extra = 0
 
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = HomePageTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
+
 
 class HomeSectionTranslationInline(admin.StackedInline):
     model = HomeSectionTranslation
     extra = 0
 
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = HomeSectionTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
+
 
 class HeroSlideTranslationInline(admin.StackedInline):
     model = HeroSlideTranslation
     extra = 0
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = HeroSlideTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
 
 
 class HeroSlideInline(admin.StackedInline):
@@ -60,6 +100,19 @@ class RichTextSectionTranslationInline(admin.StackedInline):
     model = RichTextSectionTranslation
     extra = 0
 
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = RichTextSectionTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
+
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         if db_field.name == "markdown":
             kwargs["widget"] = ToastUIMarkdownWidget
@@ -69,6 +122,19 @@ class RichTextSectionTranslationInline(admin.StackedInline):
 class NewsletterSectionTranslationInline(admin.StackedInline):
     model = NewsletterSectionTranslation
     extra = 0
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = NewsletterSectionTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
 
 
 @admin.register(HomePage)

@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
-from django.conf import settings
 from django.core.cache import cache
+
+from api.i18n import translation_fallback_chain
 
 from .models import Category, ContentBlock, ContentBlockTranslation, ContentRule
 
@@ -38,28 +39,6 @@ def _category_ancestor_ids(category_id: int | None) -> set[int]:
             break
         cur = Category.objects.filter(id=cur.parent_id).only("id", "parent_id").first()
     return ids
-
-
-def _translation_fallback_chain(language_code: str | None) -> list[str]:
-    chain: list[str] = []
-    if language_code:
-        chain.append(language_code)
-    default = (getattr(settings, "LANGUAGE_CODE", "") or "").split("-")[0]
-    if default:
-        chain.append(default)
-    # Hardcoded safe fallbacks for this project
-    chain.extend(["lt", "en"])
-
-    # Keep order, unique
-    seen: set[str] = set()
-    out: list[str] = []
-    for c in chain:
-        c = (c or "").strip().lower()
-        if not c or c in seen:
-            continue
-        out.append(c)
-        seen.add(c)
-    return out
 
 
 def get_content_blocks_for_product(
@@ -186,7 +165,7 @@ def get_content_blocks_for_product(
         included_block_ids.append(int(b.id))
         seen_block_ids.add(int(b.id))
 
-    fallback_langs = _translation_fallback_chain(language_code)
+    fallback_langs = translation_fallback_chain(language_code)
 
     translations = list(
         ContentBlockTranslation.objects.filter(

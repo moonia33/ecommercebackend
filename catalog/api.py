@@ -21,6 +21,18 @@ from shipping.services import estimate_delivery_window
 from analytics.services import track_event
 from analytics.models import RecentlyViewedProduct
 
+from .localization import (
+    localize_brand,
+    localize_category,
+    localize_feature,
+    localize_feature_value,
+    localize_option_type,
+    localize_option_value,
+    localize_product,
+    resolve_brand_by_slug,
+    resolve_category_by_slug,
+    resolve_product_by_slug,
+)
 from .content_blocks import get_content_blocks_for_product
 from .services import (
     apply_catalog_filters,
@@ -174,6 +186,8 @@ def recently_viewed(
     if not ids:
         return []
 
+    language_code = get_request_language_code(request)
+
     visibility = (
         InventoryItem.OfferVisibility.OUTLET
         if channel == "outlet"
@@ -216,7 +230,7 @@ def recently_viewed(
     products_qs = (
         Product.objects.filter(is_active=True, id__in=ids)
         .select_related("brand", "category", "tax_class")
-        .prefetch_related("images")
+        .prefetch_related("images", "translations", "brand__translations", "category__translations")
         .annotate(_min_variant_price=min_price_expr)
         .annotate(_min_offer_price=min_offer_price_expr)
     )
@@ -246,6 +260,10 @@ def recently_viewed(
 
     out: list[ProductListOut] = []
     for p in ordered:
+        product_loc = localize_product(p, language_code=language_code)
+        brand_loc = localize_brand(p.brand, language_code=language_code) if p.brand else None
+        category_loc = localize_category(p.category, language_code=language_code) if p.category else None
+
         list_net = Decimal(p._min_variant_price if getattr(
             p, "_min_variant_price", None) is not None else 0)
         if getattr(p, "_min_offer_price", None) is not None:
@@ -302,22 +320,22 @@ def recently_viewed(
             {
                 "id": p.id,
                 "sku": p.sku,
-                "slug": p.slug,
-                "name": p.name,
+                "slug": product_loc["slug"],
+                "name": product_loc["name"],
                 "is_active": bool(p.is_active),
                 "brand": {
                     "id": p.brand.id,
-                    "slug": p.brand.slug,
-                    "name": p.brand.name,
+                    "slug": brand_loc["slug"],
+                    "name": brand_loc["name"],
                 }
-                if p.brand
+                if p.brand and brand_loc
                 else None,
                 "category": {
                     "id": p.category.id,
-                    "slug": p.category.slug,
-                    "name": p.category.name,
+                    "slug": category_loc["slug"],
+                    "name": category_loc["name"],
                 }
-                if p.category
+                if p.category and category_loc
                 else None,
                 "images": images_out,
                 "price": _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
@@ -331,6 +349,7 @@ def recently_viewed(
 
 @router.get("/categories", response=list[CategoryOut])
 def categories(request):
+    language_code = get_request_language_code(request)
     shop = _shop_or_404_when_strict(request)
     product_ids = set(
         apply_shop_product_scope(
@@ -338,66 +357,81 @@ def categories(request):
             shop_id=(int(shop.id) if shop else None),
         ).values_list("id", flat=True)
     )
-    qs = Category.objects.filter(is_active=True).order_by("name")
-    return [
-        {
-            "id": c.id,
-            "slug": c.slug,
-            "name": c.name,
-            "parent_id": c.parent_id,
-            "description": c.description or "",
-            "hero_image_url": (c.hero_url or None),
-            "menu_icon_url": (c.menu_icon_url_resolved or None),
-            "seo_title": getattr(c, "seo_title", "") or "",
-            "seo_description": getattr(c, "seo_description", "") or "",
-            "seo_keywords": getattr(c, "seo_keywords", "") or "",
-        }
-        for c in qs
-        if (
-            not product_ids
-            or Product.objects.filter(is_active=True, category_id=c.id, id__in=product_ids).exists()
+    qs = Category.objects.filter(is_active=True).prefetch_related("translations").order_by("name")
+    out = []
+    for c in qs:
+        if product_ids and not Product.objects.filter(is_active=True, category_id=c.id, id__in=product_ids).exists():
+            continue
+        loc = localize_category(c, language_code=language_code)
+        out.append(
+            {
+                "id": c.id,
+                "slug": loc["slug"],
+                "name": loc["name"],
+                "parent_id": c.parent_id,
+                "description": loc["description"],
+                "hero_image_url": (c.hero_url or None),
+                "menu_icon_url": (c.menu_icon_url_resolved or None),
+                "seo_title": loc["seo_title"],
+                "seo_description": loc["seo_description"],
+                "seo_keywords": loc["seo_keywords"],
+            }
         )
-    ]
+    return out
 
 
 @router.get("/categories/{slug}", response=CategoryDetailOut)
-def category_detail(request, slug: str):
-    c = Category.objects.filter(
-        slug=slug, is_active=True).select_related("parent").first()
+def category_detail(request, slug: str, language_code: str | None = None):
+    if language_code is None:
+        language_code = get_request_language_code(request)
+    c = resolve_category_by_slug(slug=slug, language_code=language_code, is_active=True)
+    if c:
+        c = Category.objects.filter(id=c.id).select_related("parent").prefetch_related("translations").first()
     if not c:
         raise HttpError(404, "Category not found")
+    loc = localize_category(c, language_code=language_code)
     return {
         "id": c.id,
-        "slug": c.slug,
-        "name": c.name,
+        "slug": loc["slug"],
+        "name": loc["name"],
         "parent_id": c.parent_id,
-        "description": c.description or "",
+        "description": loc["description"],
         "hero_image_url": (c.hero_url or None),
         "menu_icon_url": (c.menu_icon_url_resolved or None),
-        "seo_title": getattr(c, "seo_title", "") or "",
-        "seo_description": getattr(c, "seo_description", "") or "",
-        "seo_keywords": getattr(c, "seo_keywords", "") or "",
+        "seo_title": loc["seo_title"],
+        "seo_description": loc["seo_description"],
+        "seo_keywords": loc["seo_keywords"],
     }
 
 
 @router.get("/brands", response=list[BrandOut])
 def brands(request):
+    language_code = get_request_language_code(request)
     shop = _shop_or_404_when_strict(request)
     products_qs = apply_shop_product_scope(
         qs=Product.objects.filter(is_active=True),
         shop_id=(int(shop.id) if shop else None),
     )
     qs = Brand.objects.filter(
-        is_active=True, products__in=products_qs).distinct().order_by("name")
-    return [{"id": b.id, "slug": b.slug, "name": b.name} for b in qs]
+        is_active=True, products__in=products_qs).prefetch_related("translations").distinct().order_by("name")
+    out = []
+    for b in qs:
+        loc = localize_brand(b, language_code=language_code)
+        out.append({"id": b.id, "slug": loc["slug"], "name": loc["name"]})
+    return out
 
 
 @router.get("/brands/{slug}", response=BrandOut)
-def brand_detail(request, slug: str):
-    b = Brand.objects.filter(slug=slug, is_active=True).first()
+def brand_detail(request, slug: str, language_code: str | None = None):
+    if language_code is None:
+        language_code = get_request_language_code(request)
+    b = resolve_brand_by_slug(slug=slug, language_code=language_code, is_active=True)
+    if b:
+        b = Brand.objects.filter(id=b.id).prefetch_related("translations").first()
     if not b:
         raise HttpError(404, "Brand not found")
-    return {"id": b.id, "slug": b.slug, "name": b.name}
+    loc = localize_brand(b, language_code=language_code)
+    return {"id": b.id, "slug": loc["slug"], "name": loc["name"]}
 
 
 @router.get("/product-groups", response=list[ProductGroupOut])
@@ -424,9 +458,10 @@ def product_group_detail(request, code: str):
 
 @router.get("/features", response=list[FeatureOut])
 def features(request):
+    language_code = get_request_language_code(request)
     qs = (
         Feature.objects.filter(is_active=True, is_filterable=True)
-        .prefetch_related("values")
+        .prefetch_related("translations", "values", "values__translations")
         .order_by("sort_order", "code")
     )
     out: list[FeatureOut] = []
@@ -437,8 +472,15 @@ def features(request):
             {
                 "id": f.id,
                 "code": f.code,
-                "name": f.name,
-                "values": [{"id": v.id, "value": v.value} for v in vals],
+                "name": localize_feature(f, language_code=language_code),
+                "values": [
+                    {
+                        "id": v.id,
+                        "value": v.value,
+                        "label": localize_feature_value(v, language_code=language_code),
+                    }
+                    for v in vals
+                ],
             }
         )
     return out
@@ -446,9 +488,10 @@ def features(request):
 
 @router.get("/option-types", response=list[OptionTypeOut])
 def option_types(request):
+    language_code = get_request_language_code(request)
     qs = (
         OptionType.objects.filter(is_active=True)
-        .prefetch_related("values")
+        .prefetch_related("translations", "values", "values__translations")
         .order_by("sort_order", "code")
     )
     out: list[OptionTypeOut] = []
@@ -459,10 +502,17 @@ def option_types(request):
             {
                 "id": t.id,
                 "code": t.code,
-                "name": t.name,
+                "name": localize_option_type(t, language_code=language_code),
                 "display_type": t.display_type,
                 "swatch_type": t.swatch_type,
-                "values": [{"id": v.id, "code": v.code, "label": v.label} for v in vals],
+                "values": [
+                    {
+                        "id": v.id,
+                        "code": v.code,
+                        "label": localize_option_value(v, language_code=language_code),
+                    }
+                    for v in vals
+                ],
             }
         )
     return out
@@ -474,6 +524,7 @@ def products(
     request,
     country_code: str = "LT",
     channel: str = "normal",
+    language_code: str | None = None,
     q: str | None = None,
     category_slug: str | None = None,
     brand_slug: str | None = None,
@@ -490,6 +541,8 @@ def products(
     channel = (channel or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
         raise HttpError(400, "Invalid channel")
+    if language_code is None:
+        language_code = get_request_language_code(request)
 
     visibility = (
         InventoryItem.OfferVisibility.OUTLET
@@ -537,7 +590,7 @@ def products(
     qs = (
         Product.objects.filter(is_active=True)
         .select_related("brand", "category", "tax_class")
-        .prefetch_related("images")
+        .prefetch_related("images", "translations", "brand__translations", "category__translations")
         .annotate(_min_variant_price=min_price_expr)
         .annotate(_min_offer_price=min_offer_price_expr)
     )
@@ -562,6 +615,7 @@ def products(
         q=q,
         category_slug=category_slug,
         brand_slug=brand_slug,
+        language_code=language_code,
         group_code=group_code,
         feature=feature,
         option=option,
@@ -570,7 +624,12 @@ def products(
     if channel == "outlet":
         qs = qs.filter(_min_offer_price__isnull=False)
 
-    return serialize_products_listing(qs=qs, country_code=country_code, channel=channel)
+    return serialize_products_listing(
+        qs=qs,
+        country_code=country_code,
+        channel=channel,
+        language_code=language_code,
+    )
 
 
 @router.get("/products/facets", response=CatalogFacetsOut)
@@ -578,6 +637,7 @@ def product_facets(
     request,
     country_code: str = "LT",
     channel: str = "normal",
+    language_code: str | None = None,
     q: str | None = None,
     category_slug: str | None = None,
     brand_slug: str | None = None,
@@ -592,6 +652,8 @@ def product_facets(
     channel = (channel or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
         raise HttpError(400, "Invalid channel")
+    if language_code is None:
+        language_code = get_request_language_code(request)
 
     visibility = (
         InventoryItem.OfferVisibility.OUTLET
@@ -618,13 +680,18 @@ def product_facets(
         q=q,
         category_slug=category_slug,
         brand_slug=brand_slug,
+        language_code=language_code,
         group_code=group_code,
         feature=feature,
         option=option,
     )
 
     product_ids = list(qs.values_list("id", flat=True))
-    return build_facets_payload(product_ids=product_ids, selected_category=selected_category)
+    return build_facets_payload(
+        product_ids=product_ids,
+        selected_category=selected_category,
+        language_code=language_code,
+    )
 
 
 @router.get("/categories/{slug}/products", response=list[ProductListOut])
@@ -634,6 +701,7 @@ def category_products(
     slug: str,
     country_code: str = "LT",
     channel: str = "normal",
+    language_code: str | None = None,
     q: str | None = None,
     brand_slug: str | None = None,
     group_code: str | None = None,
@@ -646,6 +714,7 @@ def category_products(
         request,
         country_code=country_code,
         channel=channel,
+        language_code=language_code,
         q=q,
         category_slug=slug,
         brand_slug=brand_slug,
@@ -664,6 +733,7 @@ def brand_products(
     slug: str,
     country_code: str = "LT",
     channel: str = "normal",
+    language_code: str | None = None,
     q: str | None = None,
     category_slug: str | None = None,
     group_code: str | None = None,
@@ -676,6 +746,7 @@ def brand_products(
         request,
         country_code=country_code,
         channel=channel,
+        language_code=language_code,
         q=q,
         category_slug=category_slug,
         brand_slug=slug,
@@ -694,6 +765,7 @@ def product_group_products(
     code: str,
     country_code: str = "LT",
     channel: str = "normal",
+    language_code: str | None = None,
     q: str | None = None,
     category_slug: str | None = None,
     brand_slug: str | None = None,
@@ -706,6 +778,7 @@ def product_group_products(
         request,
         country_code=country_code,
         channel=channel,
+        language_code=language_code,
         q=q,
         category_slug=category_slug,
         brand_slug=brand_slug,
@@ -785,22 +858,34 @@ def product_detail(
     channel = (channel or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
         raise HttpError(400, "Invalid channel")
+    if language_code is None:
+        language_code = get_request_language_code(request)
 
     shop = _shop_or_404_when_strict(request)
     products_qs = apply_shop_product_scope(
         qs=Product.objects.filter(is_active=True),
         shop_id=(int(shop.id) if shop else None),
     )
+    resolved = resolve_product_by_slug(slug=slug, language_code=language_code, is_active=True)
+    if resolved is None:
+        raise HttpError(404, "Product not found")
     product = (
-        products_qs.filter(slug=slug)
+        products_qs.filter(id=resolved.id)
         .select_related("brand", "category", "tax_class")
         .prefetch_related(
             "images",
+            "translations",
+            "brand__translations",
+            "category__translations",
+            "feature_values__feature__translations",
+            "feature_values__feature_value__translations",
             "feature_values__feature",
             "feature_values__feature_value",
             "variants",
             "variants__option_values__option_type",
+            "variants__option_values__option_type__translations",
             "variants__option_values__option_value",
+            "variants__option_values__option_value__translations",
             "variants__inventory_items",
         )
         .first()

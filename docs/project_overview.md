@@ -40,14 +40,22 @@ Rekomenduojamos taisyklės:
 
 ## i18n principai
 
-- bazinė kalba paprastai `lt`;
-- `Product/Category/Brand` turi vertimų modelius;
+- numatytos kalbos: `lt`, `pl`, `en` (konfigūruojama `SUPPORTED_LANGUAGE_CODES`);
+- kiekvienam shop aktyvios kalbos valdomos per `ShopLanguage` (kanoninis šaltinis);
+- `Shop.default_language_code` laikomas išvestiniu lauku (sinchronizuojamas iš `ShopLanguage.is_default`);
+- duomenų migracija išvalo nebeleidžiamas kalbas pagal aktyvų `SUPPORTED_LANGUAGE_CODES` sąrašą;
+- kataloge vertimai taikomi:
+  - `Category`, `Brand`, `Product`,
+  - `Feature`, `FeatureValue`,
+  - `OptionType`, `OptionValue`;
+- `cms`, `homebuilder`, `shipping` vertimų modeliai naudoja tą pačią kalbos validavimo/fallback logiką;
 - kalba nustatoma: `?lang` -> `Accept-Language` -> `shop default` -> global default.
 
 Svarbu:
 
 - URL neturi locale segmento (`/api/v1/lt/...` nenaudojama);
-- locale yra request lygmens signalas per header/query.
+- locale yra request lygmens signalas per header/query;
+- FE turi naudoti stabilius kodus filtravimui ir lokalizuotus tekstus atvaizdavimui.
 
 ## 3 etapų įgyvendinimas
 

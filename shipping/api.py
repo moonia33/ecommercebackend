@@ -13,8 +13,8 @@ from .schemas import ShippingCountryOut
 router = Router(tags=["shipping"])
 
 
-def _pick_best_translation(*, country_id: int, language_code: str) -> ShippingCountryTranslation | None:
-    langs = translation_fallback_chain(language_code)
+def _pick_best_translation(*, country_id: int, language_code: str, shop=None) -> ShippingCountryTranslation | None:
+    langs = translation_fallback_chain(language_code, shop=shop)
     rows = list(
         ShippingCountryTranslation.objects.filter(
             shipping_country_id=country_id,
@@ -57,7 +57,7 @@ def shipping_countries(request, language_code: str | None = None):
 
     out: list[ShippingCountryOut] = []
     for c in countries:
-        t = _pick_best_translation(country_id=int(c.id), language_code=language_code)
+        t = _pick_best_translation(country_id=int(c.id), language_code=language_code, shop=shop)
         name = getattr(t, "name", "") or ""
         out.append(ShippingCountryOut(code=str(c.code or "").upper(), name=name))
     return out

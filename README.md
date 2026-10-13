@@ -75,11 +75,23 @@ Patikra:
 ## Multi-shop ir i18n bazė
 
 - Shop kontekstas sprendžiamas pagal domeną (`ShopResolverMiddleware`).
+- Kalbų politika pagal default:
+  - `lt`, `pl`, `en`
+  - papildomos kalbos (pvz. `de`) įjungiamos per `SUPPORTED_LANGUAGE_CODES` (`.env`).
+- Per-shop kalbų valdymas:
+  - `ShopLanguage` yra kanoninis šaltinis, kurios kalbos aktyvios konkrečiam domenui;
+  - vienai parduotuvei gali būti pažymėta viena `is_default` kalba;
+  - `Shop.default_language_code` yra sinchronizuojamas su `ShopLanguage.is_default` ir admin'e rodomas kaip read-only;
+  - migracija `api.0003_shoplanguage_cleanup_supported_languages` pašalina nebeleidžiamas kalbas (pvz. `lv`, `et`), kad duomenys atitiktų `SUPPORTED_LANGUAGE_CODES`.
 - Kalbos pasirinkimo fallback:
   1. `?lang=...`
   2. `Accept-Language`
   3. `Shop.default_language_code`
   4. global `LANGUAGE_CODE`
+- Vertimų modeliai:
+  - katalogas: `CategoryTranslation`, `BrandTranslation`, `ProductTranslation`,
+    `FeatureTranslation`, `FeatureValueTranslation`, `OptionTypeTranslation`, `OptionValueTranslation`
+  - CMS/home/shipping: visi `*Translation` modeliai naudoja tą pačią kalbų normalizavimo logiką ir fallback grandinę API lygyje.
 - Feature flag:
   - `SHOP_CONTEXT_ENABLED=true` rekomenduojama visose ne-legacy aplinkose.
   - `SHOP_CONTEXT_STRICT=true` įjungia griežtą režimą: jei host neatitinka jokio shop domeno, API nebefallbackina į default shop.

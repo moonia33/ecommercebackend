@@ -6,6 +6,7 @@ from django.db.models import Case, DecimalField, F, IntegerField, Q, Sum, Value,
 from django.db.models.functions import Coalesce
 from ninja.errors import HttpError
 
+from catalog.localization import localize_brand, localize_category, localize_product
 from catalog.api_schemas import ProductListOut
 from catalog.models import Product
 from catalog.services.money import discount_percent, money_out
@@ -69,6 +70,7 @@ def serialize_products_listing(
     qs,
     country_code: str,
     channel: str,
+    language_code: str | None = None,
 ) -> list[ProductListOut]:
     vat_cache: dict[int, Decimal] = {}
 
@@ -87,6 +89,10 @@ def serialize_products_listing(
 
     out: list[ProductListOut] = []
     for p in qs:
+        product_loc = localize_product(p, language_code=language_code)
+        brand_loc = localize_brand(p.brand, language_code=language_code) if p.brand else None
+        category_loc = localize_category(p.category, language_code=language_code) if p.category else None
+
         list_net = Decimal(p._min_variant_price if getattr(p, "_min_variant_price", None) is not None else 0)
         base_net = Decimal(p._min_offer_price) if getattr(p, "_min_offer_price", None) is not None else Decimal(list_net)
         rate = vat_rate_for(p)
@@ -136,11 +142,11 @@ def serialize_products_listing(
             {
                 "id": p.id,
                 "sku": p.sku,
-                "slug": p.slug,
-                "name": p.name,
+                "slug": product_loc["slug"],
+                "name": product_loc["name"],
                 "is_active": bool(p.is_active),
-                "brand": {"id": p.brand.id, "slug": p.brand.slug, "name": p.brand.name} if p.brand else None,
-                "category": {"id": p.category.id, "slug": p.category.slug, "name": p.category.name} if p.category else None,
+                "brand": {"id": p.brand.id, "slug": brand_loc["slug"], "name": brand_loc["name"]} if p.brand and brand_loc else None,
+                "category": {"id": p.category.id, "slug": category_loc["slug"], "name": category_loc["name"]} if p.category and category_loc else None,
                 "images": images_out,
                 "price": money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
                 "compare_at_price": compare_at_price,

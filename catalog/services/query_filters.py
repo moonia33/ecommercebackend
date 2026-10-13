@@ -3,7 +3,8 @@ from __future__ import annotations
 from django.db.models import Q, QuerySet
 from ninja.errors import HttpError
 
-from catalog.models import Brand, Category, Product, ProductGroup
+from catalog.localization import resolve_brand_by_slug, resolve_category_by_slug
+from catalog.models import Category, Product, ProductGroup
 from .catalog_core import descendant_category_ids, parse_pairs
 
 
@@ -13,6 +14,7 @@ def apply_catalog_filters(
     q: str | None = None,
     category_slug: str | None = None,
     brand_slug: str | None = None,
+    language_code: str | None = None,
     group_code: str | None = None,
     feature: str | None = None,
     option: str | None = None,
@@ -25,14 +27,22 @@ def apply_catalog_filters(
             qs = qs.filter(Q(name__icontains=qv) | Q(slug__icontains=qv) | Q(sku__icontains=qv))
 
     if category_slug:
-        selected_category = Category.objects.filter(slug=category_slug, is_active=True).first()
+        selected_category = resolve_category_by_slug(
+            slug=category_slug,
+            language_code=language_code,
+            is_active=True,
+        )
         if not selected_category:
             raise HttpError(404, "Category not found")
         ids = descendant_category_ids(root_id=int(selected_category.id))
         qs = qs.filter(category_id__in=ids)
 
     if brand_slug:
-        brand = Brand.objects.filter(slug=brand_slug, is_active=True).first()
+        brand = resolve_brand_by_slug(
+            slug=brand_slug,
+            language_code=language_code,
+            is_active=True,
+        )
         if not brand:
             raise HttpError(404, "Brand not found")
         qs = qs.filter(brand_id=brand.id)

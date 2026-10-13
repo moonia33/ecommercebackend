@@ -19,9 +19,10 @@ def _pick_best_translation(
     *,
     page_id: int,
     language_code: str | None,
+    shop=None,
     only_fields: tuple[str, ...],
 ):
-    langs = translation_fallback_chain(language_code)
+    langs = translation_fallback_chain(language_code, shop=shop)
     translations = list(
         CmsPageTranslation.objects.filter(
             cms_page_id=page_id,
@@ -61,6 +62,7 @@ def cms_page_detail(request, slug: str, language_code: str | None = None):
     best = _pick_best_translation(
         page_id=int(page.id),
         language_code=language_code,
+        shop=shop,
         only_fields=(
             "language_code",
             "title",

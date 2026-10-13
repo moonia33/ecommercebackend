@@ -14,6 +14,15 @@
   - nenaudoti `/api/v1/lt/...`
   - naudoti `/api/v1/...` + `Accept-Language` arba `?lang=lt`
 
+### Palaikomų kalbų politika
+
+- Numatyta kalbų bazė: `lt`, `pl`, `en`.
+- Papildomos kalbos (pvz. `de`) gali būti įjungiamos backend konfigūracijoje (`SUPPORTED_LANGUAGE_CODES`).
+- Kiekvienas shop gali turėti savo aktyvių kalbų sąrašą (`ShopLanguage`), todėl FE turi remtis realiu domeno atsaku.
+- `ShopLanguage` yra vienintelis šaltinis shop kalboms; `Shop.default_language_code` yra išvestinis default indikatorius.
+- Keičiant `SUPPORTED_LANGUAGE_CODES`, backend migracija pašalina nebeleidžiamus kodus (`lv/et` ir pan.), todėl FE neturi hardcodinti kalbų sąrašo.
+- `slug` laukai gali būti lokalizuoti, todėl perjungus kalbą URL gali pasikeisti.
+
 ## 2. Techniniai Svelte 5 nustatymai
 
 ### Request helper
@@ -69,6 +78,10 @@ Privaloma:
 - `brand_slug`
 - `page`
 - `page_size`
+
+Pastaba:
+
+- `category_slug` ir `brand_slug` priima tiek bazinius, tiek lokalizuotus slug.
 
 ### Kainų interpretacija
 
@@ -143,7 +156,19 @@ Bendros taisyklės:
 - `404` - objektas nerastas arba blogas route;
 - `409` - konfliktas (pvz. pasenę consent duomenys).
 
-## 9. Svelte 5 architektūrinės rekomendacijos
+## 9. Vertimų laukų naudojimo taisyklės FE pusėje
+
+Katalogo objektuose laikykite skirtį tarp:
+
+- **stabilių identifikatorių**: `id`, `code`, canonical `value`
+- **lokalizuotų atvaizdavimo laukų**: `name`, `label`, `value_label`, lokalizuotas `slug`
+
+Praktika:
+
+- filtrų request'ams naudokite stabilius kodus/reikšmes;
+- UI rodykite lokalizuotus tekstinius laukus.
+
+## 10. Svelte 5 architektūrinės rekomendacijos
 
 - turėti atskirus sluoksnius:
   - `lib/api/client.ts` - HTTP klientas;
@@ -152,7 +177,7 @@ Bendros taisyklės:
   - `routes/*` - tik UI kompozicija.
 - idempotency, retry ir toast logika laikyti service sluoksnyje, ne komponentuose.
 
-## 10. Go-live checklist frontend komandai
+## 11. Go-live checklist frontend komandai
 
 - visi request su `credentials: 'include'`;
 - nėra locale URL segmente;

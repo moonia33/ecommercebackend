@@ -9,6 +9,14 @@ from ninja.errors import HttpError
 from pricing.services import compute_vat, get_vat_rate
 from promotions.services import apply_promo_to_unit_net
 
+from .localization import (
+    localize_brand,
+    localize_category,
+    localize_product,
+    resolve_brand_by_slug,
+    resolve_category_by_slug,
+    resolve_product_by_slug,
+)
 from .api_schemas import MoneyOut, ProductListOut
 from .models import Brand, Category, InventoryItem, Product, ProductGroup
 from .services.catalog_core import descendant_category_ids, parse_pairs
@@ -31,11 +39,23 @@ def get_products_by_slugs_for_grid(
     country_code: str,
     channel: str,
     product_slugs: list[str],
+    language_code: str | None = None,
     in_stock_only: bool = True,
 ) -> list[ProductListOut]:
     slugs = [(s or "").strip() for s in (product_slugs or [])]
     slugs = [s for s in slugs if s]
     if not slugs:
+        return []
+
+    resolved_ids: list[int] = []
+    seen_ids: set[int] = set()
+    for slug in slugs:
+        p = resolve_product_by_slug(slug=slug, language_code=language_code, is_active=True)
+        if p is None or int(p.id) in seen_ids:
+            continue
+        resolved_ids.append(int(p.id))
+        seen_ids.add(int(p.id))
+    if not resolved_ids:
         return []
 
     country_code = (country_code or "").strip().upper()
@@ -84,9 +104,9 @@ def get_products_by_slugs_for_grid(
     min_offer_price_expr = Min(offer_price_expr, filter=offer_filter)
 
     qs = (
-        Product.objects.filter(is_active=True, slug__in=slugs)
+        Product.objects.filter(is_active=True, id__in=resolved_ids)
         .select_related("brand", "category", "tax_class")
-        .prefetch_related("images")
+        .prefetch_related("images", "translations", "brand__translations", "category__translations")
         .annotate(_min_variant_price=min_price_expr)
         .annotate(_min_offer_price=min_offer_price_expr)
     )
@@ -124,6 +144,10 @@ def get_products_by_slugs_for_grid(
 
     rendered: list[ProductListOut] = []
     for p in qs:
+        product_loc = localize_product(p, language_code=language_code)
+        brand_loc = localize_brand(p.brand, language_code=language_code) if p.brand else None
+        category_loc = localize_category(p.category, language_code=language_code) if p.category else None
+
         list_net = Decimal(p._min_variant_price if getattr(p, "_min_variant_price", None) is not None else 0)
         if getattr(p, "_min_offer_price", None) is not None:
             base_net = Decimal(p._min_offer_price)
@@ -176,11 +200,27 @@ def get_products_by_slugs_for_grid(
             {
                 "id": p.id,
                 "sku": p.sku,
-                "slug": p.slug,
-                "name": p.name,
+                "slug": product_loc["slug"],
+                "name": product_loc["name"],
                 "is_active": bool(p.is_active),
-                "brand": {"id": p.brand.id, "slug": p.brand.slug, "name": p.brand.name} if p.brand else None,
-                "category": {"id": p.category.id, "slug": p.category.slug, "name": p.category.name} if p.category else None,
+                "brand": (
+                    {
+                        "id": p.brand.id,
+                        "slug": brand_loc["slug"],
+                        "name": brand_loc["name"],
+                    }
+                    if p.brand and brand_loc
+                    else None
+                ),
+                "category": (
+                    {
+                        "id": p.category.id,
+                        "slug": category_loc["slug"],
+                        "name": category_loc["name"],
+                    }
+                    if p.category and category_loc
+                    else None
+                ),
                 "images": images_out,
                 "price": _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
                 "compare_at_price": compare_at_price,
@@ -188,8 +228,8 @@ def get_products_by_slugs_for_grid(
             }
         )
 
-    order_index = {slug: i for i, slug in enumerate(slugs)}
-    rendered.sort(key=lambda p: order_index.get(p.get("slug"), 10_000))
+    order_index_by_id = {pid: i for i, pid in enumerate(resolved_ids)}
+    rendered.sort(key=lambda p: order_index_by_id.get(int(p.get("id") or 0), 10_000))
     return rendered
 
 
@@ -203,6 +243,7 @@ def get_products_for_grid(
     group_code: str | None = None,
     feature: str | None = None,
     option: str | None = None,
+    language_code: str | None = None,
     sort: str | None = None,
     in_stock_only: bool = False,
     limit: int = 12,
@@ -256,7 +297,7 @@ def get_products_for_grid(
     qs = (
         Product.objects.filter(is_active=True)
         .select_related("brand", "category", "tax_class")
-        .prefetch_related("images")
+        .prefetch_related("images", "translations", "brand__translations", "category__translations")
         .annotate(_min_variant_price=min_price_expr)
         .annotate(_min_offer_price=min_offer_price_expr)
     )
@@ -278,14 +319,14 @@ def get_products_for_grid(
             qs = qs.filter(Q(name__icontains=qv) | Q(slug__icontains=qv) | Q(sku__icontains=qv))
 
     if category_slug:
-        c = Category.objects.filter(slug=category_slug, is_active=True).first()
+        c = resolve_category_by_slug(slug=category_slug, language_code=language_code, is_active=True)
         if not c:
             raise HttpError(404, "Category not found")
         ids = descendant_category_ids(root_id=int(c.id))
         qs = qs.filter(category_id__in=ids)
 
     if brand_slug:
-        b = Brand.objects.filter(slug=brand_slug, is_active=True).first()
+        b = resolve_brand_by_slug(slug=brand_slug, language_code=language_code, is_active=True)
         if not b:
             raise HttpError(404, "Brand not found")
         qs = qs.filter(brand_id=b.id)
@@ -383,6 +424,10 @@ def get_products_for_grid(
 
     out: list[ProductListOut] = []
     for p in qs:
+        product_loc = localize_product(p, language_code=language_code)
+        brand_loc = localize_brand(p.brand, language_code=language_code) if p.brand else None
+        category_loc = localize_category(p.category, language_code=language_code) if p.category else None
+
         list_net = Decimal(p._min_variant_price if getattr(p, "_min_variant_price", None) is not None else 0)
         if getattr(p, "_min_offer_price", None) is not None:
             base_net = Decimal(p._min_offer_price)
@@ -436,11 +481,27 @@ def get_products_for_grid(
             {
                 "id": p.id,
                 "sku": p.sku,
-                "slug": p.slug,
-                "name": p.name,
+                "slug": product_loc["slug"],
+                "name": product_loc["name"],
                 "is_active": bool(p.is_active),
-                "brand": {"id": p.brand.id, "slug": p.brand.slug, "name": p.brand.name} if p.brand else None,
-                "category": {"id": p.category.id, "slug": p.category.slug, "name": p.category.name} if p.category else None,
+                "brand": (
+                    {
+                        "id": p.brand.id,
+                        "slug": brand_loc["slug"],
+                        "name": brand_loc["name"],
+                    }
+                    if p.brand and brand_loc
+                    else None
+                ),
+                "category": (
+                    {
+                        "id": p.category.id,
+                        "slug": category_loc["slug"],
+                        "name": category_loc["name"],
+                    }
+                    if p.category and category_loc
+                    else None
+                ),
                 "images": images_out,
                 "price": _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
                 "compare_at_price": compare_at_price,

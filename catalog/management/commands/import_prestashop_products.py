@@ -8,13 +8,30 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils.text import slugify
 
-from catalog.models import Brand, Category, InventoryItem, Product, TaxClass, Variant, Warehouse
+from api.i18n import get_supported_language_codes
+from catalog.models import (
+    Brand,
+    Category,
+    InventoryItem,
+    Product,
+    ProductTranslation,
+    TaxClass,
+    Variant,
+    Warehouse,
+)
 from catalog.richtext import normalize_richtext_to_markdown
 
 
 DEFAULT_SOURCE_DIR = "docs/prestashop_migration"
 BASE_LANG_ID = "1"  # lt
 BASE_SHOP_ID = "1"
+LANG_CODE_BY_PRESTA_LANG_ID = {
+    "1": "lt",
+    "2": "lv",
+    "3": "pl",
+    "4": "et",
+    "6": "en",
+}
 
 
 def _load_table_rows(path: Path) -> list[dict]:
@@ -69,6 +86,17 @@ def _unique_slug(base_slug: str, *, existing: set[str], stable_suffix: str) -> s
         idx += 1
 
 
+def _unique_translation_slug(
+    language_code: str,
+    base_slug: str,
+    *,
+    existing_by_lang: dict[str, set[str]],
+    stable_suffix: str,
+) -> str:
+    bucket = existing_by_lang.setdefault(language_code, set())
+    return _unique_slug(base_slug, existing=bucket, stable_suffix=stable_suffix)
+
+
 def _to_markdown_from_html(value: str | None) -> str:
     return normalize_richtext_to_markdown(value or "", input_format="html").markdown
 
@@ -103,6 +131,7 @@ class Command(BaseCommand):
         include_without_supplier = bool(options.get("include_without_supplier"))
         warehouse_code = str(options.get("warehouse_code") or "presta_import").strip()
         tax_class_code = str(options.get("tax_class_code") or "standard").strip()
+        supported_language_codes = set(get_supported_language_codes())
 
         required_files = [
             "ps_product.json",
@@ -121,16 +150,17 @@ class Command(BaseCommand):
 
         has_combinations: set[str] = {str(r.get("id_product", "")).strip() for r in combination_rows}
 
-        lang_by_product: dict[str, dict] = {}
+        lang_rows_by_product: dict[str, dict[str, dict]] = {}
         for row in product_lang_rows:
-            if str(row.get("id_lang", "")).strip() != BASE_LANG_ID:
-                continue
             if str(row.get("id_shop", "")).strip() != BASE_SHOP_ID:
+                continue
+            lang_id = str(row.get("id_lang", "")).strip()
+            if lang_id not in LANG_CODE_BY_PRESTA_LANG_ID:
                 continue
             product_id = str(row.get("id_product", "")).strip()
             if not product_id:
                 continue
-            lang_by_product[product_id] = row
+            lang_rows_by_product.setdefault(product_id, {})[lang_id] = row
 
         stock_by_product: dict[str, int] = {}
         for row in stock_rows:
@@ -166,7 +196,7 @@ class Command(BaseCommand):
             if product_id in has_combinations:
                 skipped_has_combinations += 1
                 continue
-            if product_id not in lang_by_product:
+            if BASE_LANG_ID not in lang_rows_by_product.get(product_id, {}):
                 skipped_no_lang += 1
                 continue
             filtered.append(row)
@@ -194,14 +224,23 @@ class Command(BaseCommand):
         )
 
         used_product_slugs = set(Product.objects.values_list("slug", flat=True))
+        used_translation_slugs_by_lang: dict[str, set[str]] = {}
+        for lang_code, slug in ProductTranslation.objects.values_list("language_code", "slug"):
+            lang_code = (lang_code or "").strip().lower()
+            slug = (slug or "").strip()
+            if not lang_code or not slug:
+                continue
+            used_translation_slugs_by_lang.setdefault(lang_code, set()).add(slug)
 
         created_products = updated_products = created_variants = updated_stock = 0
+        created_translations = updated_translations = 0
         missing_category_map = missing_brand_map = 0
 
         with transaction.atomic():
             for row in filtered:
                 product_id = str(row.get("id_product", "")).strip()
-                lang_row = lang_by_product[product_id]
+                by_lang = lang_rows_by_product.get(product_id, {})
+                lang_row = by_lang[BASE_LANG_ID]
 
                 name = (lang_row.get("name") or "").strip() or f"Product {product_id}"
                 description_html = (lang_row.get("description") or "").strip()
@@ -285,6 +324,68 @@ class Command(BaseCommand):
                     )
                     updated_products += 1
 
+                for presta_lang_id, tr_row in by_lang.items():
+                    if presta_lang_id == BASE_LANG_ID:
+                        continue
+                    language_code = LANG_CODE_BY_PRESTA_LANG_ID.get(presta_lang_id)
+                    if not language_code:
+                        continue
+                    if supported_language_codes and language_code not in supported_language_codes:
+                        continue
+
+                    tr_name = (tr_row.get("name") or "").strip()
+                    tr_description_html = (tr_row.get("description") or "").strip()
+                    tr_description_short_html = (tr_row.get("description_short") or "").strip()
+                    tr_description = _to_markdown_from_html(tr_description_html)
+                    if not tr_description and tr_description_short_html:
+                        tr_description = _to_markdown_from_html(tr_description_short_html)
+                    tr_seo_title = (tr_row.get("meta_title") or "").strip()
+                    tr_seo_description = (tr_row.get("meta_description") or "").strip()
+                    tr_seo_keywords = (tr_row.get("meta_keywords") or "").strip()
+
+                    link_rewrite_tr = (tr_row.get("link_rewrite") or "").strip()
+                    tr_slug_hint = link_rewrite_tr or slugify(tr_name) or f"product-{product_id}-{language_code}"
+
+                    tr = ProductTranslation.objects.filter(
+                        product=product,
+                        language_code=language_code,
+                    ).first()
+                    if tr is None:
+                        tr_slug = _unique_translation_slug(
+                            language_code,
+                            tr_slug_hint,
+                            existing_by_lang=used_translation_slugs_by_lang,
+                            stable_suffix=product_id,
+                        )
+                        ProductTranslation.objects.create(
+                            product=product,
+                            language_code=language_code,
+                            name=tr_name,
+                            slug=tr_slug,
+                            description=tr_description,
+                            seo_title=tr_seo_title,
+                            seo_description=tr_seo_description,
+                            seo_keywords=tr_seo_keywords,
+                        )
+                        created_translations += 1
+                    else:
+                        used_translation_slugs_by_lang.setdefault(language_code, set()).add(tr.slug)
+                        tr.name = tr_name
+                        tr.description = tr_description
+                        tr.seo_title = tr_seo_title
+                        tr.seo_description = tr_seo_description
+                        tr.seo_keywords = tr_seo_keywords
+                        tr.save(
+                            update_fields=[
+                                "name",
+                                "description",
+                                "seo_title",
+                                "seo_description",
+                                "seo_keywords",
+                            ]
+                        )
+                        updated_translations += 1
+
                 variant = product.variants.filter(external_presta_combination_id__isnull=True).first()
                 if variant is None:
                     # Backfill mapping when variant already exists globally by SKU.
@@ -324,6 +425,7 @@ class Command(BaseCommand):
                 "Presta products import done. "
                 f"created_products={created_products}, updated_products={updated_products}, "
                 f"created_variants={created_variants}, updated_stock={updated_stock}, "
+                f"created_translations={created_translations}, updated_translations={updated_translations}, "
                 f"missing_category_map={missing_category_map}, missing_brand_map={missing_brand_map}, "
                 f"selected={len(filtered)}"
             )

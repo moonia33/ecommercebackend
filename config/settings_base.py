@@ -232,10 +232,31 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-LANGUAGE_CODE = (env("LANGUAGE_CODE", default="lt") or "lt").split("-")[0].strip().lower()
-LANGUAGES = [
-    ("lt", "Lithuanian"),
+_DEFAULT_LANGUAGE_NAMES = {
+    "lt": "Lithuanian",
+    "pl": "Polish",
+    "en": "English",
+    "de": "German",
+    "lv": "Latvian",
+    "et": "Estonian",
+}
+_configured_supported_languages = [
+    (c or "").split("-")[0].strip().lower()
+    for c in env.list("SUPPORTED_LANGUAGE_CODES", default=["lt", "pl", "en"])
+    if (c or "").strip()
 ]
+_normalized_supported_languages: list[str] = []
+for _code in _configured_supported_languages:
+    if _code not in _normalized_supported_languages:
+        _normalized_supported_languages.append(_code)
+if not _normalized_supported_languages:
+    _normalized_supported_languages = ["lt", "pl", "en"]
+
+LANGUAGE_CODE = (env("LANGUAGE_CODE", default=_normalized_supported_languages[0]) or _normalized_supported_languages[0]).split("-")[0].strip().lower()
+if LANGUAGE_CODE not in _normalized_supported_languages:
+    _normalized_supported_languages.insert(0, LANGUAGE_CODE)
+
+LANGUAGES = [(_code, _DEFAULT_LANGUAGE_NAMES.get(_code, _code.upper())) for _code in _normalized_supported_languages]
 SUPPORTED_LANGUAGE_CODES = [c for c, _name in LANGUAGES]
 LANGUAGE_QUERY_PARAM = env("LANGUAGE_QUERY_PARAM", default="lang")
 TIME_ZONE = env("TIME_ZONE", default="UTC")

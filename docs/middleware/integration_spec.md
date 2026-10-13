@@ -45,22 +45,17 @@ Dokumentas orientuotas į dabartinę projekto būseną (branch `bz`) ir dabartin
 
 ## 1.2 Vertimai ir lokalizacija
 
-Esamoje bazėje realiai yra:
+Esamoje bazėje yra:
 
-- `CategoryTranslation` (yra, naudojamas)
-- `BrandTranslation` (nėra modelio)
-- `ProductTranslation` (nėra modelio)
+- `CategoryTranslation`
+- `BrandTranslation`
+- `ProductTranslation`
 
-Todėl middleware dabar turi dirbti taip:
+Middleware turi dirbti taip:
 
-- kategorijoms:
-  - bazinis LT turinys į `Category`
-  - kitos kalbos į `CategoryTranslation`
-- brand ir product:
-  - bazinis turinys į `Brand` ir `Product`
-  - jei reikia daugiakalbystės dabar, laikinas sprendimas:
-    - arba middleware-side localization store
-    - arba papildomos CMS/content taisyklės iki bus įvesti `BrandTranslation`/`ProductTranslation` modeliai
+- bazinė kalba į core (`Category`, `Brand`, `Product`)
+- kitos kalbos į atitinkamus `*Translation` modelius
+- fallback grandinė API lygyje lieka tokia pati (žr. žemiau)
 
 Kalbos fallback API lygyje:
 
@@ -114,10 +109,12 @@ Tai reiškia:
   - `Feature` (unikalus `code`)
   - `FeatureValue` (unikalus per `feature + value`)
   - `ProductFeatureValue` (unikalus per `product + feature_value`)
+  - vertimai: `FeatureTranslation`, `FeatureValueTranslation`
 - variant option:
   - `OptionType` (unikalus `code`)
   - `OptionValue` (unikalus per `option_type + code`)
   - `VariantOptionValue` (unikalus per `variant + option_type`)
+  - vertimai: `OptionTypeTranslation`, `OptionValueTranslation`
 
 Middleware taisyklė:
 
@@ -126,8 +123,11 @@ Middleware taisyklė:
 
 ## 3.3 Lokalizacijos
 
-- `CategoryTranslation.language_code` validuojamas prieš leidžiamų kalbų sąrašą
-- jei projektas single-language konfigūracijoje, backend vis tiek leidžia dalį planinių kalbų (`lv/pl/et/en`) kategorijų vertimams
+- Visi `*Translation.language_code` validuojami per bendrą palaikomų kalbų sąrašą.
+- Numatyti kodai: `lt`, `pl`, `en`; papildomi (pvz. `de`) įjungiami per `SUPPORTED_LANGUAGE_CODES`.
+- Shop aktyvios kalbos valdomos per `ShopLanguage` (kanoninis šaltinis); `Shop.default_language_code` yra sinchronizuojamas default indikatorius.
+- Po `SUPPORTED_LANGUAGE_CODES` pokyčių backend migracijos išvalo nebeleidžiamų kalbų įrašus.
+- API fallback lieka vienodas visiems moduliam: `?lang` -> `Accept-Language` -> `Shop.default_language_code` -> global `LANGUAGE_CODE`.
 
 ## 4) Kainų, likučių ir publikavimo būsenų logika
 

@@ -1,7 +1,8 @@
 from django.db import IntegrityError
-from django.test import Client, TestCase, override_settings
+from django.test import Client, RequestFactory, TestCase, override_settings
 
-from api.models import Shop
+from api.i18n import get_request_language_code, translation_fallback_chain
+from api.models import Shop, ShopLanguage
 from checkout.models import Cart, Order
 from cms.models import CmsPage, CmsPageTranslation
 from homebuilder.models import HomePage, HomePageTranslation
@@ -92,3 +93,41 @@ class MultiSiteIsolationTests(TestCase):
 
         with self.assertRaises(IntegrityError):
             Order.objects.create(user=user, shop=self.shop_a, idempotency_key="abc")
+
+
+@override_settings(
+    ALLOWED_HOSTS=["*"],
+    LANGUAGE_CODE="lt",
+    SUPPORTED_LANGUAGE_CODES=["lt", "pl", "en", "de"],
+    LANGUAGES=[("lt", "Lithuanian"), ("pl", "Polish"), ("en", "English"), ("de", "German")],
+)
+class ShopLanguageSelectionTests(TestCase):
+    def setUp(self):
+        self.rf = RequestFactory()
+        self.shop = Shop.objects.create(
+            code="s1",
+            name="Shop 1",
+            primary_domain="s1.local",
+            default_language_code="pl",
+            default_country_code="PL",
+            currency="EUR",
+            is_active=True,
+        )
+        ShopLanguage.objects.create(shop=self.shop, language_code="pl", is_active=True, is_default=True, sort_order=0)
+        ShopLanguage.objects.create(shop=self.shop, language_code="en", is_active=True, is_default=False, sort_order=1)
+        ShopLanguage.objects.create(shop=self.shop, language_code="de", is_active=False, is_default=False, sort_order=2)
+
+    def test_request_language_respects_shop_enabled_languages(self):
+        req = self.rf.get("/x", {"lang": "de"}, HTTP_ACCEPT_LANGUAGE="en")
+        req.shop = self.shop
+        self.assertEqual(get_request_language_code(req), "en")
+
+        req2 = self.rf.get("/x", {"lang": "en"}, HTTP_ACCEPT_LANGUAGE="de")
+        req2.shop = self.shop
+        self.assertEqual(get_request_language_code(req2), "en")
+
+    def test_fallback_chain_prefers_shop_default_and_enabled(self):
+        chain = translation_fallback_chain("de", shop=self.shop)
+        self.assertEqual(chain[0], "de")
+        self.assertIn("pl", chain)
+        self.assertIn("en", chain)

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from django import forms
 from django.contrib import admin
 
+from api.admin_i18n import apply_language_code_choices
 from .models import (
     DeliveryRule,
     Holiday,
@@ -21,6 +23,19 @@ class ShippingRateInline(admin.TabularInline):
 class ShippingCountryTranslationInline(admin.TabularInline):
     model = ShippingCountryTranslation
     extra = 0
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = ShippingCountryTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
 
 
 @admin.register(ShippingMethod)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from django import forms
-from django.conf import settings
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.db.models import F, IntegerField, Sum, Value
@@ -9,21 +8,28 @@ from django.db.models.functions import Coalesce
 from django.forms.models import BaseInlineFormSet
 from mptt.admin import DraggableMPTTAdmin
 
+from api.admin_i18n import apply_language_code_choices
 
 from .widgets import TableEditorWidget, ToastUIMarkdownWidget
 
 from .models import (
     Brand,
+    BrandTranslation,
     Category,
     CategoryTranslation,
     ContentBlock,
     ContentBlockTranslation,
     ContentRule,
     Feature,
+    FeatureTranslation,
     FeatureValue,
+    FeatureValueTranslation,
     OptionType,
+    OptionTypeTranslation,
     OptionValue,
+    OptionValueTranslation,
     Product,
+    ProductTranslation,
     ProductFeatureValue,
     ProductGroup,
     ProductImage,
@@ -68,21 +74,27 @@ class CategoryTranslationInline(admin.StackedInline):
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            allowed = list(getattr(settings, "LANGUAGES", []))
-            if len(allowed) <= 1:
-                allowed = [
-                    ("lt", "Lithuanian"),
-                    ("lv", "Latvian"),
-                    ("pl", "Polish"),
-                    ("et", "Estonian"),
-                    ("en", "English"),
-                ]
-            base_code = (getattr(settings, "LANGUAGE_CODE", "lt") or "lt").split("-")[0].strip().lower()
-            self.fields["language_code"].choices = [
-                ((code or "").strip().lower(), f"{name} ({(code or '').strip().lower()})")
-                for code, name in allowed
-                if ((code or "").strip().lower() and ((code or "").strip().lower() != base_code))
-            ]
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
+
+
+class BrandTranslationInline(admin.StackedInline):
+    model = BrandTranslation
+    extra = 0
+    show_change_link = True
+    fields = ("language_code", "name", "slug")
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = BrandTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
 
     form = Form
 
@@ -134,6 +146,35 @@ class BrandAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("name", "slug", "external_presta_id")
     prepopulated_fields = {"slug": ("name",)}
+    inlines = (BrandTranslationInline,)
+
+
+class ProductTranslationInline(admin.StackedInline):
+    model = ProductTranslation
+    extra = 0
+    show_change_link = True
+    fieldsets = (
+        (None, {"fields": ("language_code", "name", "slug")}),
+        ("Turinys", {"fields": ("description",)}),
+        ("SEO", {"fields": ("seo_title", "seo_description", "seo_keywords")}),
+    )
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+        description = forms.CharField(
+            required=False,
+            widget=ToastUIMarkdownWidget(mode="wysiwyg", height="320px"),
+        )
+
+        class Meta:
+            model = ProductTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
 
 
 class ProductImageInline(admin.TabularInline):
@@ -410,6 +451,7 @@ class ProductAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ("name",)}
     autocomplete_fields = ("tax_class",)
     inlines = (
+        ProductTranslationInline,
         ProductImageInline,
         ProductFeatureValueInline,
         ProductOptionTypeInline,
@@ -463,6 +505,25 @@ class FeatureValueInline(admin.TabularInline):
     extra = 0
 
 
+class FeatureTranslationInline(admin.StackedInline):
+    model = FeatureTranslation
+    extra = 0
+    show_change_link = True
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = FeatureTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
+
+
 @admin.register(Feature)
 class FeatureAdmin(admin.ModelAdmin):
     list_display = ("code", "name", "is_filterable",
@@ -470,12 +531,31 @@ class FeatureAdmin(admin.ModelAdmin):
     list_filter = ("is_filterable", "allows_multiple", "is_active")
     search_fields = ("code", "name")
     ordering = ("sort_order", "code")
-    inlines = (FeatureValueInline,)
+    inlines = (FeatureTranslationInline, FeatureValueInline)
 
 
 class OptionValueInline(admin.TabularInline):
     model = OptionValue
     extra = 0
+
+
+class OptionTypeTranslationInline(admin.StackedInline):
+    model = OptionTypeTranslation
+    extra = 0
+    show_change_link = True
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = OptionTypeTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
 
 
 @admin.register(OptionType)
@@ -484,7 +564,63 @@ class OptionTypeAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("code", "name")
     ordering = ("sort_order", "code")
-    inlines = (OptionValueInline,)
+    inlines = (OptionTypeTranslationInline, OptionValueInline)
+
+
+class FeatureValueTranslationInline(admin.StackedInline):
+    model = FeatureValueTranslation
+    extra = 0
+    show_change_link = True
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = FeatureValueTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
+
+
+@admin.register(FeatureValue)
+class FeatureValueAdmin(admin.ModelAdmin):
+    list_display = ("feature", "value", "sort_order", "is_active")
+    list_filter = ("is_active", "feature")
+    search_fields = ("value", "feature__code", "feature__name")
+    autocomplete_fields = ("feature",)
+    inlines = (FeatureValueTranslationInline,)
+
+
+class OptionValueTranslationInline(admin.StackedInline):
+    model = OptionValueTranslation
+    extra = 0
+    show_change_link = True
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = OptionValueTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
+
+
+@admin.register(OptionValue)
+class OptionValueAdmin(admin.ModelAdmin):
+    list_display = ("option_type", "code", "label", "sort_order", "is_active")
+    list_filter = ("is_active", "option_type")
+    search_fields = ("code", "label", "option_type__code", "option_type__name")
+    autocomplete_fields = ("option_type",)
+    inlines = (OptionValueTranslationInline,)
 
 
 class VariantOptionValueInline(admin.TabularInline):
@@ -637,6 +773,7 @@ class ContentBlockTranslationInline(admin.StackedInline):
     )
 
     class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
         markdown = forms.CharField(
             required=False,
             widget=ToastUIMarkdownWidget(mode="wysiwyg", height="360px"),
@@ -650,6 +787,10 @@ class ContentBlockTranslationInline(admin.StackedInline):
         class Meta:
             model = ContentBlockTranslation
             fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
 
     form = Form
 
@@ -698,6 +839,7 @@ class ContentBlockTranslationAdmin(admin.ModelAdmin):
     autocomplete_fields = ("content_block",)
 
     class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
         markdown = forms.CharField(
             required=False,
             widget=ToastUIMarkdownWidget(mode="wysiwyg", height="520px"),
@@ -711,6 +853,10 @@ class ContentBlockTranslationAdmin(admin.ModelAdmin):
         class Meta:
             model = ContentBlockTranslation
             fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
 
     form = Form
 

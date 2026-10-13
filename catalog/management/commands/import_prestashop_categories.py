@@ -8,13 +8,14 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils.text import slugify
 
+from api.i18n import get_supported_language_codes
 from catalog.models import Category, CategoryTranslation
 from catalog.richtext import normalize_richtext_to_markdown
 
 
 DEFAULT_SOURCE_PATH = "docs/prestashop_category_for_import.json"
-DEFAULT_ALLOWED_LANG_IDS = ("1", "2", "3", "4", "6")  # lt, lv, pl, et, en
-DEFAULT_LANG_PRIORITY = ("1", "6", "2", "3", "4")  # prefer lt, then en
+DEFAULT_ALLOWED_LANG_IDS = ("1", "3", "6")  # lt, pl, en
+DEFAULT_LANG_PRIORITY = ("1", "3", "6")  # prefer lt, then pl, then en
 DEFAULT_EXCLUDED_CATEGORY_IDS = ("1", "2")
 LANG_CODE_BY_PRESTA_LANG_ID = {
     "1": "lt",
@@ -136,6 +137,7 @@ class Command(BaseCommand):
         replace_existing = bool(options.get("replace_existing"))
         dry_run = bool(options.get("dry_run"))
         base_language_code = "lt"
+        supported_language_codes = set(get_supported_language_codes())
 
         if not source_path.exists():
             raise CommandError(f"Source file not found: {source_path}")
@@ -300,6 +302,8 @@ class Command(BaseCommand):
                 for presta_lang_id, tr_row in src.rows_by_lang.items():
                     language_code = LANG_CODE_BY_PRESTA_LANG_ID.get(presta_lang_id)
                     if not language_code:
+                        continue
+                    if supported_language_codes and language_code not in supported_language_codes:
                         continue
                     # Base content is LT; keep non-LT locales in translation table.
                     if language_code == base_language_code:

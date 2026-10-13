@@ -103,6 +103,7 @@ class ProductFeatureOut(Schema):
     feature_name: str
     value_id: int
     value: str
+    value_label: str | None = None
 
 
 class DeliveryWindowOut(Schema):
@@ -157,6 +158,7 @@ class ProductGroupOut(Schema):
 class FeatureValueOut(Schema):
     id: int
     value: str
+    label: str | None = None
 
 
 class FeatureOut(Schema):

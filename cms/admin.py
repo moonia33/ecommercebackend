@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from django import forms
 from django.contrib import admin
-from django.db import models
 
+from api.admin_i18n import apply_language_code_choices
 from catalog.widgets import ToastUIMarkdownWidget
 
 from .models import CmsPage, CmsPageTranslation
@@ -19,6 +20,19 @@ class CmsPageTranslationInline(admin.StackedInline):
         ("Paveikslėlis", {"fields": ("hero_image", "hero_image_alt"), "classes": ("collapse",)}),
         ("Turinys", {"fields": ("body_markdown",)}),
     )
+
+    class Form(forms.ModelForm):
+        language_code = forms.ChoiceField(choices=())
+
+        class Meta:
+            model = CmsPageTranslation
+            fields = "__all__"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            apply_language_code_choices(self, exclude_default=True)
+
+    form = Form
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
         if db_field.name == "body_markdown":

@@ -53,8 +53,8 @@ def _descendant_category_ids(*, root_id: int) -> list[int]:
     return out
 
 
-def _pick_best_translation(*, qs, language_code: str | None):
-    langs = translation_fallback_chain(language_code)
+def _pick_best_translation(*, qs, language_code: str | None, shop=None):
+    langs = translation_fallback_chain(language_code, shop=shop)
     rows = list(qs.filter(language_code__in=langs))
     order_index = {lang: i for i, lang in enumerate(langs)}
     best = None
@@ -97,7 +97,11 @@ def home(
     if page is None:
         raise HttpError(404, "Home page not configured")
 
-    page_t = _pick_best_translation(qs=HomePageTranslation.objects.filter(home_page_id=page.id), language_code=language_code)
+    page_t = _pick_best_translation(
+        qs=HomePageTranslation.objects.filter(home_page_id=page.id),
+        language_code=language_code,
+        shop=shop,
+    )
 
     title = getattr(page_t, "title", "") or ""
     seo_title = getattr(page_t, "seo_title", "") or ""
@@ -110,7 +114,11 @@ def home(
     out_sections: list[dict] = []
 
     for s in sections:
-        tbest = _pick_best_translation(qs=HomeSectionTranslation.objects.filter(home_section_id=s.id), language_code=language_code)
+        tbest = _pick_best_translation(
+            qs=HomeSectionTranslation.objects.filter(home_section_id=s.id),
+            language_code=language_code,
+            shop=shop,
+        )
         title_sec = getattr(tbest, "title", "") or ""
 
         if s.type == HomeSection.Type.HERO:
@@ -120,7 +128,7 @@ def home(
             slides = list(hero.slides.all())
             slides_out = []
             for sl in slides:
-                sl_t = _pick_best_translation(qs=sl.translations.all(), language_code=language_code)
+                sl_t = _pick_best_translation(qs=sl.translations.all(), language_code=language_code, shop=shop)
                 img_src = sl.image.url if sl.image else (sl.image_url or "")
                 if not img_src:
                     continue
@@ -150,6 +158,7 @@ def home(
                 country_code=country_code,
                 channel=channel,
                 product_slugs=pinned_slugs,
+                language_code=language_code,
                 in_stock_only=True,
             )
             pinned_ids = {int(p["id"]) for p in pinned_items if isinstance(p, dict) and p.get("id") is not None}
@@ -165,6 +174,7 @@ def home(
                 grid_items = get_products_for_grid(
                     country_code=country_code,
                     channel=channel,
+                    language_code=language_code,
                     q=grid.q or None,
                     category_slug=grid.category.slug if grid.category_id else None,
                     brand_slug=grid.brand.slug if grid.brand_id else None,
@@ -246,7 +256,7 @@ def home(
             rt = RichTextSection.objects.filter(home_section_id=s.id).first()
             if rt is None:
                 continue
-            best = _pick_best_translation(qs=rt.translations.all(), language_code=language_code)
+            best = _pick_best_translation(qs=rt.translations.all(), language_code=language_code, shop=shop)
             md = getattr(best, "markdown", "") or ""
             out_sections.append({"type": "rich_text", "payload": {"title": title_sec, "markdown": md}})
             continue
@@ -255,7 +265,7 @@ def home(
             nl = NewsletterSection.objects.filter(home_section_id=s.id).first()
             if nl is None:
                 continue
-            best = _pick_best_translation(qs=nl.translations.all(), language_code=language_code)
+            best = _pick_best_translation(qs=nl.translations.all(), language_code=language_code, shop=shop)
             out_sections.append(
                 {
                     "type": "newsletter",

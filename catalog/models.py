@@ -8,6 +8,19 @@ from django.core.files.base import ContentFile
 from django.db import models
 from mptt.models import MPTTModel, TreeForeignKey
 
+from api.i18n import get_supported_language_codes, validate_supported_language_code
+
+
+def _normalize_and_validate_translation_language_code(value: str | None) -> str:
+    try:
+        return validate_supported_language_code(value)
+    except ValueError:
+        code = (value or "").strip().lower()
+        allowed = get_supported_language_codes()
+        raise ValidationError(
+            {"language_code": f"Neleistinas language_code '{code}'. Leidziami: {', '.join(sorted(allowed))}"}
+        )
+
 
 class TaxClass(models.Model):
     code = models.SlugField(max_length=50, unique=True)
@@ -165,21 +178,7 @@ class CategoryTranslation(models.Model):
 
     def clean(self):
         super().clean()
-        code = (self.language_code or "").strip().lower()
-        allowed = {
-            (c or "").strip().lower()
-            for c, _name in getattr(settings, "LANGUAGES", [])
-            if (c or "").strip()
-        }
-        # If project is currently configured as single-language (lt),
-        # still allow planned catalog locales for manual translations.
-        if len(allowed) <= 1:
-            allowed.update({"lv", "pl", "et", "en"})
-        if code and allowed and code not in allowed:
-            raise ValidationError(
-                {"language_code": f"Neleistinas language_code '{code}'. Leidziami: {', '.join(sorted(allowed))}"}
-            )
-        self.language_code = code
+        self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
 
 
 class Brand(models.Model):
@@ -200,6 +199,38 @@ class Brand(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class BrandTranslation(models.Model):
+    brand = models.ForeignKey(
+        Brand,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+
+    name = models.CharField(max_length=200, blank=True, default="")
+    slug = models.SlugField(max_length=200, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["brand", "language_code"],
+                name="uniq_brand_translation",
+            ),
+            models.UniqueConstraint(
+                fields=["language_code", "slug"],
+                name="uniq_brand_translation_slug",
+                condition=~models.Q(slug=""),
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.brand_id}:{self.language_code}"
+
+    def clean(self):
+        super().clean()
+        self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
 
 
 class Product(models.Model):
@@ -261,6 +292,42 @@ class Product(models.Model):
 
     def __str__(self) -> str:
         return f"{self.sku} - {self.name}"
+
+
+class ProductTranslation(models.Model):
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+
+    name = models.CharField(max_length=255, blank=True, default="")
+    slug = models.SlugField(max_length=255, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    seo_title = models.CharField(max_length=255, blank=True, default="")
+    seo_description = models.CharField(max_length=320, blank=True, default="")
+    seo_keywords = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "language_code"],
+                name="uniq_product_translation",
+            ),
+            models.UniqueConstraint(
+                fields=["language_code", "slug"],
+                name="uniq_product_translation_slug",
+                condition=~models.Q(slug=""),
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.product_id}:{self.language_code}"
+
+    def clean(self):
+        super().clean()
+        self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
 
 
 class ProductImage(models.Model):
@@ -586,6 +653,7 @@ class ContentBlockTranslation(models.Model):
 
     def clean(self):
         super().clean()
+        self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
         cb = getattr(self, "content_block", None)
         if not cb:
             return
@@ -825,6 +893,31 @@ class Feature(models.Model):
         return self.code
 
 
+class FeatureTranslation(models.Model):
+    feature = models.ForeignKey(
+        Feature,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+    name = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["feature", "language_code"],
+                name="uniq_feature_translation",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.feature_id}:{self.language_code}"
+
+    def clean(self):
+        super().clean()
+        self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
+
+
 class FeatureValue(models.Model):
     feature = models.ForeignKey(
         Feature, on_delete=models.CASCADE, related_name="values")
@@ -843,6 +936,31 @@ class FeatureValue(models.Model):
 
     def __str__(self) -> str:
         return f"{self.feature.code}:{self.value}"
+
+
+class FeatureValueTranslation(models.Model):
+    feature_value = models.ForeignKey(
+        FeatureValue,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+    value = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["feature_value", "language_code"],
+                name="uniq_feature_value_translation",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.feature_value_id}:{self.language_code}"
+
+    def clean(self):
+        super().clean()
+        self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
 
 
 class ProductFeatureValue(models.Model):
@@ -901,6 +1019,31 @@ class OptionType(models.Model):
         return self.code
 
 
+class OptionTypeTranslation(models.Model):
+    option_type = models.ForeignKey(
+        OptionType,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+    name = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["option_type", "language_code"],
+                name="uniq_option_type_translation",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.option_type_id}:{self.language_code}"
+
+    def clean(self):
+        super().clean()
+        self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
+
+
 class OptionValue(models.Model):
     option_type = models.ForeignKey(
         OptionType, on_delete=models.CASCADE, related_name="values")
@@ -920,6 +1063,31 @@ class OptionValue(models.Model):
 
     def __str__(self) -> str:
         return f"{self.option_type.code}:{self.label}"
+
+
+class OptionValueTranslation(models.Model):
+    option_value = models.ForeignKey(
+        OptionValue,
+        on_delete=models.CASCADE,
+        related_name="translations",
+    )
+    language_code = models.CharField(max_length=10)
+    label = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["option_value", "language_code"],
+                name="uniq_option_value_translation",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.option_value_id}:{self.language_code}"
+
+    def clean(self):
+        super().clean()
+        self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
 
 
 class BackInStockSubscription(models.Model):

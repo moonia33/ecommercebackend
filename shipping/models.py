@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.db import models
+
+from api.i18n import get_supported_language_codes, validate_supported_language_code
 
 
 class ShippingCountry(models.Model):
@@ -38,6 +41,17 @@ class ShippingCountryTranslation(models.Model):
 
     def __str__(self) -> str:
         return f"{self.shipping_country.code} [{self.language_code}]"
+
+    def clean(self):
+        super().clean()
+        try:
+            self.language_code = validate_supported_language_code(self.language_code)
+        except ValueError:
+            code = (self.language_code or "").strip().lower()
+            allowed = get_supported_language_codes()
+            raise ValidationError(
+                {"language_code": f"Neleistinas language_code '{code}'. Leidziami: {', '.join(sorted(allowed))}"}
+            )
 
 
 class Holiday(models.Model):

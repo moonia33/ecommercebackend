@@ -6,6 +6,15 @@ from django.utils import timezone
 from ninja.errors import HttpError
 
 from catalog.content_blocks import get_content_blocks_for_product
+from catalog.localization import (
+    localize_brand,
+    localize_category,
+    localize_feature,
+    localize_feature_value,
+    localize_option_type,
+    localize_option_value,
+    localize_product,
+)
 from catalog.models import InventoryItem
 from catalog.shop_pricing import resolve_shop_variant_price
 from catalog.services.money import discount_percent, effective_offer_unit_net, money_out
@@ -22,6 +31,10 @@ def build_product_detail_payload(
     channel: str,
     language_code: str | None,
 ):
+    product_loc = localize_product(product, language_code=language_code)
+    brand_loc = localize_brand(product.brand, language_code=language_code) if product.brand else None
+    category_loc = localize_category(product.category, language_code=language_code) if product.category else None
+
     if not product.tax_class_id:
         raise HttpError(400, "Product has no tax_class assigned")
 
@@ -127,9 +140,9 @@ def build_product_detail_payload(
                 "options": [
                     {
                         "option_type_code": r.option_type.code,
-                        "option_type_name": r.option_type.name,
+                        "option_type_name": localize_option_type(r.option_type, language_code=language_code),
                         "option_value_code": r.option_value.code,
-                        "option_value_label": r.option_value.label,
+                        "option_value_label": localize_option_value(r.option_value, language_code=language_code),
                     }
                     for r in options
                 ],
@@ -150,9 +163,10 @@ def build_product_detail_payload(
         {
             "feature_id": r.feature_id,
             "feature_code": r.feature.code,
-            "feature_name": r.feature.name,
+            "feature_name": localize_feature(r.feature, language_code=language_code),
             "value_id": r.feature_value_id,
             "value": r.feature_value.value,
+            "value_label": localize_feature_value(r.feature_value, language_code=language_code),
         }
         for r in feature_rows
     ]
@@ -171,15 +185,15 @@ def build_product_detail_payload(
     return {
         "id": product.id,
         "sku": product.sku,
-        "slug": product.slug,
-        "name": product.name,
-        "description": product.description,
+        "slug": product_loc["slug"],
+        "name": product_loc["name"],
+        "description": product_loc["description"],
         "is_active": bool(product.is_active),
-        "seo_title": getattr(product, "seo_title", "") or "",
-        "seo_description": getattr(product, "seo_description", "") or "",
-        "seo_keywords": getattr(product, "seo_keywords", "") or "",
-        "brand": {"id": product.brand.id, "slug": product.brand.slug, "name": product.brand.name} if product.brand else None,
-        "category": {"id": product.category.id, "slug": product.category.slug, "name": product.category.name} if product.category else None,
+        "seo_title": product_loc["seo_title"],
+        "seo_description": product_loc["seo_description"],
+        "seo_keywords": product_loc["seo_keywords"],
+        "brand": {"id": product.brand.id, "slug": brand_loc["slug"], "name": brand_loc["name"]} if product.brand and brand_loc else None,
+        "category": {"id": product.category.id, "slug": category_loc["slug"], "name": category_loc["name"]} if product.category and category_loc else None,
         "images": [
             {
                 "avif_url": img.avif_url or None,

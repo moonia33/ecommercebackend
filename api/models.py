@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 
 
 def _normalized_language_codes() -> set[str]:
@@ -109,6 +109,78 @@ class Shop(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+    @property
+    def enabled_language_codes(self) -> list[str]:
+        rows = list(
+            self.languages.filter(is_active=True).order_by(
+                "-is_default", "sort_order", "id"
+            )
+        )
+        out: list[str] = []
+        seen: set[str] = set()
+        for row in rows:
+            c = (row.language_code or "").strip().lower()
+            if not c or c in seen:
+                continue
+            out.append(c)
+            seen.add(c)
+        if not out and self.default_language_code:
+            out = [self.default_language_code]
+        return out
+
+
+class ShopLanguage(models.Model):
+    shop = models.ForeignKey(
+        Shop,
+        on_delete=models.CASCADE,
+        related_name="languages",
+    )
+    language_code = models.CharField(max_length=8)
+    is_active = models.BooleanField(default=True)
+    is_default = models.BooleanField(default=False)
+    sort_order = models.IntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["shop__code", "-is_default", "sort_order", "language_code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["shop", "language_code"],
+                name="uniq_shop_language",
+            ),
+            models.UniqueConstraint(
+                fields=["shop"],
+                condition=models.Q(is_default=True),
+                name="uniq_shop_default_language",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["shop", "is_active", "sort_order"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.shop.code}:{self.language_code}"
+
+    def clean(self):
+        supported = _normalized_language_codes()
+        self.language_code = (self.language_code or "").split("-")[0].strip().lower()
+        if self.language_code not in supported:
+            raise ValidationError({"language_code": f"Unsupported language code: {self.language_code}"})
+        if self.is_default and not self.is_active:
+            raise ValidationError({"is_default": "Default language must be active."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        with transaction.atomic():
+            super().save(*args, **kwargs)
+            if self.is_default:
+                ShopLanguage.objects.filter(shop=self.shop).exclude(id=self.id).update(is_default=False)
+                if self.shop.default_language_code != self.language_code:
+                    self.shop.default_language_code = self.language_code
+                    self.shop.save(update_fields=["default_language_code", "updated_at"])
 
 
 class ShopConfig(models.Model):
