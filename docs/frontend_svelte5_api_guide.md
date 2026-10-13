@@ -13,6 +13,7 @@
 - Locale URL segmente nenaudojamas:
   - nenaudoti `/api/v1/lt/...`
   - naudoti `/api/v1/...` + `Accept-Language` arba `?lang=lt`
+- Ops (vadybininkų) API kontraktas aprašytas atskirai: `docs/ops_admin_api.md`
 
 ### Palaikomų kalbų politika
 

@@ -33,6 +33,7 @@ Svarbu FE:
 
 - Swagger: `/api/v1/docs`
 - OpenAPI: `/api/v1/openapi.json`
+- Ops admin API: `docs/ops_admin_api.md`
 
 ## 4) Auth
 

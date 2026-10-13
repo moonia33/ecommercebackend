@@ -7,6 +7,8 @@ Ilgalaikei plėtrai paruošta e-commerce platforma su multi-shop, daugiašaliu t
 - Projekto architektūra: `docs/project_overview.md`
 - Frontend (Svelte 5) API instrukcija: `docs/frontend_svelte5_api_guide.md`
 - Admin UI (Svelte 5) instrukcija: `docs/svelte5_admin_ui_guide.md`
+- Ops Admin MVP specifikacija (vadybininkų panelė): `docs/ops_admin_mvp_spec.md`
+- Ops Admin API dokumentacija: `docs/ops_admin_api.md`
 - Middleware importų kontraktas: `docs/middleware/integration_spec.md`
 - Middleware job lifecycle: `docs/middleware/import_job_lifecycle.md`
 - FE API v2 trumpa santrauka: `docs/api_v2_frontend_guidelines.md`

@@ -370,6 +370,55 @@ class OrderEvent(models.Model):
         return f"order:{self.order_id} event:{self.kind}:{self.name}"
 
 
+class OpsJob(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+
+    class JobType(models.TextChoices):
+        SHIPMENT_LABELS_BULK = "shipment_labels_bulk", "Shipment labels bulk"
+        ORDERS_BULK_ACTION = "orders_bulk_action", "Orders bulk action"
+
+    job_type = models.CharField(max_length=40, choices=JobType.choices)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
+
+    shop = models.ForeignKey(
+        "api.Shop",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ops_jobs",
+    )
+    actor_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="ops_jobs",
+    )
+    request_payload = models.JSONField(default=dict, blank=True)
+    result_payload = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True, default="")
+
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["job_type", "-created_at"]),
+            models.Index(fields=["shop", "status", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"opsjob:{self.id}:{self.job_type}:{self.status}"
+
+
 class OrderDiscount(models.Model):
     class Kind(models.TextChoices):
         COUPON = "coupon", "Coupon"

@@ -1,9 +1,11 @@
 from django.db import IntegrityError
 from django.test import Client, RequestFactory, TestCase, override_settings
 
+from accounts.jwt_utils import issue_access_token
 from api.i18n import get_request_language_code, translation_fallback_chain
 from api.models import Shop, ShopLanguage
-from checkout.models import Cart, Order
+from checkout.models import Cart, OpsJob, Order, PaymentIntent
+from catalog.models import Brand, Category, InventoryItem, Product, TaxClass, Variant, Warehouse
 from cms.models import CmsPage, CmsPageTranslation
 from homebuilder.models import HomePage, HomePageTranslation
 from accounts.models import User
@@ -131,3 +133,200 @@ class ShopLanguageSelectionTests(TestCase):
         self.assertEqual(chain[0], "de")
         self.assertIn("pl", chain)
         self.assertIn("en", chain)
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class OpsOrderSearchTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.shop = Shop.objects.create(
+            code="ops",
+            name="Ops Shop",
+            primary_domain="ops.local",
+            default_language_code="lt",
+            default_country_code="LT",
+            currency="EUR",
+            is_active=True,
+        )
+        ShopLanguage.objects.create(shop=self.shop, language_code="lt", is_active=True, is_default=True, sort_order=0)
+
+        self.staff_user = User.objects.create_user(
+            email="ops-staff@example.com",
+            password="pass1234",
+            is_staff=True,
+        )
+        self.non_staff_user = User.objects.create_user(
+            email="ops-user@example.com",
+            password="pass1234",
+            is_staff=False,
+        )
+
+        tax, _ = TaxClass.objects.get_or_create(code="standard", defaults={"name": "Standard"})
+        suffix = self._testMethodName.lower().replace("_", "-")
+        category = Category.objects.create(name="Tools", slug=f"tools-{suffix}", is_active=True)
+        brand = Brand.objects.create(name="Bosch", slug=f"bosch-{suffix}", is_active=True)
+        product = Product.objects.create(
+            sku="P-1",
+            name="Bosch Grąžtas",
+            slug="bosch-graztas",
+            tax_class=tax,
+            brand=brand,
+            category=category,
+            is_active=True,
+        )
+        variant = Variant.objects.create(
+            product=product,
+            sku="ABC-123",
+            name="13mm",
+            price_eur="10.00",
+            is_active=True,
+        )
+        warehouse = Warehouse.objects.create(
+            code="remote_wh_1",
+            name="Remote WH",
+            country_code="PL",
+            is_active=True,
+        )
+        inventory = InventoryItem.objects.create(
+            variant=variant,
+            warehouse=warehouse,
+            qty_on_hand=10,
+            qty_reserved=0,
+        )
+
+        self.order = Order.objects.create(
+            user=self.staff_user,
+            shop=self.shop,
+            status=Order.Status.PAID,
+            fulfillment_mode=Order.FulfillmentMode.DROPSHIP,
+            supplier_reservation_status=Order.SupplierReservationStatus.PENDING,
+            supplier_reference="SUP-7782",
+            shipping_method="dpd_pickup",
+            delivery_min_date="2026-10-20",
+            delivery_max_date="2026-10-24",
+            country_code="LT",
+            currency="EUR",
+        )
+        self.order.lines.create(
+            variant=variant,
+            offer=inventory,
+            sku="ABC-123",
+            name="Bosch Grąžtas",
+            unit_net="10.00",
+            vat_rate="0.21",
+            unit_vat="2.10",
+            unit_gross="12.10",
+            qty=2,
+            total_net="20.00",
+            total_vat="4.20",
+            total_gross="24.20",
+        )
+        self.payment = PaymentIntent.objects.create(
+            order=self.order,
+            provider=PaymentIntent.Provider.BANK_TRANSFER,
+            status=PaymentIntent.Status.PENDING,
+            currency="EUR",
+            amount_gross="24.20",
+        )
+        self.inventory_item = inventory
+        self.variant = variant
+        self.product = product
+
+    def _set_auth_cookie(self, user: User):
+        token = issue_access_token(user_id=user.id)
+        self.client.cookies["access_token"] = token
+
+    def test_staff_can_search_orders_by_product_supplier_manufacturer(self):
+        self._set_auth_cookie(self.staff_user)
+        res = self.client.get(
+            "/api/v1/ops/orders",
+            {
+                "product_q": "ABC-123",
+                "supplier_code": "remote_wh_1",
+                "manufacturer_q": "bosch",
+                "remote_only": "true",
+            },
+            HTTP_HOST="ops.local",
+        )
+        self.assertEqual(res.status_code, 200)
+        payload = res.json()
+        self.assertEqual(payload["total_count"], 1)
+        self.assertEqual(len(payload["results"]), 1)
+        self.assertEqual(payload["results"][0]["id"], self.order.id)
+        self.assertEqual(payload["results"][0]["matched_suppliers"], ["remote_wh_1"])
+        self.assertEqual(payload["results"][0]["matched_items_count"], 1)
+
+    def test_non_staff_is_forbidden(self):
+        self._set_auth_cookie(self.non_staff_user)
+        res = self.client.get("/api/v1/ops/orders", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 403)
+
+    def test_ops_order_actions_and_jobs(self):
+        self._set_auth_cookie(self.staff_user)
+        assign_res = self.client.post(
+            f"/api/v1/ops/orders/{self.order.id}/actions/assign",
+            data={"assignee": "operator-1", "note": "assign"},
+            content_type="application/json",
+            HTTP_HOST="ops.local",
+        )
+        self.assertEqual(assign_res.status_code, 200)
+
+        bulk_res = self.client.post(
+            "/api/v1/ops/orders/actions/bulk",
+            data={"action": "move_to_picking", "selected_ids": [self.order.id], "note": "bulk"},
+            content_type="application/json",
+            HTTP_HOST="ops.local",
+        )
+        self.assertEqual(bulk_res.status_code, 200)
+        payload = bulk_res.json()
+        self.assertIn(payload["status"], ["success", "failed"])
+        self.assertTrue(OpsJob.objects.filter(id=payload["id"]).exists())
+
+    def test_ops_payments_inventory_and_catalog_endpoints(self):
+        self._set_auth_cookie(self.staff_user)
+
+        list_payments = self.client.get("/api/v1/ops/payments", HTTP_HOST="ops.local")
+        self.assertEqual(list_payments.status_code, 200)
+        self.assertGreaterEqual(list_payments.json()["total_count"], 1)
+
+        mark_paid = self.client.post(
+            f"/api/v1/ops/payments/{self.payment.id}/mark-paid",
+            data={"note": "manual paid"},
+            content_type="application/json",
+            HTTP_HOST="ops.local",
+        )
+        self.assertEqual(mark_paid.status_code, 200)
+        self.payment.refresh_from_db()
+        self.order.refresh_from_db()
+        self.assertEqual(self.payment.status, PaymentIntent.Status.SUCCEEDED)
+        self.assertEqual(self.order.status, Order.Status.PAID)
+
+        adjust = self.client.post(
+            f"/api/v1/ops/inventory/items/{self.inventory_item.id}/adjust",
+            data={"delta": 1, "reason_code": "restock", "comment": "test"},
+            content_type="application/json",
+            HTTP_HOST="ops.local",
+        )
+        self.assertEqual(adjust.status_code, 200)
+        self.inventory_item.refresh_from_db()
+        self.assertEqual(self.inventory_item.qty_on_hand, 11)
+
+        toggle = self.client.post(
+            f"/api/v1/ops/catalog/products/{self.product.id}/toggle-active",
+            data={},
+            content_type="application/json",
+            HTTP_HOST="ops.local",
+        )
+        self.assertEqual(toggle.status_code, 200)
+        self.product.refresh_from_db()
+        self.assertFalse(self.product.is_active)
+
+        upd_price = self.client.post(
+            f"/api/v1/ops/catalog/variants/{self.variant.id}/update-price",
+            data={"price_eur": "12.50"},
+            content_type="application/json",
+            HTTP_HOST="ops.local",
+        )
+        self.assertEqual(upd_price.status_code, 200)
+        self.variant.refresh_from_db()
+        self.assertEqual(str(self.variant.price_eur), "12.50")
