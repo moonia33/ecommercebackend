@@ -68,8 +68,7 @@ class CheckoutPreviewIn(Schema):
     shipping_address_id: int
     shipping_method: str = "unisend_pickup"
     pickup_point_id: str | None = None
-    payment_method: str = "klix"
-    neopay_bank_bic: str | None = None
+    payment_method: str = "bank_transfer"
     channel: str = "normal"
     coupon_code: str | None = None
 
@@ -114,8 +113,7 @@ class CheckoutConfirmIn(Schema):
     shipping_address_id: int
     shipping_method: str = "unisend_pickup"
     pickup_point_id: str | None = None
-    payment_method: str = "klix"
-    neopay_bank_bic: str | None = None
+    payment_method: str = "bank_transfer"
     channel: str = "normal"
     coupon_code: str | None = None
     consents: list[OrderConsentIn]
@@ -195,9 +193,6 @@ class OrderOut(Schema):
     payment_status_label: str = ""
     payment_redirect_url: str = ""
     payment_instructions: str = ""
-
-    neopay_bank_bic: str = ""
-    neopay_bank_name: str = ""
 
     items: list[OrderLineOut]
 

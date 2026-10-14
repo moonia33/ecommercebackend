@@ -66,69 +66,6 @@ class PaymentMethod(models.Model):
         return "\n".join(parts).strip()
 
 
-class NeopayConfig(models.Model):
-    is_active = models.BooleanField(default=True)
-
-    project_id = models.BigIntegerField()
-    project_key = models.CharField(max_length=255)
-
-    enable_bank_preselect = models.BooleanField(default=False)
-
-    force_bank_bic = models.CharField(max_length=32, blank=True, default="")
-    force_bank_name = models.CharField(max_length=200, blank=True, default="")
-
-    banks_api_base_url = models.URLField(
-        blank=True, default="https://psd2.neopay.lt/api"
-    )
-
-    widget_host = models.URLField(
-        blank=True, default="https://psd2.neopay.lt/widget.html?"
-    )
-    client_redirect_url = models.URLField(blank=True, default="")
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["-id"]
-        indexes = [
-            models.Index(fields=["is_active", "-created_at"]),
-        ]
-
-    def __str__(self) -> str:
-        return f"neopay:{self.project_id}"
-
-
-class NeopayBank(models.Model):
-    country_code = models.CharField(max_length=2)
-    bic = models.CharField(max_length=32)
-    name = models.CharField(max_length=200, blank=True, default="")
-    logo_url = models.URLField(blank=True, default="")
-
-    is_operating = models.BooleanField(default=True)
-    is_enabled = models.BooleanField(default=True)
-    sort_order = models.IntegerField(default=0)
-
-    raw = models.JSONField(default=dict, blank=True)
-    last_synced_at = models.DateTimeField(null=True, blank=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["country_code", "sort_order", "name", "bic"]
-        constraints = [
-            models.UniqueConstraint(fields=["country_code", "bic"], name="uniq_neopay_bank_country_bic"),
-        ]
-        indexes = [
-            models.Index(fields=["country_code", "is_enabled", "sort_order"]),
-            models.Index(fields=["bic"]),
-        ]
-
-    def __str__(self) -> str:
-        return f"{self.country_code}:{self.bic}"
-
-
 class ShopPaymentMethodPolicy(models.Model):
     shop = models.ForeignKey("api.Shop", on_delete=models.CASCADE, related_name="payment_policies")
     payment_method = models.ForeignKey(

@@ -128,7 +128,7 @@ Body:
   "shipping_address_id": 123,
   "shipping_method": "<shipping_method>",
   "pickup_point_id": "<pickup_point_id>",
-  "payment_method": "klix",
+  "payment_method": "bank_transfer",
   "channel": "normal"
 }
 ```
@@ -161,10 +161,10 @@ Rekomenduojamas UX:
 - Kviečiant preview UI lygyje daryti debounce (pvz. 200–400ms), kad nekviestų per dažnai.
 - Kol preview negaunamas (arba grąžina klaidą), mygtukas "Mokėti" turi būti disabled.
 
-## Mokėjimų pasirinkimai (Neopay + kiti) be hardcode
+## Mokėjimų pasirinkimai be hardcode
 
 - `GET /api/v1/checkout/payment-options?country_code=LT`
-  - Neopay bankai paduodami iš lokalaus DB (modelis `NeopayBank`) pagal `country_code` ir `is_enabled=true`.
+  - Pasirinkimai paduodami iš DB (modeliai `PaymentMethod` + `ShopPaymentMethodPolicy`), filtruojami pagal `country_code` ir shop politiką.
   - FE turi naudoti `option.id` kaip unikalų key renderinant sąrašą (pvz. `{#each options as opt (opt.id)}`), nes `code` gali dubliuotis tarp skirtingų option'ų.
 
 ### 8) Checkout confirm
@@ -178,7 +178,7 @@ Body:
   "shipping_address_id": 123,
   "shipping_method": "<shipping_method>",
   "pickup_point_id": "<pickup_point_id>",
-  "payment_method": "klix",
+  "payment_method": "bank_transfer",
   "consents": [
     {"kind":"terms","document_version":"v1"},
     {"kind":"privacy","document_version":"v1"}

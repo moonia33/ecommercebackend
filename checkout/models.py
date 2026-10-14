@@ -570,9 +570,7 @@ class InventoryAllocation(models.Model):
 
 class PaymentIntent(models.Model):
     class Provider(models.TextChoices):
-        KLIX = "klix", "Klix (Citadele)"
         BANK_TRANSFER = "bank_transfer", "Bank transfer"
-        NEOPAY = "neopay", "Neopay"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -584,7 +582,7 @@ class PaymentIntent(models.Model):
     order = models.OneToOneField(
         Order, on_delete=models.CASCADE, related_name="payment_intent")
     provider = models.CharField(
-        max_length=20, choices=Provider.choices, default=Provider.KLIX)
+        max_length=20, choices=Provider.choices, default=Provider.BANK_TRANSFER)
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING)
 
@@ -593,9 +591,6 @@ class PaymentIntent(models.Model):
 
     external_id = models.CharField(max_length=120, blank=True, default="")
     redirect_url = models.URLField(max_length=2048, blank=True, default="")
-
-    neopay_bank_bic = models.CharField(max_length=32, blank=True, default="")
-    neopay_bank_name = models.CharField(max_length=200, blank=True, default="")
 
     raw_request = models.JSONField(default=dict, blank=True)
     raw_response = models.JSONField(default=dict, blank=True)
