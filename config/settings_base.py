@@ -87,6 +87,11 @@ env = environ.Env(
     COUPON_ALLOWED_CHANNELS=(list, ["normal"]),
     SHOP_CONTEXT_ENABLED=(bool, True),
     SHOP_CONTEXT_STRICT=(bool, False),
+
+    # Redis / Celery
+    REDIS_URL=(str, "redis://localhost:6379/0"),
+    CELERY_BROKER_URL=(str, ""),
+    CELERY_RESULT_BACKEND=(str, "django-db"),
 )
 
 # Loads variables from .env if present (dev convenience). In prod use real env vars.
@@ -154,6 +159,8 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "corsheaders",
     "mptt",
+    "django_celery_results",
+    "django_celery_beat",
     "api",
     "accounts",
     "notifications",
@@ -304,7 +311,7 @@ if MEDIA_STORAGE == "s3":
     AWS_S3_CUSTOM_DOMAIN = env("AWS_S3_CUSTOM_DOMAIN", default="")
     AWS_DEFAULT_ACL = env("AWS_DEFAULT_ACL", default=None)
     AWS_QUERYSTRING_AUTH = env.bool("AWS_QUERYSTRING_AUTH", default=False)
-    AWS_S3_ADDRESSING_STYLE = env("AWS_S3_ADDRESSING_STYLE", default="auto")
+    AWS_S3_ADDRESSING_STYLE = env("AWS_S3_ADDRESSING_STYLE", default="path")
 
     STORAGES = {
         "default": {
@@ -317,6 +324,7 @@ if MEDIA_STORAGE == "s3":
                 "default_acl": AWS_DEFAULT_ACL,
                 "querystring_auth": AWS_QUERYSTRING_AUTH,
                 "addressing_style": AWS_S3_ADDRESSING_STYLE,
+                "file_overwrite": False,
             },
         },
         "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
@@ -343,3 +351,23 @@ API_BASE_PATH = env("API_BASE_PATH", default=env(
 COUPON_ALLOWED_CHANNELS = [c.strip().lower() for c in env.list("COUPON_ALLOWED_CHANNELS", default=["normal"]) if c.strip()]
 SHOP_CONTEXT_ENABLED = env.bool("SHOP_CONTEXT_ENABLED", default=True)
 SHOP_CONTEXT_STRICT = env.bool("SHOP_CONTEXT_STRICT", default=False)
+
+# --- Redis / Celery ---
+REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+    }
+}
+
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL) or REDIS_URL
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="django-db")
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_TRACK_STARTED = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True

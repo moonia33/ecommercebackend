@@ -4,9 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings
-from django.core.mail import EmailMultiAlternatives
-from django.template import Context, Engine, TemplateDoesNotExist
-from django.utils import timezone
+from django.template import Context, Engine
 
 from api.i18n import get_default_language_code, normalize_language_code, translation_fallback_chain
 
@@ -98,24 +96,9 @@ def send_templated_email(
         status=OutboundEmail.Status.PENDING,
     )
 
-    try:
-        msg = EmailMultiAlternatives(
-            subject=subject,
-            body=body_text,
-            from_email=from_email or getattr(
-                settings, "DEFAULT_FROM_EMAIL", None) or None,
-            to=[to_email],
-        )
-        if body_html:
-            msg.attach_alternative(body_html, "text/html")
-        msg.send(fail_silently=False)
-    except Exception as exc:
-        outbound.status = OutboundEmail.Status.FAILED
-        outbound.error_message = str(exc)
-        outbound.save(update_fields=["status", "error_message"])
-        return SendEmailResult(ok=False, outbound_id=outbound.id, error=outbound.error_message)
-
-    outbound.status = OutboundEmail.Status.SENT
-    outbound.sent_at = timezone.now()
-    outbound.save(update_fields=["status", "sent_at"])
+    from config.celery import safe_delay
+    from notifications.tasks import send_email_task
+    # If the broker is down, the email stays PENDING and is picked up by the
+    # periodic retry_failed_emails_task sweep.
+    safe_delay(send_email_task, outbound.id)
     return SendEmailResult(ok=True, outbound_id=outbound.id)

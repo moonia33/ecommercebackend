@@ -7,6 +7,15 @@ psycopg[binary]>=3.2
 Pillow>=10.0
 django-storages[boto3]>=1.14.3
 boto3>=1.34
+requests>=2.32
+PyJWT>=2.8
+gunicorn>=22
+
+# Async task queue
+celery[redis]>=5.4
+redis>=5.0
+django-celery-results>=2.5
+django-celery-beat>=2.7
 
 # Rich text / Markdown (admin) + HTML import cleanup
 bleach>=6.1.0
