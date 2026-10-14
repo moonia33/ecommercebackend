@@ -55,7 +55,9 @@ Rekomenduojamas PR šablonas:
 
 4. Paleidimas:
 
-- `.venv/Scripts/python.exe manage.py runserver`
+- Web: `.venv/Scripts/python.exe manage.py runserver` (būtinai `.venv` interpretatorius — globalus Python neturi `celery` ir kitų dependencijų)
+- Worker: `.venv/Scripts/python.exe -m celery -A config worker -l info`
+- Beat (periodiniai task'ai iš DB): `.venv/Scripts/python.exe -m celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler`
 
 Patikra:
 
@@ -72,7 +74,7 @@ Patikra:
 - Katalogas: `Product`/`Variant` + `InventoryItem` offer modelis
 - Checkout: cart -> preview -> confirm -> order/payment intent
 - Carrier integracijos: DPD, Unisend
-- Mokėjimai: bank transfer / Klix / Neopay (pagal konfigūraciją)
+- Mokėjimai: bank transfer (payment provider integracija bus pridedama)
 
 ## Multi-shop ir i18n bazė
 
