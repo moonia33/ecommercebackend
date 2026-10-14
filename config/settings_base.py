@@ -166,6 +166,7 @@ INSTALLED_APPS = [
     "notifications",
     "analytics.apps.AnalyticsConfig",
     "catalog.apps.CatalogConfig",
+    "catalog_import",
     "cms.apps.CmsConfig",
     "homebuilder.apps.HomebuilderConfig",
     "shipping",
@@ -346,6 +347,10 @@ CSRF_TRUSTED_ORIGINS = env.list(
 # API routing
 API_BASE_PATH = env("API_BASE_PATH", default=env(
     "NINJA_BASE_PATH", default="api"))
+
+# Ops katalogo importai gali būti kelių MB JSON dokumentai.
+DATA_UPLOAD_MAX_MEMORY_SIZE = env.int(
+    "DATA_UPLOAD_MAX_MEMORY_SIZE", default=100 * 1024 * 1024)
 
 # --- Promotions/Coupons policy ---
 COUPON_ALLOWED_CHANNELS = [c.strip().lower() for c in env.list("COUPON_ALLOWED_CHANNELS", default=["normal"]) if c.strip()]

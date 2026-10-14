@@ -9,13 +9,25 @@ from .taxonomy import Brand, Category
 
 
 class Product(models.Model):
-    external_presta_id = models.CharField(
-        max_length=32,
-        null=True,
+    import_source = models.CharField(
+        max_length=64,
         blank=True,
-        unique=True,
+        default="",
+        help_text="Catalog import source identifier (e.g. 'normalizer').",
+    )
+    import_code = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
         db_index=True,
-        help_text="Original PrestaShop id_product used for import mapping.",
+        help_text="External product code within import_source.",
+    )
+    product_group_code = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Supplier/import product-family code shared by the product and its variants.",
     )
     sku = models.CharField(max_length=64, unique=True)
     name = models.CharField(max_length=255)
@@ -137,7 +149,8 @@ class ProductImage(models.Model):
         blank=True,
     )
     # Legacy/external image source (optional). Prefer `image`.
-    image_url = models.URLField(blank=True, default="")
+    # max_length=1000 – tiekėjų CDN URL'ai būna ilgesni nei default 200.
+    image_url = models.URLField(blank=True, default="", max_length=1000)
     alt_text = models.CharField(max_length=255, blank=True)
     sort_order = models.IntegerField(default=0)
 
