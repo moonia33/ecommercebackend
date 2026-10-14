@@ -1,5 +1,11 @@
 # Middleware integracijos specifikacija (Django target)
 
+> **Deprecated (2026-10-15).** Šis spec'as aprašo seną būseną su `external_presta_id`
+> ir be importų orchestration. Galiojantis kontraktas:
+> [`docs/normalizer_integration.md`](../normalizer_integration.md).
+> Importų pipeline realizuotas `catalog_import` app (`ImportRun`/`ImportItem`,
+> ops API `/ops/imports/*`, `import_catalog`/`import_stock` komandos).
+
 ## Tikslas ir ribos
 
 Šis dokumentas aprašo kontraktą tarp importų middleware ir esamos Django e-commerce platformos.

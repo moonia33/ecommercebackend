@@ -7,13 +7,18 @@ from .shared import _normalize_and_validate_translation_language_code
 
 
 class Category(MPTTModel):
-    external_presta_id = models.CharField(
-        max_length=32,
-        null=True,
+    import_source = models.CharField(
+        max_length=64,
         blank=True,
-        unique=True,
+        default="",
+        help_text="Catalog import source identifier (e.g. 'normalizer').",
+    )
+    import_code = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
         db_index=True,
-        help_text="Original PrestaShop id_category used for import mapping.",
+        help_text="External category code within import_source.",
     )
     name = models.CharField(max_length=200)
     slug = models.SlugField(max_length=200, unique=True)
@@ -115,13 +120,18 @@ class CategoryTranslation(models.Model):
 
 
 class Brand(models.Model):
-    external_presta_id = models.CharField(
-        max_length=32,
-        null=True,
+    import_source = models.CharField(
+        max_length=64,
         blank=True,
-        unique=True,
+        default="",
+        help_text="Catalog import source identifier (e.g. 'normalizer').",
+    )
+    import_code = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
         db_index=True,
-        help_text="Original PrestaShop id_manufacturer used for import mapping.",
+        help_text="External brand code within import_source.",
     )
     name = models.CharField(max_length=200)
     slug = models.SlugField(max_length=200, unique=True)

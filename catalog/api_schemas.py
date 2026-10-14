@@ -64,7 +64,8 @@ class VariantOptionOut(Schema):
 class VariantOut(Schema):
     id: int
     sku: str
-    barcode: str
+    barcode: str | None = None
+    product_group_code: str = ""
     name: str
     is_active: bool
     stock_available: int
@@ -84,6 +85,7 @@ class ProductListOut(Schema):
     slug: str
     name: str
     is_active: bool
+    product_group_code: str = ""
 
     brand: BrandRefOut | None = None
     category: CategoryRefOut | None = None
@@ -92,6 +94,9 @@ class ProductListOut(Schema):
 
     # Representative price for lists: min active variant net + VAT breakdown
     price: MoneyOut
+    # "Price to" for variant ranges: max active variant list price when it
+    # differs from `price`; null when all variants share one price.
+    price_to: MoneyOut | None = None
 
     compare_at_price: MoneyOut | None = None
     discount_percent: int | None = None
@@ -129,6 +134,7 @@ class ProductDetailOut(Schema):
     name: str
     description: str
     is_active: bool
+    product_group_code: str = ""
 
     seo_title: str = ""
     seo_description: str = ""

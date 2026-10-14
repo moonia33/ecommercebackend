@@ -130,12 +130,21 @@ Idempotency:
 
 - `GET /api/v1/checkout/orders`
 - `GET /api/v1/checkout/orders/{order_id}`
+- `GET /api/v1/checkout/statuses` — visų būsenų enum'ai su lokalizuotais labeliais (filter'iams/status badge'iams)
 
 UI laukams svarbu:
 
-- `payment_status`, `payment_provider`
-- `delivery_status`, `carrier_code`, `tracking_number`
+- `payment_status` + `payment_status_label`, `payment_provider` + `payment_provider_label`
+- `status` + `status_label` (užsakymo)
+- `delivery_status` + `delivery_status_label`, `carrier_code`, `tracking_number`
 - `payment_instructions` (bank transfer atvejis)
+
+Būsenų atvaizdavimas:
+
+- `*_label` laukai jau **lokalizuoti** pagal request kalbą (`?lang=` / `Accept-Language` / shop default) — FE juos gali rodyti tiesiogiai, nereikia savų vertimų.
+- `*_status`/`*_mode` laukai yra stabilūs mašininiai kodai — juos naudokite logikai (pvz. `delivery_status === 'shipped'`), ne UI tekstui.
+- `GET /checkout/statuses` grąžina `{domain: [{code, label}]}` visoms domenams: `order_status`, `delivery_status`, `fulfillment_mode`, `supplier_reservation_status`, `payment_status`, `payment_provider` — naudinga filtrų dropdown'ams.
+- Šaltinis tiesai: `checkout/statuses.py` — naujoms būsenoms label'iai pridedami ten.
 
 ## 7. DPD / Unisend pickup sąrašai
 

@@ -101,10 +101,10 @@ class BrandTranslationInline(admin.StackedInline):
 
 @admin.register(Category)
 class CategoryAdmin(DraggableMPTTAdmin):
-    list_display = ("tree_actions", "indented_title", "external_presta_id", "slug", "is_active")
+    list_display = ("tree_actions", "indented_title", "import_source", "import_code", "slug", "is_active")
     list_display_links = ("indented_title",)
-    list_filter = ("is_active",)
-    search_fields = ("name", "slug", "external_presta_id")
+    list_filter = ("is_active", "import_source")
+    search_fields = ("name", "slug", "import_code")
     prepopulated_fields = {"slug": ("name",)}
     inlines = (CategoryTranslationInline,)
 
@@ -121,7 +121,7 @@ class CategoryAdmin(DraggableMPTTAdmin):
     form = Form
 
     fieldsets = (
-        (None, {"fields": ("external_presta_id", "name", "slug", "parent", "is_active")}),
+        (None, {"fields": ("import_source", "import_code", "name", "slug", "parent", "is_active")}),
         ("Turinys", {"fields": ("description",)}),
         (
             "Media",
@@ -142,9 +142,9 @@ class CategoryAdmin(DraggableMPTTAdmin):
 
 @admin.register(Brand)
 class BrandAdmin(admin.ModelAdmin):
-    list_display = ("name", "external_presta_id", "slug", "is_active")
-    list_filter = ("is_active",)
-    search_fields = ("name", "slug", "external_presta_id")
+    list_display = ("name", "import_source", "import_code", "slug", "is_active")
+    list_filter = ("is_active", "import_source")
+    search_fields = ("name", "slug", "import_code")
     prepopulated_fields = {"slug": ("name",)}
     inlines = (BrandTranslationInline,)
 
@@ -445,9 +445,9 @@ class VariantInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ("sku", "external_presta_id", "name", "brand", "category", "group", "is_active")
-    list_filter = ("is_active", "brand", "category", "group")
-    search_fields = ("sku", "external_presta_id", "name", "slug")
+    list_display = ("sku", "product_group_code", "name", "brand", "category", "group", "is_active")
+    list_filter = ("is_active", "brand", "category", "group", "import_source")
+    search_fields = ("sku", "import_code", "product_group_code", "name", "slug")
     prepopulated_fields = {"slug": ("name",)}
     autocomplete_fields = ("tax_class",)
     inlines = (
@@ -471,7 +471,7 @@ class ProductAdmin(admin.ModelAdmin):
     form = Form
 
     fieldsets = (
-        (None, {"fields": ("external_presta_id", "sku", "name", "slug", "is_active")}),
+        (None, {"fields": ("import_source", "import_code", "product_group_code", "sku", "name", "slug", "is_active")}),
         ("Klasifikacija", {
          "fields": ("brand", "category", "group", "tax_class")}),
         ("Turinys", {"fields": ("description",)}),

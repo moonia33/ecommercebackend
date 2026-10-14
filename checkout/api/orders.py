@@ -1,6 +1,37 @@
 from __future__ import annotations
 
+from api.i18n import get_request_language_code
+from checkout.statuses import get_status_label, get_status_options
+
 from .shared import *
+
+
+def _localized_status_labels(o, pi, language_code: str) -> dict[str, str]:
+    return {
+        "status_label": get_status_label("order_status", o.status, language_code),
+        "delivery_status_label": get_status_label("delivery_status", o.delivery_status, language_code),
+        "fulfillment_mode_label": get_status_label("fulfillment_mode", o.fulfillment_mode, language_code),
+        "supplier_reservation_status_label": get_status_label(
+            "supplier_reservation_status", o.supplier_reservation_status, language_code),
+        "payment_provider_label": get_status_label("payment_provider", pi.provider, language_code) if pi else "",
+        "payment_status_label": get_status_label("payment_status", pi.status, language_code) if pi else "",
+    }
+
+
+@router.get("/statuses", auth=_auth)
+def get_order_statuses(request):
+    language_code = get_request_language_code(request)
+    return {
+        domain: get_status_options(domain, language_code)
+        for domain in (
+            "order_status",
+            "delivery_status",
+            "fulfillment_mode",
+            "supplier_reservation_status",
+            "payment_status",
+            "payment_provider",
+        )
+    }
 
 
 @router.get("/orders", response=list[OrderOut], auth=_auth)
@@ -23,6 +54,8 @@ def list_orders(request, limit: int = 20):
         .order_by("-created_at")[:limit]
     )
 
+    language_code = get_request_language_code(request)
+
     result: list[OrderOut] = []
     for o in orders:
         pi = getattr(o, "payment_intent", None)
@@ -30,38 +63,7 @@ def list_orders(request, limit: int = 20):
         if pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER:
             payment_instructions = _bank_transfer_instructions_for(order_id=o.id, country_code=o.country_code)
 
-        status_label = ""
-        delivery_status_label = ""
-        fulfillment_mode_label = ""
-        supplier_reservation_status_label = ""
-        try:
-            status_label = str(getattr(o, "get_status_display")())
-        except Exception:
-            status_label = ""
-        try:
-            delivery_status_label = str(getattr(o, "get_delivery_status_display")())
-        except Exception:
-            delivery_status_label = ""
-        try:
-            fulfillment_mode_label = str(getattr(o, "get_fulfillment_mode_display")())
-        except Exception:
-            fulfillment_mode_label = ""
-        try:
-            supplier_reservation_status_label = str(getattr(o, "get_supplier_reservation_status_display")())
-        except Exception:
-            supplier_reservation_status_label = ""
-
-        payment_provider_label = ""
-        payment_status_label = ""
-        if pi:
-            try:
-                payment_provider_label = str(PaymentIntent.Provider(pi.provider).label)
-            except Exception:
-                payment_provider_label = ""
-            try:
-                payment_status_label = str(PaymentIntent.Status(pi.status).label)
-            except Exception:
-                payment_status_label = ""
+        labels = _localized_status_labels(o, pi, language_code)
 
         fees_out: list[FeeOut] = []
         fees_net = Decimal("0.00")
@@ -223,13 +225,13 @@ def list_orders(request, limit: int = 20):
             OrderOut(
                 id=o.id,
                 status=o.status,
-                status_label=status_label,
+                status_label=labels["status_label"],
                 delivery_status=o.delivery_status,
-                delivery_status_label=delivery_status_label,
+                delivery_status_label=labels["delivery_status_label"],
                 fulfillment_mode=(getattr(o, "fulfillment_mode", "") or ""),
-                fulfillment_mode_label=fulfillment_mode_label,
+                fulfillment_mode_label=labels["fulfillment_mode_label"],
                 supplier_reservation_status=(getattr(o, "supplier_reservation_status", "") or ""),
-                supplier_reservation_status_label=supplier_reservation_status_label,
+                supplier_reservation_status_label=labels["supplier_reservation_status_label"],
                 supplier_reserved_at=(o.supplier_reserved_at.isoformat() if getattr(o, "supplier_reserved_at", None) else ""),
                 supplier_reference=(getattr(o, "supplier_reference", "") or ""),
                 currency=o.currency,
@@ -238,9 +240,9 @@ def list_orders(request, limit: int = 20):
                 carrier_code=o.carrier_code,
                 tracking_number=o.tracking_number,
                 payment_provider=(pi.provider if pi else ""),
-                payment_provider_label=payment_provider_label,
+                payment_provider_label=labels["payment_provider_label"],
                 payment_status=(pi.status if pi else ""),
-                payment_status_label=payment_status_label,
+                payment_status_label=labels["payment_status_label"],
                 payment_redirect_url=(pi.redirect_url if pi else ""),
                 payment_instructions=payment_instructions,
                 items=lines_out,
@@ -377,38 +379,8 @@ def get_order(request, order_id: int):
     if pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER:
         payment_instructions = _bank_transfer_instructions_for(order_id=o.id, country_code=o.country_code)
 
-    status_label = ""
-    delivery_status_label = ""
-    fulfillment_mode_label = ""
-    supplier_reservation_status_label = ""
-    try:
-        status_label = str(getattr(o, "get_status_display")())
-    except Exception:
-        status_label = ""
-    try:
-        delivery_status_label = str(getattr(o, "get_delivery_status_display")())
-    except Exception:
-        delivery_status_label = ""
-    try:
-        fulfillment_mode_label = str(getattr(o, "get_fulfillment_mode_display")())
-    except Exception:
-        fulfillment_mode_label = ""
-    try:
-        supplier_reservation_status_label = str(getattr(o, "get_supplier_reservation_status_display")())
-    except Exception:
-        supplier_reservation_status_label = ""
-
-    payment_provider_label = ""
-    payment_status_label = ""
-    if pi:
-        try:
-            payment_provider_label = str(PaymentIntent.Provider(pi.provider).label)
-        except Exception:
-            payment_provider_label = ""
-        try:
-            payment_status_label = str(PaymentIntent.Status(pi.status).label)
-        except Exception:
-            payment_status_label = ""
+    language_code = get_request_language_code(request)
+    labels = _localized_status_labels(o, pi, language_code)
 
     delivery_window = None
     if getattr(o, "delivery_min_date", None) and getattr(o, "delivery_max_date", None):
@@ -431,13 +403,13 @@ def get_order(request, order_id: int):
     return OrderOut(
         id=o.id,
         status=o.status,
-        status_label=status_label,
+        status_label=labels["status_label"],
         delivery_status=o.delivery_status,
-        delivery_status_label=delivery_status_label,
+        delivery_status_label=labels["delivery_status_label"],
         fulfillment_mode=(getattr(o, "fulfillment_mode", "") or ""),
-        fulfillment_mode_label=fulfillment_mode_label,
+        fulfillment_mode_label=labels["fulfillment_mode_label"],
         supplier_reservation_status=(getattr(o, "supplier_reservation_status", "") or ""),
-        supplier_reservation_status_label=supplier_reservation_status_label,
+        supplier_reservation_status_label=labels["supplier_reservation_status_label"],
         supplier_reserved_at=(o.supplier_reserved_at.isoformat() if getattr(o, "supplier_reserved_at", None) else ""),
         supplier_reference=(getattr(o, "supplier_reference", "") or ""),
         currency=o.currency,
@@ -446,9 +418,9 @@ def get_order(request, order_id: int):
         carrier_code=o.carrier_code,
         tracking_number=o.tracking_number,
         payment_provider=(pi.provider if pi else ""),
-        payment_provider_label=payment_provider_label,
+        payment_provider_label=labels["payment_provider_label"],
         payment_status=(pi.status if pi else ""),
-        payment_status_label=payment_status_label,
+        payment_status_label=labels["payment_status_label"],
         payment_redirect_url=(pi.redirect_url if pi else ""),
         payment_instructions=payment_instructions,
         items=lines_out,

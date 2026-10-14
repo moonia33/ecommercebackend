@@ -11,7 +11,6 @@ env = environ.Env(
     ALLOWED_HOSTS=(list, []),
     CORS_ALLOWED_ORIGINS=(list, []),
     CSRF_TRUSTED_ORIGINS=(list, []),
-    ALLOW_GUEST_CHECKOUT=(bool, True),
     JWT_ALGORITHM=(str, "HS256"),
     JWT_ACCESS_TTL_MINUTES=(int, 15),
     JWT_REFRESH_TTL_DAYS=(int, 30),
@@ -102,8 +101,6 @@ DEBUG = env.bool("DEBUG", default=False)
 
 NINJA_ENABLE_DOCS = env.bool("NINJA_ENABLE_DOCS", default=DEBUG)
 NINJA_DOCS_REQUIRE_STAFF = env.bool("NINJA_DOCS_REQUIRE_STAFF", default=False)
-
-ALLOW_GUEST_CHECKOUT = env.bool("ALLOW_GUEST_CHECKOUT", default=True)
 
 JWT_ALGORITHM = env("JWT_ALGORITHM")
 JWT_ACCESS_TTL_MINUTES = env.int("JWT_ACCESS_TTL_MINUTES")

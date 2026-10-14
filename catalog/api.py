@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.conf import settings
-from django.db.models import Case, Count, DecimalField, ExpressionWrapper, F, IntegerField, Min, Q, Value, When
+from django.db.models import Case, Count, DecimalField, ExpressionWrapper, F, IntegerField, Max, Min, Q, Value, When
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.contrib.auth import get_user_model
@@ -196,6 +196,8 @@ def recently_viewed(
 
     min_price_expr = Min("variants__price_eur",
                          filter=Q(variants__is_active=True))
+    max_price_expr = Max("variants__price_eur",
+                         filter=Q(variants__is_active=True))
     offer_price_expr = Case(
         When(
             variants__inventory_items__never_discount=True,
@@ -232,6 +234,7 @@ def recently_viewed(
         .select_related("brand", "category", "tax_class")
         .prefetch_related("images", "translations", "brand__translations", "category__translations")
         .annotate(_min_variant_price=min_price_expr)
+        .annotate(_max_variant_price=max_price_expr)
         .annotate(_min_offer_price=min_offer_price_expr)
     )
     products_qs = apply_shop_product_scope(
@@ -295,6 +298,12 @@ def recently_viewed(
             compare_at_price = _money_out(
                 currency="EUR", unit_net=list_net, vat_rate=rate)
 
+        price_to = None
+        max_variant_net = getattr(p, "_max_variant_price", None)
+        if max_variant_net is not None and Decimal(max_variant_net) > list_net:
+            price_to = _money_out(
+                currency="EUR", unit_net=Decimal(max_variant_net), vat_rate=rate)
+
         imgs = list(p.images.all())
         imgs.sort(key=lambda i: (i.sort_order, i.id))
         images_out = []
@@ -323,6 +332,7 @@ def recently_viewed(
                 "slug": product_loc["slug"],
                 "name": product_loc["name"],
                 "is_active": bool(p.is_active),
+                "product_group_code": p.product_group_code or "",
                 "brand": {
                     "id": p.brand.id,
                     "slug": brand_loc["slug"],
@@ -339,6 +349,7 @@ def recently_viewed(
                 else None,
                 "images": images_out,
                 "price": _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
+                "price_to": price_to,
                 "compare_at_price": compare_at_price,
                 "discount_percent": discount_percent,
             }
@@ -553,6 +564,8 @@ def products(
     # Representative list price: min active variant price (net) per product.
     min_price_expr = Min("variants__price_eur",
                          filter=Q(variants__is_active=True))
+    max_price_expr = Max("variants__price_eur",
+                         filter=Q(variants__is_active=True))
 
     # Representative offer price: min effective offer sale price (net) per product.
     # Only consider inventory items with available stock and matching visibility.
@@ -592,6 +605,7 @@ def products(
         .select_related("brand", "category", "tax_class")
         .prefetch_related("images", "translations", "brand__translations", "category__translations")
         .annotate(_min_variant_price=min_price_expr)
+        .annotate(_max_variant_price=max_price_expr)
         .annotate(_min_offer_price=min_offer_price_expr)
     )
     qs = apply_shop_product_scope(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import Case, DecimalField, ExpressionWrapper, F, IntegerField, Min, Q, Sum, Value, When
+from django.db.models import Case, DecimalField, ExpressionWrapper, F, IntegerField, Max, Min, Q, Sum, Value, When
 from django.db.models.functions import Coalesce
 from ninja.errors import HttpError
 
@@ -73,6 +73,7 @@ def get_products_by_slugs_for_grid(
     )
 
     min_price_expr = Min("variants__price_eur", filter=Q(variants__is_active=True))
+    max_price_expr = Max("variants__price_eur", filter=Q(variants__is_active=True))
 
     offer_price_expr = Case(
         When(
@@ -108,6 +109,7 @@ def get_products_by_slugs_for_grid(
         .select_related("brand", "category", "tax_class")
         .prefetch_related("images", "translations", "brand__translations", "category__translations")
         .annotate(_min_variant_price=min_price_expr)
+        .annotate(_max_variant_price=max_price_expr)
         .annotate(_min_offer_price=min_offer_price_expr)
     )
 
@@ -175,6 +177,11 @@ def get_products_by_slugs_for_grid(
         if discount_percent is not None:
             compare_at_price = _money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
 
+        price_to = None
+        max_variant_net = getattr(p, "_max_variant_price", None)
+        if max_variant_net is not None and Decimal(max_variant_net) > list_net:
+            price_to = _money_out(currency="EUR", unit_net=Decimal(max_variant_net), vat_rate=rate)
+
         imgs = list(p.images.all())
         imgs.sort(key=lambda i: (i.sort_order, i.id))
         images_out = []
@@ -203,6 +210,7 @@ def get_products_by_slugs_for_grid(
                 "slug": product_loc["slug"],
                 "name": product_loc["name"],
                 "is_active": bool(p.is_active),
+                "product_group_code": p.product_group_code or "",
                 "brand": (
                     {
                         "id": p.brand.id,
@@ -223,6 +231,7 @@ def get_products_by_slugs_for_grid(
                 ),
                 "images": images_out,
                 "price": _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
+                "price_to": price_to,
                 "compare_at_price": compare_at_price,
                 "discount_percent": discount_percent,
             }
@@ -299,6 +308,7 @@ def get_products_for_grid(
         .select_related("brand", "category", "tax_class")
         .prefetch_related("images", "translations", "brand__translations", "category__translations")
         .annotate(_min_variant_price=min_price_expr)
+        .annotate(_max_variant_price=Max("variants__price_eur", filter=Q(variants__is_active=True)))
         .annotate(_min_offer_price=min_offer_price_expr)
     )
 
@@ -455,6 +465,11 @@ def get_products_for_grid(
         if discount_percent is not None:
             compare_at_price = _money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
 
+        price_to = None
+        max_variant_net = getattr(p, "_max_variant_price", None)
+        if max_variant_net is not None and Decimal(max_variant_net) > list_net:
+            price_to = _money_out(currency="EUR", unit_net=Decimal(max_variant_net), vat_rate=rate)
+
         imgs = list(p.images.all())
         imgs.sort(key=lambda i: (i.sort_order, i.id))
         images_out = []
@@ -484,6 +499,7 @@ def get_products_for_grid(
                 "slug": product_loc["slug"],
                 "name": product_loc["name"],
                 "is_active": bool(p.is_active),
+                "product_group_code": p.product_group_code or "",
                 "brand": (
                     {
                         "id": p.brand.id,
@@ -504,6 +520,7 @@ def get_products_for_grid(
                 ),
                 "images": images_out,
                 "price": _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
+                "price_to": price_to,
                 "compare_at_price": compare_at_price,
                 "discount_percent": discount_percent,
             }

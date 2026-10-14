@@ -141,11 +141,12 @@ Rezultatas: nuspėjamas release ciklas ir mažesnė eksploatavimo kaina.
 - Svelte 5 storefront instrukcija: `docs/frontend_svelte5_api_guide.md`
 - Svelte 5 admin panelės instrukcija: `docs/svelte5_admin_ui_guide.md`
 
-## Bootstrap importai
+## Katalogo importai
 
-- `python manage.py import_prestashop_categories --source "docs/prestashop_category_for_import.json" --replace-existing`
-- `python manage.py import_prestashop_brands --source "docs/ps_manufacturer.json" --replace-existing`
-- `python manage.py import_prestashop_products --source-dir "docs/prestashop_migration"`
+- `.venv\Scripts\python.exe manage.py import_catalog <failas.json> [--dry-run] [--no-apply]` — normalizuotas katalogas
+- `.venv\Scripts\python.exe manage.py import_stock <failas.json> [--warehouse <code>] [--dry-run]` — likučiai
+- Ops API: `POST /api/v1/ops/imports/catalog`, `POST /api/v1/ops/imports/stock`, `GET /api/v1/ops/imports/runs*`
+- Formato spec normalizeriui: `docs/normalizer_integration.md`
 
 ## Middleware dokumentacija
 

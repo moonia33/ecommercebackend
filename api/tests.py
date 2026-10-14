@@ -384,3 +384,90 @@ class OpsOrderSearchTests(TestCase):
         self.assertEqual(str(line.unit_net), str(self.variant.price_eur))
         self.assertEqual(line.sku, self.variant.sku)
         self.assertEqual(line.name, self.variant.product.name)
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class OrderStatusLabelsTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.shop = Shop.objects.create(
+            code="sl",
+            name="Status Shop",
+            primary_domain="sl.local",
+            default_language_code="lt",
+            default_country_code="LT",
+            currency="EUR",
+            is_active=True,
+        )
+        ShopLanguage.objects.create(
+            shop=self.shop, language_code="lt", is_active=True, is_default=True, sort_order=0)
+        ShopLanguage.objects.create(
+            shop=self.shop, language_code="en", is_active=True, is_default=False, sort_order=1)
+
+        self.user = User.objects.create_user(
+            email="status@example.com", password="pass1234")
+
+        self.order = Order.objects.create(
+            user=self.user,
+            shop=self.shop,
+            status=Order.Status.PAID,
+            delivery_status=Order.DeliveryStatus.SHIPPED,
+            fulfillment_mode=Order.FulfillmentMode.STOCK,
+            shipping_method="dpd_pickup",
+            country_code="LT",
+            currency="EUR",
+        )
+        PaymentIntent.objects.create(
+            order=self.order,
+            provider=PaymentIntent.Provider.BANK_TRANSFER,
+            status=PaymentIntent.Status.PENDING,
+            currency="EUR",
+            amount_gross="12.10",
+        )
+
+        token = issue_access_token(user_id=self.user.id)
+        self.client.cookies["access_token"] = token
+
+    def test_statuses_endpoint_returns_localized_labels(self):
+        res = self.client.get("/api/v1/checkout/statuses", HTTP_HOST="sl.local")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+
+        self.assertIn("order_status", data)
+        self.assertIn("delivery_status", data)
+        self.assertIn("payment_status", data)
+
+        order_statuses = {o["code"]: o["label"] for o in data["order_status"]}
+        self.assertEqual(order_statuses["paid"], "Apmokėta")
+        self.assertEqual(order_statuses["pending_payment"], "Laukiama apmokėjimo")
+
+        delivery_statuses = {o["code"]: o["label"] for o in data["delivery_status"]}
+        self.assertEqual(delivery_statuses["shipped"], "Išsiųsta")
+
+    def test_statuses_endpoint_respects_lang_param(self):
+        res = self.client.get("/api/v1/checkout/statuses?lang=en", HTTP_HOST="sl.local")
+        self.assertEqual(res.status_code, 200)
+        order_statuses = {o["code"]: o["label"] for o in res.json()["order_status"]}
+        self.assertEqual(order_statuses["paid"], "Paid")
+
+    def test_orders_endpoint_returns_localized_labels(self):
+        res = self.client.get("/api/v1/checkout/orders", HTTP_HOST="sl.local")
+        self.assertEqual(res.status_code, 200)
+        orders = res.json()
+        self.assertEqual(len(orders), 1)
+
+        o = orders[0]
+        self.assertEqual(o["status"], "paid")
+        self.assertEqual(o["status_label"], "Apmokėta")
+        self.assertEqual(o["delivery_status"], "shipped")
+        self.assertEqual(o["delivery_status_label"], "Išsiųsta")
+        self.assertEqual(o["payment_provider_label"], "Bankinis pavedimas")
+        self.assertEqual(o["payment_status_label"], "Laukiama")
+
+    def test_orders_endpoint_localizes_to_en(self):
+        res = self.client.get("/api/v1/checkout/orders?lang=en", HTTP_HOST="sl.local")
+        self.assertEqual(res.status_code, 200)
+        o = res.json()[0]
+        self.assertEqual(o["status_label"], "Paid")
+        self.assertEqual(o["delivery_status_label"], "Shipped")
+        self.assertEqual(o["payment_status_label"], "Pending")

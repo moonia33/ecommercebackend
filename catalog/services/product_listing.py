@@ -117,6 +117,13 @@ def serialize_products_listing(
         if disc_pct is not None:
             compare_at_price = money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
 
+        price_to = None
+        max_variant_net = getattr(p, "_max_variant_price", None)
+        if max_variant_net is not None and Decimal(max_variant_net) > list_net:
+            price_to = money_out(
+                currency="EUR", unit_net=Decimal(max_variant_net), vat_rate=rate
+            )
+
         imgs = list(p.images.all())
         imgs.sort(key=lambda i: (i.sort_order, i.id))
         images_out = []
@@ -145,10 +152,12 @@ def serialize_products_listing(
                 "slug": product_loc["slug"],
                 "name": product_loc["name"],
                 "is_active": bool(p.is_active),
+                "product_group_code": p.product_group_code or "",
                 "brand": {"id": p.brand.id, "slug": brand_loc["slug"], "name": brand_loc["name"]} if p.brand and brand_loc else None,
                 "category": {"id": p.category.id, "slug": category_loc["slug"], "name": category_loc["name"]} if p.category and category_loc else None,
                 "images": images_out,
                 "price": money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
+                "price_to": price_to,
                 "compare_at_price": compare_at_price,
                 "discount_percent": disc_pct,
             }

@@ -98,9 +98,9 @@ OTP turi `attempts` ir resend cooldown'ą per email, bet nėra IP lygio limitų 
 
 Ninja API neturi CSRF apsaugos; `SameSite=Lax` dengia daugumą atvejų, bet jei FE kitame subdomene — rizika. Spręsti CSRF token endpoint'u arba `SameSite=Strict`.
 
-### 9. Guest checkout kontradikcija
+### 9. ~~Guest checkout kontradikcija~~ (išspręsta)
 
-`ALLOW_GUEST_CHECKOUT=True` default'as, bet `checkout_confirm` reikalauja auth ir `Order.user` yra not-null. Arba implementuoti guest flow, arba pakeisti default'ą į `False` ir pašalinti setting'ą.
+`ALLOW_GUEST_CHECKOUT` setting'as pašalintas — checkout visada per OTP auth. Session cart'as (guest krepšelis iki login) lieka kaip UX mechanizmas: merge'inamas į user cart'ą prisijungus.
 
 ### 10. Reviews / wishlist / PDF sąskaitos / CI/CD
 

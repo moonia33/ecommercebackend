@@ -27,18 +27,36 @@ class ProductOptionType(models.Model):
 
 
 class Variant(models.Model):
-    external_presta_combination_id = models.CharField(
-        max_length=32,
-        null=True,
-        blank=True,
-        unique=True,
-        db_index=True,
-        help_text="Original PrestaShop id_product_attribute (combination).",
-    )
     product = models.ForeignKey(
         Product, on_delete=models.CASCADE, related_name="variants")
     sku = models.CharField(max_length=64, unique=True)
-    barcode = models.CharField(max_length=64, blank=True)
+    barcode = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="EAN/barcode; unique when present (empty stored as NULL).",
+    )
+    import_source = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Catalog import source identifier (e.g. 'normalizer').",
+    )
+    import_code = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="External variant code within import_source.",
+    )
+    product_group_code = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Supplier/import product-family code shared with the base product.",
+    )
     name = models.CharField(max_length=255, blank=True)
 
     # MVP: EUR-only. Price is net (excl VAT).
