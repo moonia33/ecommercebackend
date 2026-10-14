@@ -1,0 +1,138 @@
+from __future__ import annotations
+
+from decimal import Decimal
+
+from ninja import Schema
+
+
+class ImportTranslationIn(Schema):
+    name: str = ""
+    slug: str = ""
+    description: str = ""
+    seo_title: str = ""
+    seo_description: str = ""
+    seo_keywords: str = ""
+
+
+class ImportFeatureIn(Schema):
+    code: str
+    value: str
+    # feature name translations: {"lt": "Spalva", "pl": "Kolor"}
+    name_translations: dict[str, str] = {}
+    # value translations: {"lt": "Raudona", "pl": "Czerwony"}
+    value_translations: dict[str, str] = {}
+
+
+class ImportImageIn(Schema):
+    url: str
+    alt: str = ""
+    sort_order: int = 0
+
+
+class ImportVideoIn(Schema):
+    url: str
+    # product | instructional | tutorial
+    type: str = "product"
+    language: str = ""
+    sort_order: int = 0
+
+
+class ImportVariantIn(Schema):
+    code: str
+    product_group_code: str = ""
+    ean: str = ""
+    # option_type_code -> option_value code/label, e.g. {"size": "m"}
+    options: dict[str, str] = {}
+    price_net: Decimal | None = None
+    cost_net: Decimal | None = None
+    weight_g: int = 0
+    length_cm: int = 0
+    width_cm: int = 0
+    height_cm: int = 0
+    is_active: bool = True
+    # warehouse_code -> qty
+    stock: dict[str, int] = {}
+
+
+class ImportProductIn(Schema):
+    code: str
+    product_group_code: str = ""
+    ean: str = ""
+    brand_code: str = ""
+    # shop Category.slug (mapping happens in the normalizer)
+    category: str = ""
+    tax_class: str = "standard"
+    is_active: bool = True
+    price_net: Decimal
+    cost_net: Decimal | None = None
+    weight_g: int = 0
+    length_cm: int = 0
+    width_cm: int = 0
+    height_cm: int = 0
+    # "lt" required (base language); others become ProductTranslation rows
+    translations: dict[str, ImportTranslationIn]
+    features: list[ImportFeatureIn] = []
+    images: list[ImportImageIn] = []
+    videos: list[ImportVideoIn] = []
+    # warehouse_code -> qty (product-level stock goes to the default variant)
+    stock: dict[str, int] = {}
+    variants: list[ImportVariantIn] = []
+
+
+class CatalogImportEnvelope(Schema):
+    """Envelope validated strictly; items stay raw and are validated per-row."""
+
+    format_version: int = 1
+    source: str = "normalizer"
+    mode: str = "upsert"  # upsert | full_sync
+    # upsert never deletes; full_sync + delete_missing=true deactivates absent items
+    delete_missing: bool = False
+    items: list[dict]
+
+
+class CatalogImportFile(CatalogImportEnvelope):
+    """Fully-typed document (docs/schema; items are validated per-row at runtime)."""
+
+    items: list[ImportProductIn]
+
+
+class StockImportItemIn(Schema):
+    code: str  # variant sku
+    qty: int
+
+
+class StockImportEnvelope(Schema):
+    format_version: int = 1
+    source: str = "normalizer"
+    warehouse_code: str = "main"
+    items: list[dict]
+
+
+class StockImportFile(StockImportEnvelope):
+    items: list[StockImportItemIn]
+
+
+class ImportRunOut(Schema):
+    id: int
+    kind: str
+    source: str
+    file_name: str
+    status: str
+    mode: str
+    total_items: int
+    ok_items: int
+    failed_items: int
+    skipped_items: int
+    error_message: str
+    created_at: str
+    finished_at: str
+
+
+class ImportItemOut(Schema):
+    id: int
+    row_no: int
+    external_code: str
+    status: str
+    error: str
+    product_id: int | None = None
+    variant_id: int | None = None

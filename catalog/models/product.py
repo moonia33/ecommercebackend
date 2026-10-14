@@ -117,6 +117,42 @@ class ProductTranslation(models.Model):
         self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
 
 
+class ProductVideo(models.Model):
+    """Išorinė video nuoroda (pvz., YouTube) iš tiekėjo feed'o."""
+
+    class Type(models.TextChoices):
+        PRODUCT = "product", "Produkto video"
+        INSTRUCTIONAL = "instructional", "Instruktažinis video"
+        TUTORIAL = "tutorial", "Mokomasis video"
+
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="videos"
+    )
+    url = models.URLField(max_length=1000)
+    video_type = models.CharField(
+        max_length=20, choices=Type.choices, default=Type.PRODUCT
+    )
+    language_code = models.CharField(
+        max_length=10,
+        blank=True,
+        default="",
+        help_text="Video kalba (jei tiekėjas turi skirtingus video per kalbas).",
+    )
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ["sort_order", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "url"],
+                name="uniq_product_video_url",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.product_id}:{self.video_type} {self.url}"
+
+
 class ProductImage(models.Model):
     product = models.ForeignKey(
         Product, on_delete=models.CASCADE, related_name="images")
