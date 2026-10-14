@@ -72,7 +72,7 @@ Patikra:
 - Katalogas: `Product`/`Variant` + `InventoryItem` offer modelis
 - Checkout: cart -> preview -> confirm -> order/payment intent
 - Carrier integracijos: DPD, Unisend
-- Mokėjimai: bank transfer / Klix / Neopay (pagal konfigūraciją)
+- Mokėjimai: bank transfer / Klix (pagal konfigūraciją)
 
 ## Multi-shop ir i18n bazė
 

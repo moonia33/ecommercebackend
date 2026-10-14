@@ -69,7 +69,6 @@ class CheckoutPreviewIn(Schema):
     shipping_method: str = "unisend_pickup"
     pickup_point_id: str | None = None
     payment_method: str = "klix"
-    neopay_bank_bic: str | None = None
     channel: str = "normal"
     coupon_code: str | None = None
 
@@ -115,7 +114,6 @@ class CheckoutConfirmIn(Schema):
     shipping_method: str = "unisend_pickup"
     pickup_point_id: str | None = None
     payment_method: str = "klix"
-    neopay_bank_bic: str | None = None
     channel: str = "normal"
     coupon_code: str | None = None
     consents: list[OrderConsentIn]
