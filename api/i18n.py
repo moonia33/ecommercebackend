@@ -127,6 +127,18 @@ def get_request_language_code(
     shop_enabled = get_shop_enabled_language_codes(shop)
     allowed = shop_enabled or supported
 
+    # URL path prefix: /lt/... or /pl/... wins over everything else —
+    # enables mixed domain+prefix routing when FE decides to use it.
+    if not single_language_mode():
+        try:
+            seg = normalize_language_code(
+                (getattr(request, "path", "") or "").split("/")[1]
+            )
+        except Exception:
+            seg = ""
+        if seg and seg in allowed:
+            return seg
+
     if not single_language_mode() and query_param:
         try:
             qp = normalize_language_code(getattr(request, "GET", {}).get(query_param))

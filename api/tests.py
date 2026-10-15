@@ -128,6 +128,19 @@ class ShopLanguageSelectionTests(TestCase):
         req2.shop = self.shop
         self.assertEqual(get_request_language_code(req2), "en")
 
+    def test_request_language_from_path_prefix(self):
+        req = self.rf.get("/pl/produkty")
+        req.shop = self.shop
+        self.assertEqual(get_request_language_code(req), "pl")
+
+        req2 = self.rf.get("/de/produkte", HTTP_ACCEPT_LANGUAGE="en")
+        req2.shop = self.shop
+        self.assertEqual(get_request_language_code(req2), "en")  # de not shop-enabled
+
+        req3 = self.rf.get("/products")
+        req3.shop = self.shop
+        self.assertEqual(get_request_language_code(req3), "pl")  # shop default
+
     def test_fallback_chain_prefers_shop_default_and_enabled(self):
         chain = translation_fallback_chain("de", shop=self.shop)
         self.assertEqual(chain[0], "de")
