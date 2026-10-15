@@ -9,6 +9,84 @@ from django.db.models import Q
 from django.utils import timezone
 
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=300)
+def ingest_product_image_task(self, product_image_id: int):
+    """Download `image_url` into `image` (object storage) -> triggers rendition task."""
+    import urllib.request
+    from urllib.parse import urlparse
+
+    from .models import ProductImage
+
+    try:
+        instance = ProductImage.objects.get(pk=product_image_id)
+    except ProductImage.DoesNotExist:
+        return
+
+    if instance.image:
+        if instance.ingest_status != ProductImage.INGEST_DONE:
+            instance.ingest_status = ProductImage.INGEST_DONE
+            instance.ingest_error = ""
+            instance.save(update_fields=["ingest_status", "ingest_error"])
+        return
+
+    url = (instance.image_url or "").strip()
+    if not url:
+        return
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        instance.ingest_status = ProductImage.INGEST_ERROR
+        instance.ingest_error = f"unsupported url scheme '{parsed.scheme}'"
+        instance.save(update_fields=["ingest_status", "ingest_error"])
+        return
+
+    max_bytes = int(getattr(settings, "IMAGE_INGEST_MAX_BYTES", 8 * 1024 * 1024))
+    timeout = int(getattr(settings, "IMAGE_INGEST_TIMEOUT", 20))
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "catalog-image-ingest/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            allowed = getattr(
+                settings, "IMAGE_INGEST_CONTENT_TYPES",
+                {"image/jpeg", "image/png", "image/webp", "image/gif", "image/avif", "image/svg+xml"},
+            )
+            if content_type and content_type not in allowed:
+                raise ValueError(f"unsupported content-type '{content_type}'")
+            declared = int(resp.headers.get("Content-Length") or 0)
+            if declared > max_bytes:
+                raise ValueError(f"file too large ({declared} bytes, max {max_bytes})")
+            data = resp.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise ValueError(f"file too large (> {max_bytes} bytes)")
+
+        if len(data) < 32:
+            raise ValueError("response too small to be an image")
+
+        ext = parsed.path.rsplit(".", 1)[-1].lower() if "." in parsed.path else ""
+        ext_map = {
+            "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+            "image/gif": "gif", "image/avif": "avif", "image/svg+xml": "svg",
+        }
+        if ext not in ("jpg", "jpeg", "png", "webp", "gif", "avif", "svg"):
+            ext = ext_map.get(content_type, "jpg")
+
+        filename = f"ingested_{instance.id}.{ext}"
+        instance.ingest_status = ProductImage.INGEST_DONE
+        instance.ingest_error = ""
+        # image.save() writes to storage (R2) and save() dispatches rendition task
+        instance.image.save(filename, ContentFile(data), save=False)
+        instance.save(update_fields=["image", "ingest_status", "ingest_error"])
+    except Exception as exc:
+        instance.ingest_status = ProductImage.INGEST_ERROR
+        instance.ingest_error = str(exc)[:500]
+        instance.save(update_fields=["ingest_status", "ingest_error"])
+        if getattr(self.request, "called_directly", False):
+            return  # invoked inline (e.g. --sync command) — no retry machinery
+        if int(getattr(self.request, "retries", 0) or 0) < self.max_retries:
+            raise self.retry(exc=exc)
+
+
 @shared_task
 def process_product_image_task(product_image_id: int):
     from .models import ProductImage

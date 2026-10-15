@@ -46,7 +46,10 @@ def build_product_detail_payload(
     images = list(product.images.all())
     images.sort(key=lambda i: (i.sort_order, i.id))
 
-    variants_qs = [v for v in product.variants.all() if v.is_active]
+    variants_qs = [
+        v for v in product.variants.prefetch_related("variant_images").all()
+        if v.is_active
+    ]
     variants_qs.sort(key=lambda v: (v.sku, v.id))
 
     variants = []
@@ -146,6 +149,20 @@ def build_product_detail_payload(
                         "option_value_label": localize_option_value(r.option_value, language_code=language_code),
                     }
                     for r in options
+                ],
+                "images": [
+                    {
+                        "avif_url": img.avif_url or None,
+                        "webp_url": img.webp_url or None,
+                        "url": img.url,
+                        "alt_text": img.alt_text,
+                        "sort_order": img.sort_order,
+                    }
+                    for img in sorted(
+                        v.variant_images.all(),
+                        key=lambda i: (i.sort_order, i.id),
+                    )
+                    if img.url
                 ],
             }
         )

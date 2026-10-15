@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import F, IntegerField, Sum, Value
 from django.db.models.functions import Coalesce
 from django.forms.models import BaseInlineFormSet
+from django.utils.html import format_html_join
 from mptt.admin import DraggableMPTTAdmin
 
 from api.admin_i18n import apply_language_code_choices
@@ -180,12 +181,16 @@ class ProductTranslationInline(admin.StackedInline):
 class ProductImageInline(admin.TabularInline):
     model = ProductImage
     extra = 0
-    fields = ("image", "image_url", "alt_text", "sort_order")
+    fields = ("image", "image_url", "alt_text", "sort_order", "variants",
+              "ingest_status", "ingest_error")
+    readonly_fields = ("ingest_status", "ingest_error")
+    autocomplete_fields = ("variants",)
 
 
 class ProductFeatureValueInline(admin.TabularInline):
     model = ProductFeatureValue
     extra = 0
+    autocomplete_fields = ("feature", "feature_value")
 
 
 class ProductOptionTypeInline(admin.TabularInline):
@@ -449,7 +454,7 @@ class ProductAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "brand", "category", "group", "import_source")
     search_fields = ("sku", "import_code", "product_group_code", "name", "slug")
     prepopulated_fields = {"slug": ("name",)}
-    autocomplete_fields = ("tax_class",)
+    autocomplete_fields = ("tax_class", "brand", "category", "group")
     inlines = (
         ProductTranslationInline,
         ProductImageInline,
@@ -659,7 +664,25 @@ class VariantAdmin(admin.ModelAdmin):
         "option_values__option_type__name",
     )
     ordering = ("sku",)
+    readonly_fields = ("variant_images_display",)
+    fields = (
+        "import_source", "import_code", "product_group_code",
+        "product", "sku", "barcode", "name", "price_eur", "cost_eur",
+        "weight_g", "length_cm", "width_cm", "height_cm", "is_active",
+        "variant_images_display",
+    )
     inlines = (VariantOptionValueInline, InventoryItemInline)
+
+    @admin.display(description="Varianto nuotraukos")
+    def variant_images_display(self, obj):
+        images = list(obj.variant_images.all())
+        if not images:
+            return "—"
+        return format_html_join(
+            ", ",
+            '<a href="{}#productimage-tab">{}</a>',
+            ((f"/admin/catalog/product/{obj.product_id}/change/", img.alt_text or img.image_url or img.id) for img in images),
+        )
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)

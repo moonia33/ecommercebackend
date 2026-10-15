@@ -189,6 +189,19 @@ class ProductImage(models.Model):
     image_url = models.URLField(blank=True, default="", max_length=1000)
     alt_text = models.CharField(max_length=255, blank=True)
     sort_order = models.IntegerField(default=0)
+    # Variant-specific image: empty = shown for all variants (generic gallery),
+    # non-empty = only when one of these variants is selected.
+    variants = models.ManyToManyField(
+        "Variant", blank=True, related_name="variant_images"
+    )
+
+    # External URL ingest state: downloaded into `image` (object storage) by
+    # ingest_product_image_task. Empty = not needed (local upload or no url).
+    INGEST_PENDING = "pending"
+    INGEST_DONE = "done"
+    INGEST_ERROR = "error"
+    ingest_status = models.CharField(max_length=20, blank=True, default="")
+    ingest_error = models.CharField(max_length=500, blank=True, default="")
 
     class Meta:
         ordering = ["sort_order", "id"]

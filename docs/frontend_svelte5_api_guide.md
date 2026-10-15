@@ -92,6 +92,17 @@ Pastaba:
   - rodyti `price` kaip aktyvią,
   - `compare_at_price` kaip perbrauktą.
 
+### Variantų nuotraukos
+
+`ProductDetailOut.images[]` yra **bendra galerija** (`ProductImage.variants` tuščias).
+`variants[].images[]` — nuotraukos priskirtos konkrečiam variantui (kai jos skiriasi, pvz. skirtingos spalvos).
+
+Atvaizdavimo taisyklė:
+
+- variantas **nepasirinktas** arba variantas neturi savų nuotraukų → rodyti `images[]`;
+- variantas **pasirinktas ir turi `images[]`** → rodyti jo nuotraukas (gali būti kelios);
+- varianto `images[]` yra papildomos prie bendrų — jei dizainas nori visų nuotraukų, naudok `variant.images + product.images` su `sort_order`.
+
 ## 5. Checkout srautas (privalomas)
 
 ### Cart

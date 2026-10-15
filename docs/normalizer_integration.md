@@ -131,7 +131,7 @@ Klaidos visada per `GET /ops/imports/runs/{id}/items?status=error` — ten `row_
 | `weight_g`, `length_cm`, `width_cm`, `height_cm` | int | ne | Logistika (default variante). |
 | `translations` | object | **taip** | `translations.lt` **privaloma** (`name` negali būti tuščias). `lt` → baziniai `Product` laukai; kitos kalbos → `ProductTranslation`. `slug` siunčiamas kaip hint'as — platforma užtikrina unikalumą (suffix `-2`, `-3`...). |
 | `features` | array | ne | Spec. charakteristikos (filtrams). `Feature`/`FeatureValue` auto-create pagal `code`/`value`. **Failas yra source of truth**: prekės feature'ai, kurių nėra faile, ištrinami. |
-| `images` | array | ne | `url` privalomas; saugoma kaip external `image_url` (renditions generuojami tik upload'ams). |
+| `images` | array | ne | `url` privalomas → sukuriamas `ProductImage` su `image_url`; Celery `ingest_product_image_task` atsiunčia originalą į object storage (R2) ir generuoja AVIF/WebP renditions. Rekomenduota: ≥1200px kraštinė, ≤8MB, JPEG/PNG/WebP. **Bendra galerija** — rodoma visoms variantams. |
 | `stock` | object | ne | `{"<warehouse_code>": <qty>}` → `qty_on_hand` default variantui. Nežinomas warehouse → item ERROR. `qty >= 0`. |
 | `variants` | array | ne | Žr. žemiau. Tuščias/nėra → automatinis default variantas (`code = item.code`, paveldi `price_net`/`ean`/`stock`). |
 
@@ -147,7 +147,8 @@ Klaidos visada per `GET /ops/imports/runs/{id}/items?status=error` — ten `row_
   "cost_net": "11.00",
   "is_active": true,
   "weight_g": 1250,
-  "stock": {"main": 5, "supplier-x": 40}
+  "stock": {"main": 5, "supplier-x": 40},
+  "images": [{"url": "https://cdn.example/abc-123-red.jpg", "alt": "", "sort_order": 0}]
 }
 ```
 
@@ -159,6 +160,7 @@ Klaidos visada per `GET /ops/imports/runs/{id}/items?status=error` — ten `row_
 | `options` | `{"<option_type_code>": "<option_value_code>"}`, pvz. `{"size": "m"}`. `OptionType`/`OptionValue` auto-create. Tai maitina variantų checkbox/select UI front'e. |
 | `price_net` | Jei nenurodyta — paveldi prekės `price_net`. Variantų kainų skirtumai → listing'e rodoma `price`–`price_to` (nuo–iki). |
 | `stock` | Tas pats kaip prekės lygyje, bet rašoma į **šio** varianto `InventoryItem`. Tas pats variantas gali turėti likučius keliuose warehouse'uose (skirtingi tiekėjai). |
+| `images` | Variantui priskirtos nuotraukos (`ProductImage.variants` M2M). Rodo tik kai variantas pasirinktas. Dedup pagal `url` — tas pats URL keliems variantams = vienas `ProductImage` priskirtas keliems. |
 
 **Svarbu:** variantas visada priklauso savo prekei. Tas pats `variant.code`, atėjęs kitos prekės viduje → item ERROR (konfliktas).
 

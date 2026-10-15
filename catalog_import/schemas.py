@@ -50,6 +50,8 @@ class ImportVariantIn(Schema):
     width_cm: int = 0
     height_cm: int = 0
     is_active: bool = True
+    # variant-specific image URLs (attached to this variant only)
+    images: list[ImportImageIn] = []
     # warehouse_code -> qty
     stock: dict[str, int] = {}
 

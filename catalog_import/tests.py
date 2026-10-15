@@ -83,6 +83,40 @@ class CatalogImportTestCase(TestCase):
             InventoryItem.objects.get(variant=variants["xxxx-M"]).qty_on_hand, 5
         )
 
+    def test_variant_images_are_attached_to_specific_variant(self):
+        run = self._run([
+            {
+                "code": "shirt",
+                "tax_class": "standard",
+                "price_net": "15.00",
+                "translations": {"lt": {"name": "Marškiniai"}},
+                "images": [{"url": "https://cdn.x/shared.jpg", "sort_order": 0}],
+                "variants": [
+                    {"code": "shirt-red", "options": {"color": "red"},
+                     "images": [{"url": "https://cdn.x/red.jpg", "sort_order": 1}]},
+                    {"code": "shirt-blue", "options": {"color": "blue"},
+                     "images": [{"url": "https://cdn.x/blue.jpg", "sort_order": 1}]},
+                ],
+            }
+        ])
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        product = Product.objects.get(sku="shirt")
+        variants = {v.sku: v for v in product.variants.all()}
+
+        shared = product.images.get(image_url="https://cdn.x/shared.jpg")
+        self.assertEqual(shared.variants.count(), 0)
+
+        red_img = product.images.get(image_url="https://cdn.x/red.jpg")
+        blue_img = product.images.get(image_url="https://cdn.x/blue.jpg")
+        self.assertEqual(
+            list(red_img.variants.values_list("id", flat=True)),
+            [variants["shirt-red"].id],
+        )
+        self.assertEqual(
+            list(blue_img.variants.values_list("id", flat=True)),
+            [variants["shirt-blue"].id],
+        )
+
     def test_product_without_variants_gets_default(self):
         run = self._run([
             {
@@ -236,3 +270,84 @@ class StockImportTestCase(TestCase):
         self.assertEqual(
             InventoryItem.objects.get(variant=self.variant).qty_on_hand, 2
         )
+
+
+from unittest.mock import MagicMock, patch
+
+from catalog.models import ProductImage
+
+
+class ImageIngestTestCase(TestCase):
+    def setUp(self):
+        TaxClass.objects.get_or_create(code="standard", defaults={"name": "S"})
+        self.product = Product.objects.create(
+            sku="img-p", name="Img P", slug="img-p", is_active=True,
+            tax_class=TaxClass.objects.get(code="standard"),
+        )
+
+    def _fake_response(self, body: bytes, content_type: str = "image/jpeg"):
+        resp = MagicMock()
+        resp.headers = {"Content-Type": content_type, "Content-Length": str(len(body))}
+        resp.read.side_effect = lambda n=-1: body[:n] if n >= 0 else body
+        resp.__enter__ = lambda s: resp
+        resp.__exit__ = lambda s, *a: False
+        return resp
+
+    def _run_import_with_image(self):
+        run = _run = None
+        doc = _catalog_doc([{
+            "code": "img-p", "tax_class": "standard", "price_net": "5.00",
+            "translations": {"lt": {"name": "Img"}},
+            "images": [{"url": "https://cdn.x/pic.jpg"}],
+        }])
+        r = create_run(kind="catalog", payload_bytes=doc, file_name="t.json")
+        execute_run(r)
+        return r
+
+    def test_import_marks_image_pending_ingest(self):
+        self._run_import_with_image()
+        img = ProductImage.objects.get(product=self.product)
+        self.assertEqual(img.ingest_status, ProductImage.INGEST_PENDING)
+
+    @patch("urllib.request.urlopen")
+    def test_ingest_downloads_and_marks_done(self, mock_open):
+        self._run_import_with_image()
+        img = ProductImage.objects.get(product=self.product)
+        mock_open.return_value = self._fake_response(b"\xff\xd8\xff" + b"x" * 5000)
+
+        from catalog.tasks import ingest_product_image_task
+        ingest_product_image_task(img.pk)
+
+        img.refresh_from_db()
+        self.assertEqual(img.ingest_status, ProductImage.INGEST_DONE)
+        self.assertTrue(bool(img.image))
+        self.assertEqual(img.ingest_error, "")
+        img.image.delete(save=False)
+
+    @patch("urllib.request.urlopen")
+    def test_ingest_rejects_bad_content_type(self, mock_open):
+        self._run_import_with_image()
+        img = ProductImage.objects.get(product=self.product)
+        mock_open.return_value = self._fake_response(b"<html>x" * 100, "text/html")
+
+        from catalog.tasks import ingest_product_image_task
+        ingest_product_image_task(img.pk)
+
+        img.refresh_from_db()
+        self.assertEqual(img.ingest_status, ProductImage.INGEST_ERROR)
+        self.assertIn("content-type", img.ingest_error)
+        self.assertFalse(bool(img.image))
+
+    @patch("urllib.request.urlopen")
+    def test_ingest_rejects_oversized(self, mock_open):
+        self._run_import_with_image()
+        img = ProductImage.objects.get(product=self.product)
+        big = b"x" * (9 * 1024 * 1024)
+        mock_open.return_value = self._fake_response(big)
+
+        from catalog.tasks import ingest_product_image_task
+        ingest_product_image_task(img.pk)
+
+        img.refresh_from_db()
+        self.assertEqual(img.ingest_status, ProductImage.INGEST_ERROR)
+        self.assertIn("large", img.ingest_error)

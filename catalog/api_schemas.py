@@ -77,6 +77,7 @@ class VariantOut(Schema):
     offer_visibility: str = ""
     discount_percent: int | None = None
     options: list[VariantOptionOut]
+    images: list[ProductImageOut] = []
 
 
 class ProductListOut(Schema):

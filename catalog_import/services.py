@@ -387,6 +387,25 @@ def _sync_features(product: Product, item: ImportProductIn) -> None:
     ).delete()
 
 
+def _dispatch_image_ingest(obj: ProductImage) -> None:
+    """Queue download of external image_url into object storage (after commit)."""
+    if obj.image or not obj.image_url:
+        return
+    if obj.ingest_status == ProductImage.INGEST_PENDING:
+        return
+    if obj.ingest_status != ProductImage.INGEST_PENDING:
+        obj.ingest_status = ProductImage.INGEST_PENDING
+        obj.save(update_fields=["ingest_status"])
+    pk = obj.pk
+
+    def _dispatch(pk=pk):
+        from catalog.tasks import ingest_product_image_task
+        from config.celery import safe_delay
+        safe_delay(ingest_product_image_task, pk)
+
+    transaction.on_commit(_dispatch)
+
+
 def _sync_images(product: Product, item: ImportProductIn) -> None:
     for img in item.images:
         if not img.url:
@@ -404,6 +423,7 @@ def _sync_images(product: Product, item: ImportProductIn) -> None:
             changed = True
         if changed:
             obj.save(update_fields=["alt_text", "sort_order"])
+        _dispatch_image_ingest(obj)
 
 
 def _sync_videos(product: Product, item: ImportProductIn) -> None:
@@ -472,18 +492,34 @@ def _sync_variants(product: Product, item: ImportProductIn, source: str) -> list
                 raise _ItemError(f"ean '{spec.ean}' already used by variant '{conflict.sku}'")
             variant.barcode = spec.ean
         variant.is_active = spec.is_active
-        if spec.price_net is not None:
-            variant.price_eur = Decimal(spec.price_net)
-        if spec.cost_net is not None:
-            variant.cost_eur = Decimal(spec.cost_net)
+        price_net = spec.price_net if spec.price_net is not None else item.price_net
+        if price_net is not None:
+            variant.price_eur = Decimal(price_net)
+        cost_net = spec.cost_net if spec.cost_net is not None else item.cost_net
+        if cost_net is not None:
+            variant.cost_eur = Decimal(cost_net)
         variant.weight_g = spec.weight_g or item.weight_g
         variant.length_cm = spec.length_cm or item.length_cm
         variant.width_cm = spec.width_cm or item.width_cm
         variant.height_cm = spec.height_cm or item.height_cm
         variant.save()
         _sync_variant_options(product, variant, spec.options)
+        _sync_variant_images(product, variant, spec)
         out.append(variant)
     return out
+
+
+def _sync_variant_images(product: Product, variant: Variant, spec: ImportVariantIn) -> None:
+    for img in spec.images:
+        if not img.url:
+            continue
+        obj, _ = ProductImage.objects.get_or_create(
+            product=product, image_url=img.url,
+            defaults={"alt_text": img.alt, "sort_order": img.sort_order},
+        )
+        if not obj.variants.filter(pk=variant.pk).exists():
+            obj.variants.add(variant)
+        _dispatch_image_ingest(obj)
 
 
 def _match_variant(product: Product, spec: ImportVariantIn, source: str) -> Variant | None:
