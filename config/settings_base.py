@@ -194,6 +194,7 @@ AUTH_USER_MODEL = "accounts.User"
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "api.middleware.ShopResolverMiddleware",
     "django.middleware.locale.LocaleMiddleware",
@@ -298,6 +299,10 @@ CHECKOUT_PRIVACY_URL = env("CHECKOUT_PRIVACY_URL", default="/privacy")
 MEDIA_STORAGE = env("MEDIA_STORAGE", default="local").lower()
 if env.bool("DJANGO_USE_S3", default=False):
     MEDIA_STORAGE = "s3"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
 if MEDIA_STORAGE == "s3":
     INSTALLED_APPS += ["storages"]
 
