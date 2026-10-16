@@ -1,0 +1,34 @@
+# Production stack for Coolify (Docker Compose build pack).
+# Postgres and Redis are separate Coolify resources; set DATABASE_URL / REDIS_URL
+# and all other variables in Coolify (it passes them to every service via .env).
+x-app: &app
+  build: .
+  restart: unless-stopped
+  environment:
+    DJANGO_SETTINGS_MODULE: config.settings_prod
+  volumes:
+    - media:/app/media
+
+services:
+  web:
+    <<: *app
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings_prod
+      RUN_MIGRATIONS: "1"
+    expose:
+      - "8000"
+
+  worker:
+    <<: *app
+    command: celery -A config worker -l info -Q default
+    healthcheck:
+      disable: true
+
+  beat:
+    <<: *app
+    command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    healthcheck:
+      disable: true
+
+volumes:
+  media:
