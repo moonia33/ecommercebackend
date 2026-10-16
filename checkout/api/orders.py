@@ -7,9 +7,18 @@ from .shared import *
 
 
 def _localized_status_labels(o, pi, language_code: str) -> dict[str, str]:
+    # Locker pickups show "picked up from locker" instead of plain "delivered".
+    ds_code = o.delivery_status
+    if ds_code == Order.DeliveryStatus.DELIVERED and (
+        "pickup" in (o.shipping_method or "").lower()
+        or "locker" in (o.shipping_method or "").lower()
+        or o.pickup_locker_id is not None
+        or (o.pickup_point_id or "").strip()
+    ):
+        ds_code = "delivered_pickup"
     return {
         "status_label": get_status_label("order_status", o.status, language_code),
-        "delivery_status_label": get_status_label("delivery_status", o.delivery_status, language_code),
+        "delivery_status_label": get_status_label("delivery_status", ds_code, language_code),
         "fulfillment_mode_label": get_status_label("fulfillment_mode", o.fulfillment_mode, language_code),
         "supplier_reservation_status_label": get_status_label(
             "supplier_reservation_status", o.supplier_reservation_status, language_code),

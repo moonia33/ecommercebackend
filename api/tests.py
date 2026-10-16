@@ -424,7 +424,7 @@ class OrderStatusLabelsTests(TestCase):
             user=self.user,
             shop=self.shop,
             status=Order.Status.PAID,
-            delivery_status=Order.DeliveryStatus.SHIPPED,
+            delivery_status=Order.DeliveryStatus.IN_TRANSIT,
             fulfillment_mode=Order.FulfillmentMode.STOCK,
             shipping_method="dpd_pickup",
             country_code="LT",
@@ -455,7 +455,8 @@ class OrderStatusLabelsTests(TestCase):
         self.assertEqual(order_statuses["pending_payment"], "Laukiama apmokėjimo")
 
         delivery_statuses = {o["code"]: o["label"] for o in data["delivery_status"]}
-        self.assertEqual(delivery_statuses["shipped"], "Išsiųsta")
+        self.assertEqual(delivery_statuses["in_transit"], "Siunta kelyje")
+        self.assertEqual(delivery_statuses["at_pickup_point"], "Pristatyta į paštomatą")
 
     def test_statuses_endpoint_respects_lang_param(self):
         res = self.client.get("/api/v1/checkout/statuses?lang=en", HTTP_HOST="sl.local")
@@ -472,8 +473,8 @@ class OrderStatusLabelsTests(TestCase):
         o = orders[0]
         self.assertEqual(o["status"], "paid")
         self.assertEqual(o["status_label"], "Apmokėta")
-        self.assertEqual(o["delivery_status"], "shipped")
-        self.assertEqual(o["delivery_status_label"], "Išsiųsta")
+        self.assertEqual(o["delivery_status"], "in_transit")
+        self.assertEqual(o["delivery_status_label"], "Siunta kelyje")
         self.assertEqual(o["payment_provider_label"], "Bankinis pavedimas")
         self.assertEqual(o["payment_status_label"], "Laukiama")
 
@@ -482,5 +483,5 @@ class OrderStatusLabelsTests(TestCase):
         self.assertEqual(res.status_code, 200)
         o = res.json()[0]
         self.assertEqual(o["status_label"], "Paid")
-        self.assertEqual(o["delivery_status_label"], "Shipped")
+        self.assertEqual(o["delivery_status_label"], "Parcel in transit")
         self.assertEqual(o["payment_status_label"], "Pending")

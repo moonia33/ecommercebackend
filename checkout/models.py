@@ -112,9 +112,15 @@ class Order(models.Model):
 
     class DeliveryStatus(models.TextChoices):
         PENDING = "pending", "Pending"
-        LABEL_CREATED = "label_created", "Label created"
-        SHIPPED = "shipped", "Shipped"
+        AWAITING_STOCK = "awaiting_stock", "Awaiting stock"
+        PACKING = "packing", "Packing"
+        PACKED = "packed", "Packed, awaiting pickup"
+        PICKED_UP = "picked_up", "Picked up by carrier"
+        IN_TRANSIT = "in_transit", "In transit"
+        AT_PICKUP_POINT = "at_pickup_point", "At pickup point"
         DELIVERED = "delivered", "Delivered"
+        RETURNING = "returning", "Returning to sender"
+        RETURNED = "returned", "Returned to sender"
         CANCELLED = "cancelled", "Cancelled"
         ERROR = "error", "Error"
 
@@ -168,6 +174,9 @@ class Order(models.Model):
     delivery_status = models.CharField(
         max_length=32, choices=DeliveryStatus.choices, default=DeliveryStatus.PENDING
     )
+    # Set when the order first reaches DELIVERED or AT_PICKUP_POINT
+    # (locker arrival = customer can take possession; return window anchor).
+    delivered_at = models.DateTimeField(null=True, blank=True)
 
     # Delivery ETA snapshot (order-level, aggregated)
     delivery_min_date = models.DateField(null=True, blank=True)

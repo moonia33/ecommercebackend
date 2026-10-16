@@ -96,7 +96,7 @@ def ops_mark_shipment_shipped(request, shipment_id: int):
     _ensure_shop_context_if_strict(request)
     user = _require_ops_user(request)
     order = _get_order_for_ops(shipment_id, shop_id=_request_shop_id(request))
-    order.delivery_status = Order.DeliveryStatus.SHIPPED
+    order.delivery_status = Order.DeliveryStatus.PICKED_UP
     order.save(update_fields=["delivery_status", "updated_at"])
     _track_order_event(order=order, user=user, kind=OrderEvent.Kind.DELIVERY, name="ops_mark_shipped", payload={})
     return OpsActionResultOut(ok=True, message="Shipment marked as shipped", updated_ids=[order.id], failed_ids=[])

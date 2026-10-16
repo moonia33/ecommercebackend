@@ -155,7 +155,7 @@ Grąžina bulk lipdukų job būseną.
 
 Veiksmas:
 
-- nustato `order.delivery_status = shipped`
+- nustato `order.delivery_status = picked_up` (vieninga būsena: vežėjas paėmė siuntą)
 - `OrderEvent(name="ops_mark_shipped")`
 
 ## POST `/api/v1/ops/shipments/{shipment_id}/refresh-tracking`

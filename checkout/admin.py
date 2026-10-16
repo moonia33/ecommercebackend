@@ -745,8 +745,8 @@ class OrderAdmin(admin.ModelAdmin):
 
         now = timezone.now()
         for o in orders:
-            if o.delivery_status != Order.DeliveryStatus.LABEL_CREATED:
-                o.delivery_status = Order.DeliveryStatus.LABEL_CREATED
+            if o.delivery_status != Order.DeliveryStatus.PACKED:
+                o.delivery_status = Order.DeliveryStatus.PACKED
             if o.shipping_label_generated_at is None:
                 o.shipping_label_generated_at = now
             o.save(update_fields=["delivery_status", "shipping_label_generated_at", "updated_at"])
@@ -782,8 +782,8 @@ class OrderAdmin(admin.ModelAdmin):
 
             now = timezone.now()
             for o in orders:
-                if o.delivery_status != Order.DeliveryStatus.LABEL_CREATED:
-                    o.delivery_status = Order.DeliveryStatus.LABEL_CREATED
+                if o.delivery_status != Order.DeliveryStatus.PACKED:
+                    o.delivery_status = Order.DeliveryStatus.PACKED
                 if o.shipping_label_generated_at is None:
                     o.shipping_label_generated_at = now
                 o.save(update_fields=["delivery_status", "shipping_label_generated_at", "updated_at"])

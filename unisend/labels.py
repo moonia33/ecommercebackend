@@ -225,7 +225,7 @@ def generate_label_pdf_for_order(
         filename = f"unisend_label_10x15_order_{order.id}_{parcel_id}.pdf"
         order.shipping_label_pdf.save(filename, ContentFile(pdf), save=False)
         order.shipping_label_generated_at = timezone.now()
-        order.delivery_status = Order.DeliveryStatus.LABEL_CREATED
+        order.delivery_status = Order.DeliveryStatus.PACKED
         order.save(update_fields=[
             "shipping_label_pdf",
             "shipping_label_generated_at",

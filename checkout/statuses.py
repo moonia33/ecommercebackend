@@ -27,20 +27,55 @@ STATUS_LABELS: dict[str, dict[str, dict[str, str]]] = {
             "en": "Pending",
             "pl": "W przygotowaniu",
         },
-        "label_created": {
-            "lt": "Sukurta siuntos etiketė",
-            "en": "Label created",
-            "pl": "Utworzono etykietę",
+        "awaiting_stock": {
+            "lt": "Laukiama prekės iš nuotolinio sandėlio",
+            "en": "Waiting for stock from remote warehouse",
+            "pl": "Oczekiwanie na towar ze zdalnego magazynu",
         },
-        "shipped": {
-            "lt": "Išsiųsta",
-            "en": "Shipped",
-            "pl": "Wysłano",
+        "packing": {
+            "lt": "Perduota pakavimui",
+            "en": "Handed to packing",
+            "pl": "Przekazano do pakowania",
+        },
+        "packed": {
+            "lt": "Supakuota, laukiama paėmimo",
+            "en": "Packed, awaiting carrier pickup",
+            "pl": "Spakowano, oczekuje na odbiór kuriera",
+        },
+        "picked_up": {
+            "lt": "Siunta paimta",
+            "en": "Parcel picked up",
+            "pl": "Przesyłka odebrana",
+        },
+        "in_transit": {
+            "lt": "Siunta kelyje",
+            "en": "Parcel in transit",
+            "pl": "Przesyłka w drodze",
+        },
+        "at_pickup_point": {
+            "lt": "Pristatyta į paštomatą",
+            "en": "Delivered to pickup point",
+            "pl": "Dostarczono do paczkomatu",
         },
         "delivered": {
             "lt": "Pristatyta",
             "en": "Delivered",
             "pl": "Dostarczono",
+        },
+        "delivered_pickup": {
+            "lt": "Atsiimta iš paštomato",
+            "en": "Picked up from locker",
+            "pl": "Odebrano z paczkomatu",
+        },
+        "returning": {
+            "lt": "Grąžinama siuntėjui",
+            "en": "Returning to sender",
+            "pl": "Zwrot do nadawcy",
+        },
+        "returned": {
+            "lt": "Siunta grąžinta siuntėjui",
+            "en": "Returned to sender",
+            "pl": "Przesyłka zwrócona do nadawcy",
         },
         "cancelled": {
             "lt": "Atšaukta",
@@ -147,8 +182,17 @@ def get_status_label(domain: str, code: str, language_code: str = "") -> str:
     return labels.get(lang) or labels.get("en") or code
 
 
+# Label-only keys that are not real status codes (display variants),
+# excluded from the statuses endpoint so FE sees only real enum values.
+_DISPLAY_ONLY_CODES = {
+    "delivery_status": {"delivered_pickup"},
+}
+
+
 def get_status_options(domain: str, language_code: str = "") -> list[dict[str, str]]:
+    skip = _DISPLAY_ONLY_CODES.get(domain, set())
     return [
         {"code": code, "label": get_status_label(domain, code, language_code)}
         for code in STATUS_LABELS.get(domain, {})
+        if code not in skip
     ]

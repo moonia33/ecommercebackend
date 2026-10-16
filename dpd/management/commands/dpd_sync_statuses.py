@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
 from checkout.models import Order
 from dpd.client import DpdApiError, DpdClient
+from dpd.status_mapping import extract_latest_event, map_dpd_status
 
 
 class Command(BaseCommand):
@@ -20,6 +20,13 @@ class Command(BaseCommand):
         qs = (
             Order.objects.filter(carrier_code="dpd")
             .exclude(tracking_number="")
+            .exclude(
+                delivery_status__in=[
+                    Order.DeliveryStatus.DELIVERED,
+                    Order.DeliveryStatus.RETURNED,
+                    Order.DeliveryStatus.CANCELLED,
+                ]
+            )
             .order_by("-updated_at")
         )
 
@@ -40,39 +47,34 @@ class Command(BaseCommand):
                 self.stderr.write(f"order={order.id} tracking={tracking}: {e}")
                 continue
 
-            # MVP mapping: we keep it conservative.
-            # If DPD returns no statuses, do nothing.
             if not raw:
                 continue
 
-            # Try to detect delivered-ish states from payload (best-effort).
-            # Different detail levels may vary; for now check common keys.
-            latest = raw[0] if isinstance(raw[0], dict) else {}
-            status_text = str(
-                latest.get("status")
-                or latest.get("statusText")
-                or latest.get("statusDescription")
-                or latest.get("statusName")
-                or ""
-            ).lower()
-            status_code = str(latest.get("statusCode")
-                              or latest.get("code") or "").lower()
+            event = extract_latest_event(raw)
+            new_status = map_dpd_status(
+                status_code=event["status_code"],
+                service_codes=event["service_codes"],
+                prev_status_code=event["prev_status_code"],
+            )
+            if new_status is None or new_status == order.delivery_status:
+                continue
 
-            new_delivery_status = order.delivery_status
-            if any(k in status_text for k in ["delivered", "pristatyta", "atsiimta", "atiduota"]):
-                new_delivery_status = Order.DeliveryStatus.DELIVERED
-            elif any(k in status_text for k in ["shipped", "on the way", "kelyje", "išsiųsta", "issiusta"]):
-                new_delivery_status = Order.DeliveryStatus.SHIPPED
-            elif status_code in {"label_created", "created"}:
-                new_delivery_status = Order.DeliveryStatus.LABEL_CREATED
+            fields = {"delivery_status": new_status}
+            if (
+                new_status
+                in {
+                    Order.DeliveryStatus.DELIVERED,
+                    Order.DeliveryStatus.AT_PICKUP_POINT,
+                }
+                and order.delivered_at is None
+            ):
+                fields["delivered_at"] = timezone.now()
 
-            # Store raw last status snapshot into pickup_point_raw for now? No.
-            # Keep minimal: just update delivery_status.
-            if new_delivery_status != order.delivery_status:
-                if not dry_run:
-                    order.delivery_status = new_delivery_status
-                    order.save(update_fields=["delivery_status", "updated_at"])
-                updated += 1
+            if not dry_run:
+                for k, v in fields.items():
+                    setattr(order, k, v)
+                order.save(update_fields=list(fields) + ["updated_at"])
+            updated += 1
 
         self.stdout.write(
             f"Done. processed={processed} updated={updated} failed={failed} dry_run={dry_run}"

@@ -179,9 +179,28 @@ UI laukams svarbu:
 Būsenų atvaizdavimas:
 
 - `*_label` laukai jau **lokalizuoti** pagal request kalbą (`?lang=` / `Accept-Language` / shop default) — FE juos gali rodyti tiesiogiai, nereikia savų vertimų.
-- `*_status`/`*_mode` laukai yra stabilūs mašininiai kodai — juos naudokite logikai (pvz. `delivery_status === 'shipped'`), ne UI tekstui.
+- `*_status`/`*_mode` laukai yra stabilūs mašininiai kodai — juos naudokite logikai (pvz. `delivery_status === 'in_transit'`), ne UI tekstui.
 - `GET /checkout/statuses` grąžina `{domain: [{code, label}]}` visoms domenams: `order_status`, `delivery_status`, `fulfillment_mode`, `supplier_reservation_status`, `payment_status`, `payment_provider` — naudinga filtrų dropdown'ams.
 - Šaltinis tiesai: `checkout/statuses.py` — naujoms būsenoms label'iai pridedami ten.
+
+`delivery_status` kodai (vieningi visiems vežėjams — DPD/Unisend raw statusai map'inami backend'e):
+
+| Kodas | LT label'as | Pastabos |
+|---|---|---|
+| `pending` | Ruošiama | pradinis |
+| `awaiting_stock` | Laukiama prekės iš nuotolinio sandėlio | dropship/supplier line'ai |
+| `packing` | Perduota pakavimui | |
+| `packed` | Supakuota, laukiama paėmimo | nustatomas ir sugeneravus lipduką |
+| `picked_up` | Siunta paimta | vežėjas paėmė siuntą |
+| `in_transit` | Siunta kelyje | terminalai, line-haul, kurjerio skenai |
+| `at_pickup_point` | Pristatyta į paštomatą | galima atsiimti |
+| `delivered` | Pristatyta | kurjeris; paštomatams label'as tampa „Atsiimta iš paštomato“ |
+| `returning` | Grąžinama siuntėjui | return-to-sender srautas |
+| `returned` | Siunta grąžinta siuntėjui | |
+| `cancelled` / `error` | Atšaukta / Klaida | |
+
+- `Order.delivered_at` (ISO datetime) nustatomas kai `delivery_status → delivered` arba `at_pickup_point` — naudoti grąžinimo langui.
+- Paštomato užsakymams (`shipping_method` su `pickup`/`locker`) `delivered` label'as API'e automatiškai rodomas kaip „Atsiimta iš paštomato“ — machine kodas lieka `delivered`.
 
 ## 7. DPD / Unisend pickup sąrašai
 

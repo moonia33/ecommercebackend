@@ -363,7 +363,7 @@ def generate_a6_label_pdf_for_order(
         filename = f"dpd_label_a6_order_{order.id}_{suffix}.pdf"
         order.shipping_label_pdf.save(filename, ContentFile(pdf), save=False)
         order.shipping_label_generated_at = timezone.now()
-        order.delivery_status = Order.DeliveryStatus.LABEL_CREATED
+        order.delivery_status = Order.DeliveryStatus.PACKED
         order.save(update_fields=[
             "shipping_label_pdf",
             "shipping_label_generated_at",
