@@ -128,6 +128,13 @@ class ContentBlockOut(Schema):
     payload: dict
 
 
+class ProductVideoOut(Schema):
+    url: str
+    video_type: str
+    language_code: str = ""
+    sort_order: int = 0
+
+
 class ProductDetailOut(Schema):
     id: int
     sku: str
@@ -145,6 +152,7 @@ class ProductDetailOut(Schema):
     category: CategoryRefOut | None = None
 
     images: list[ProductImageOut]
+    videos: list[ProductVideoOut] = []
     features: list[ProductFeatureOut] = []
     delivery_window: DeliveryWindowOut | None = None
     content_blocks: list[ContentBlockOut] = []

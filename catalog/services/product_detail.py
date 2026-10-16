@@ -46,6 +46,11 @@ def build_product_detail_payload(
     images = list(product.images.all())
     images.sort(key=lambda i: (i.sort_order, i.id))
 
+    videos = [
+        v for v in product.videos.all()
+        if not v.language_code or v.language_code == (language_code or "")
+    ]
+
     variants_qs = [
         v for v in product.variants.prefetch_related("variant_images").all()
         if v.is_active
@@ -223,6 +228,15 @@ def build_product_detail_payload(
             }
             for img in images
             if img.url
+        ],
+        "videos": [
+            {
+                "url": v.url,
+                "video_type": v.video_type,
+                "language_code": v.language_code or "",
+                "sort_order": v.sort_order,
+            }
+            for v in videos
         ],
         "features": features_out,
         "delivery_window": delivery_window_out,

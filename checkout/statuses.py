@@ -130,6 +130,11 @@ STATUS_LABELS: dict[str, dict[str, dict[str, str]]] = {
             "en": "Bank transfer",
             "pl": "Przelew bankowy",
         },
+        "montonio": {
+            "lt": "Montonio",
+            "en": "Montonio",
+            "pl": "Montonio",
+        },
     },
 }
 

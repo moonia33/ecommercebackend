@@ -383,8 +383,12 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
     )
 
     payment_method = (payload.payment_method or "").strip() or "bank_transfer"
-    if payment_method not in ["bank_transfer"]:
+    if payment_method not in ["bank_transfer", "montonio"]:
         raise HttpError(400, "Unsupported payment_method")
+    if payment_method == "montonio":
+        from payments import montonio as montonio_svc
+        if not montonio_svc.is_configured():
+            raise HttpError(400, "Payment method not available")
 
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
 
@@ -666,7 +670,11 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             "total_gross",
         ])
 
-        provider = PaymentIntent.Provider.BANK_TRANSFER
+        provider = (
+            PaymentIntent.Provider.MONTONIO
+            if payment_method == "montonio"
+            else PaymentIntent.Provider.BANK_TRANSFER
+        )
         pi = PaymentIntent.objects.create(
             order=order,
             provider=provider,
@@ -682,9 +690,30 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         # Clear cart after creating the order.
         CartItem.objects.filter(cart=cart).delete()
 
-        bank_transfer_instructions = _bank_transfer_instructions_for(
-            order_id=order.id, country_code=order.country_code
-        )
+        bank_transfer_instructions = ""
+        if provider == PaymentIntent.Provider.MONTONIO:
+            pass  # redirect url created below, outside the transaction
+        else:
+            bank_transfer_instructions = _bank_transfer_instructions_for(
+                order_id=order.id, country_code=order.country_code
+            )
+
+    if pi.provider == PaymentIntent.Provider.MONTONIO:
+        from payments import montonio as montonio_svc
+        try:
+            from api.i18n import get_request_language_code
+            res = montonio_svc.create_order_payment(
+                order=order, language_code=get_request_language_code(request)
+            )
+        except montonio_svc.MontonioError as exc:
+            pi.status = PaymentIntent.Status.FAILED
+            pi.save(update_fields=["status", "updated_at"])
+            raise HttpError(502, "Payment provider error") from exc
+        pi.external_id = res.uuid
+        pi.redirect_url = res.payment_url
+        pi.status = PaymentIntent.Status.REDIRECTED
+        pi.raw_request = {**(pi.raw_request or {}), "montonio_order": res.raw_response}
+        pi.save(update_fields=["external_id", "redirect_url", "status", "raw_request", "updated_at"])
 
     try:
         track_event(

@@ -1,3 +1,5 @@
+import datetime
+
 from django.test import TestCase
 
 from catalog.localization import (
@@ -27,8 +29,12 @@ from catalog.models import (
     OptionValueTranslation,
     Product,
     ProductTranslation,
+    ProductVideo,
     TaxClass,
+    TaxRate,
+    Variant,
 )
+from catalog.services.product_detail import build_product_detail_payload
 from catalog.services.query_filters import apply_catalog_filters
 
 
@@ -128,3 +134,38 @@ class CatalogLocalizationTests(TestCase):
         self.assertEqual(localize_feature_value(self.feature_value, language_code="pl"), '15,6"')
         self.assertEqual(localize_option_type(self.option_type, language_code="pl"), "Krāsa")
         self.assertEqual(localize_option_value(self.option_value, language_code="pl"), "Melna")
+
+
+class ProductDetailVideoTests(TestCase):
+    def setUp(self):
+        tax_class, _ = TaxClass.objects.get_or_create(code="standard", defaults={"name": "Standard"})
+        TaxRate.objects.create(
+            tax_class=tax_class,
+            country_code="LT",
+            rate="0.21",
+            valid_from=datetime.date(2020, 1, 1),
+            is_active=True,
+        )
+        self.product = Product.objects.create(
+            sku="VID-1",
+            name="Video Product",
+            slug="video-product",
+            tax_class=tax_class,
+            is_active=True,
+        )
+        Variant.objects.create(product=self.product, sku="VID-1-A", name="A", price_eur="10.00", is_active=True)
+
+        ProductVideo.objects.create(product=self.product, url="https://youtu.be/generic", sort_order=1)
+        ProductVideo.objects.create(product=self.product, url="https://youtu.be/lt", language_code="lt", sort_order=2)
+        ProductVideo.objects.create(product=self.product, url="https://youtu.be/de", language_code="de", sort_order=3)
+
+    def test_detail_payload_returns_videos_filtered_by_language(self):
+        payload = build_product_detail_payload(
+            product=self.product,
+            shop_id=None,
+            country_code="LT",
+            channel="normal",
+            language_code="lt",
+        )
+        urls = [v["url"] for v in payload["videos"]]
+        self.assertEqual(urls, ["https://youtu.be/generic", "https://youtu.be/lt"])

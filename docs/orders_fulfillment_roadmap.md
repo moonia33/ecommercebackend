@@ -5,29 +5,31 @@ Dabartinė būsena ir tolimesni darbai užsakymų srityje. Būsenų vertimai
 
 ---
 
-## 1. Montonio integracija (payment provider)
+## 1. Montonio integracija (payment provider) — ✅ ĮGYVENDINTA
 
-**Kada:** kai klientas duos Montonio paskyrą (API key, access key/secret).
+**Stargate API** (`payments/montonio.py` + `payments/api.py`):
 
-**Architektūra (sekti `bank_transfer` pattern'ą):**
+- `PaymentIntent.Provider.MONTONIO = "montonio"` (migracija `0025`).
+- `checkout/confirm` su `payment_method="montonio"` → JWT order payload
+  (`merchantReference=order.id`, billing/shipping snapshot, lineItems su
+  shipping eilute) → `POST {MONTONIO_API_URL}/orders` → `redirect_url` =
+  `paymentUrl`, intent'as `redirected`.
+- `POST /api/v1/payments/montonio/webhook` (public, no auth) — verifikuoja
+  `orderToken` JWT parašą Secret Key → `select_for_update` + viena
+  transakcija: `pi.succeeded` + `order.paid` + `capture_inventory` +
+  `redeem_coupon`. Idempotenta (dublis → 200 `already=succeeded`).
+  `refundToken` ack'inamas — refund flow su RMA moduliu.
+- Env: `MONTONIO_API_URL` (sandbox/prod), `MONTONIO_ACCESS_KEY`,
+  `MONTONIO_SECRET_KEY`, `MONTONIO_RETURN_URL`, `MONTONIO_NOTIFICATION_URL`,
+  `MONTONIO_LOCALE`.
+- `payment-methods` yra DB-driven — admin'e sukurti `PaymentMethod`
+  `code="montonio"`, `provider="montonio"`; jei `is_configured()` False →
+  confirm atmeta 400.
+- Cloudflare/WAF: whitelist Montonio webhook IP (`35.156.245.42`,
+  `35.156.159.169`) — dokumentuota Montonio webhooks guide.
 
-- `PaymentIntent.Provider.MONTONIO = "montonio"` naujas choices.
-- Naujas `payments/` app servisas:
-  - `create_payment(order) → redirect_url` — Montonio POST `/payments` su
-    `accessKey`, `merchantReference=order.id`, `returnUrl`, `notificationUrl`.
-  - `handle_webhook(payload)` — Montonio callback'as order būsenai atnaujinti:
-    `PaymentIntent.status → succeeded` + `Order.status → paid` vienoje
-    transakcijoje (būtina `select_for_update` — webhook'ai kartais dubliuojasi).
-  - Idempotencija: `external_id` unikalus; webhook'as jau `succeeded` intent'ui
-    → no-op 200.
-- `.env.example`: `MONTONIO_API_URL`, `MONTONIO_ACCESS_KEY`,
-  `MONTONIO_SECRET_KEY`, `MONTONIO_RETURN_URL`, `MONTONIO_WEBHOOK_SECRET`.
-- FE: `checkout/confirm` atsakyme `payment_redirect_url` jau yra — FE daro
-  `window.location = payment_redirect_url`. Nieko naujo fronte.
-- Testai: webhook su fake signature, idempotent retry, failed payment path.
-
-**Sandėris:** Montonio apmokėjimo metodai (bank links, card) renkasi
-Montonio pusėje — mums pakanka vieno provider kodo.
+**Liko (ne blokuoja):** Montonio Refund API kvietimas `Refund.method=
+original_payment` atveju (RMA modulio metu).
 
 ## 2. Sąskaitos (invoice / credit note)
 

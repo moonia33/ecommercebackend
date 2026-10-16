@@ -571,6 +571,7 @@ class InventoryAllocation(models.Model):
 class PaymentIntent(models.Model):
     class Provider(models.TextChoices):
         BANK_TRANSFER = "bank_transfer", "Bank transfer"
+        MONTONIO = "montonio", "Montonio"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

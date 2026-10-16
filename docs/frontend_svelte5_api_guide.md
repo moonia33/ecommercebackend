@@ -103,6 +103,17 @@ Atvaizdavimo taisyklė:
 - variantas **pasirinktas ir turi `images[]`** → rodyti jo nuotraukas (gali būti kelios);
 - varianto `images[]` yra papildomos prie bendrų — jei dizainas nori visų nuotraukų, naudok `variant.images + product.images` su `sort_order`.
 
+### Produkto video
+
+`ProductDetailOut.videos[]` — išorinės video nuorodos (pvz. YouTube):
+
+- `url` — embed'uojama nuoroda;
+- `video_type` — `product` | `instructional` | `tutorial`;
+- `language_code` — video kalba ("" = universali visoms kalboms);
+- `sort_order` — rūšiavimas.
+
+Backend jau filtruoja: `videos[]` grąžina tik `language_code == ""` arba sutampančią su request kalba — FE papildomo filtravimo nereikia. Rodoma PDP galerijos/modal zonoje, paprastai kaip tab'as šalia nuotraukų.
+
 ## 5. Checkout srautas (privalomas)
 
 ### Cart
@@ -136,6 +147,21 @@ Jei shipping metodas reikalauja pickup:
 Idempotency:
 
 - `checkout/confirm` siųsti su `Idempotency-Key` header.
+
+### Online mokėjimas (Montonio)
+
+`payment_method` reikšmės `checkout/confirm` payload'e:
+
+- `bank_transfer` — pavedimas ranka; `payment_instructions` laukai grąžinami;
+- `montonio` — Montonio Stargate redirect flow (kai sukonfigūruota backend'e).
+
+Montonio flow'as:
+
+1. `checkout/confirm` su `payment_method="montonio"` → atsakymo `redirect_url` yra Montonio `paymentUrl` (`payment_provider="montonio"`, `payment_status="redirected"`).
+2. FE daro `window.location.href = redirect_url` — klientas apmoka Montonio gateway'je (bank link / card).
+3. Klientas grįžta į `MONTONIO_RETURN_URL` (FE route) su `?order-token=...` — **netikėti** šio statuso kaip galutinio (patikimą rezultatą rodo `GET /checkout/orders/{id}` — `payment_status`).
+4. Backend'as gauna webhook'ą → `order.status="paid"`, `payment_status="succeeded"`.
+5. FE success puslapyje pollinti `GET /checkout/orders/{order_id}` kol `status === "paid"` (webhook'as gali užtrukti sekundes).
 
 ## 6. Užsakymai
 
