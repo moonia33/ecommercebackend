@@ -31,48 +31,51 @@ class DpdShipmentConfig:
 
 
 def _get_shipment_cfg() -> DpdShipmentConfig:
-    # 1) DB config (admin)
+    def _env() -> DpdShipmentConfig:
+        return DpdShipmentConfig(
+            sender_name=str(
+                getattr(settings, "DPD_SENDER_NAME", "") or "").strip(),
+            sender_phone=str(
+                getattr(settings, "DPD_SENDER_PHONE", "") or "").strip(),
+            sender_street=str(
+                getattr(settings, "DPD_SENDER_STREET", "") or "").strip(),
+            sender_city=str(
+                getattr(settings, "DPD_SENDER_CITY", "") or "").strip(),
+            sender_postal_code=str(
+                getattr(settings, "DPD_SENDER_POSTAL_CODE", "") or "").strip(),
+            sender_country=str(
+                getattr(settings, "DPD_SENDER_COUNTRY", "") or "").strip(),
+            payer_code=str(
+                getattr(settings, "DPD_PAYER_CODE", "") or "").strip(),
+            service_alias_courier=str(
+                getattr(settings, "DPD_SERVICE_ALIAS_COURIER", "") or "").strip(),
+            service_alias_locker=str(
+                getattr(settings, "DPD_SERVICE_ALIAS_LOCKER", "") or "").strip(),
+        )
+
+    env = _env()
+
+    # DB config (admin) overrides env per-field — empty DB fields fall back.
     try:
         from .models import DpdConfig as DpdDbConfig
 
         cfg = DpdDbConfig.objects.order_by("id").first()
-        if cfg:
-            return DpdShipmentConfig(
-                sender_name=str(cfg.sender_name or "").strip(),
-                sender_phone=str(cfg.sender_phone or "").strip(),
-                sender_street=str(cfg.sender_street or "").strip(),
-                sender_city=str(cfg.sender_city or "").strip(),
-                sender_postal_code=str(cfg.sender_postal_code or "").strip(),
-                sender_country=str(cfg.sender_country or "").strip(),
-                payer_code=str(cfg.payer_code or "").strip(),
-                service_alias_courier=str(
-                    cfg.service_alias_courier or "").strip(),
-                service_alias_locker=str(
-                    cfg.service_alias_locker or "").strip(),
-            )
     except Exception:
         # DB may be unavailable during migrations/startup
-        pass
+        cfg = None
 
-    # 2) fallback to settings/env
+    if cfg is None:
+        return env
     return DpdShipmentConfig(
-        sender_name=str(
-            getattr(settings, "DPD_SENDER_NAME", "") or "").strip(),
-        sender_phone=str(
-            getattr(settings, "DPD_SENDER_PHONE", "") or "").strip(),
-        sender_street=str(
-            getattr(settings, "DPD_SENDER_STREET", "") or "").strip(),
-        sender_city=str(
-            getattr(settings, "DPD_SENDER_CITY", "") or "").strip(),
-        sender_postal_code=str(
-            getattr(settings, "DPD_SENDER_POSTAL_CODE", "") or "").strip(),
-        sender_country=str(
-            getattr(settings, "DPD_SENDER_COUNTRY", "") or "").strip(),
-        payer_code=str(getattr(settings, "DPD_PAYER_CODE", "") or "").strip(),
-        service_alias_courier=str(
-            getattr(settings, "DPD_SERVICE_ALIAS_COURIER", "") or "").strip(),
-        service_alias_locker=str(
-            getattr(settings, "DPD_SERVICE_ALIAS_LOCKER", "") or "").strip(),
+        sender_name=str(cfg.sender_name or "").strip() or env.sender_name,
+        sender_phone=str(cfg.sender_phone or "").strip() or env.sender_phone,
+        sender_street=str(cfg.sender_street or "").strip() or env.sender_street,
+        sender_city=str(cfg.sender_city or "").strip() or env.sender_city,
+        sender_postal_code=str(cfg.sender_postal_code or "").strip() or env.sender_postal_code,
+        sender_country=str(cfg.sender_country or "").strip() or env.sender_country,
+        payer_code=str(cfg.payer_code or "").strip() or env.payer_code,
+        service_alias_courier=str(cfg.service_alias_courier or "").strip() or env.service_alias_courier,
+        service_alias_locker=str(cfg.service_alias_locker or "").strip() or env.service_alias_locker,
     )
 
 
