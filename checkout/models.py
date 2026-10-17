@@ -3,7 +3,16 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.files.storage import storages
 from django.db import models
+
+
+def _private_label_storage():
+    """Labels/invoices never go to the public CDN bucket."""
+    try:
+        return storages["private"]
+    except Exception:
+        return storages["default"]
 
 
 class Cart(models.Model):
@@ -190,9 +199,11 @@ class Order(models.Model):
         max_length=80, blank=True, default="")
     tracking_number = models.CharField(max_length=64, blank=True, default="")
 
-    # Shipping label (PDF)
+    # Shipping label (PDF) — private bucket: labels contain personal data.
     shipping_label_pdf = models.FileField(
-        upload_to="shipping_labels/%Y/%m/", null=True, blank=True
+        upload_to="shipping_labels/%Y/%m/",
+        storage=_private_label_storage,
+        null=True, blank=True
     )
     shipping_label_generated_at = models.DateTimeField(null=True, blank=True)
 
