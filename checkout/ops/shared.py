@@ -547,6 +547,21 @@ class OpsCatalogVariantOptionOut(Schema):
     label: str = ""
 
 
+class OpsVariantPickerOut(Schema):
+    variant_id: int
+    sku: str
+    barcode: str = ""
+    name: str = ""
+    product_id: int | None = None
+    product_name: str = ""
+    product_slug: str = ""
+    thumbnail_url: str = ""
+    is_active: bool = True
+    unit_net: str = "0"
+    unit_gross: str = "0"
+    stock_available: int = 0
+
+
 class OpsCatalogVariantOut(Schema):
     id: int
     sku: str

@@ -599,6 +599,9 @@ outbound shipment and stay backward-compatible.
 
 ### Order line editing (automatic balance)
 
+- `GET /ops/catalog/variants/search?q=&is_active=&limit=` — flat variant
+  picker search (variant SKU/barcode/name, product name/SKU) returning
+  shop-resolved prices and stock; used by the "add line" modal.
 - `POST /ops/orders/{id}/lines` — `{variant_id, qty, offer_id?}` adds a
   line priced from the shop price list; totals recalculated.
 - `PATCH /ops/orders/{id}/lines/{line_id}` — `{qty}` sets the quantity;

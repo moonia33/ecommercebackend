@@ -924,6 +924,23 @@ class OpsOrderEditingBalanceTests(TestCase):
         s.refresh_from_db()
         self.assertEqual(s.status, "cancelled")
 
+    def test_variant_search_picker(self):
+        self._auth()
+        res = self.client.get(
+            "/api/v1/ops/catalog/variants/search",
+            {"q": "V-20"}, HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        rows = res.json()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["variant_id"], self.variant2.id)
+        self.assertEqual(rows[0]["unit_gross"], "24.20")
+        self.assertEqual(rows[0]["stock_available"], 10)
+
+        res = self.client.get(
+            "/api/v1/ops/catalog/variants/search",
+            {"q": "drill"}, HTTP_HOST="ops.local")
+        self.assertEqual(len(res.json()), 2)
+
     def test_label_regen_forks_shipment(self):
         from unittest.mock import patch
         from django.utils import timezone

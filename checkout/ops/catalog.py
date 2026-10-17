@@ -204,6 +204,79 @@ def _validate_fk_or_400(model, obj_id: int | None, label: str):
     return obj
 
 
+@router.get("/catalog/variants/search", response=list[OpsVariantPickerOut], auth=_auth)
+def ops_catalog_variant_search(
+    request,
+    q: str = "",
+    is_active: str = "",
+    limit: int = 20,
+):
+    """Flat variant search for order-line picking: matches variant SKU,
+    barcode, variant name, product name/SKU. Prices resolved for the
+    request shop (retail channel)."""
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+    shop_id = _request_shop_id(request)
+    limit = max(1, min(int(limit or 20), 50))
+
+    qs = Variant.objects.select_related(
+        "product", "product__brand", "product__tax_class",
+    ).prefetch_related("product__images")
+    q = q.strip()
+    if q:
+        qs = qs.filter(
+            Q(sku__icontains=q)
+            | Q(barcode__icontains=q)
+            | Q(name__icontains=q)
+            | Q(product__name__icontains=q)
+            | Q(product__sku__icontains=q)
+        )
+    if is_active.strip().lower() in {"true", "false"}:
+        qs = qs.filter(is_active=is_active.strip().lower() == "true")
+
+    from catalog.shop_pricing import resolve_shop_variant_price
+    from checkout.services import get_vat_rate_for, money_from_net
+    from catalog.models import InventoryItem
+
+    rows = list(qs.order_by("product__name", "id")[:limit])
+    stock = {
+        int(r["variant_id"]): int(r["avail"] or 0)
+        for r in InventoryItem.objects.filter(
+            variant_id__in=[v.id for v in rows],
+        ).values("variant_id").annotate(
+            avail=Sum(F("qty_on_hand") - F("qty_reserved"))
+        )
+    }
+    out = []
+    for v in rows:
+        priced = resolve_shop_variant_price(
+            variant=v, shop_id=shop_id, channel_type="retail")
+        unit_net = getattr(priced, "unit_net", priced) or Decimal("0")
+        product = getattr(v, "product", None)
+        vat_rate = Decimal("0")
+        if product is not None:
+            vat_rate = get_vat_rate_for(
+                country_code="LT",
+                tax_class=getattr(product, "tax_class", None))
+        money = money_from_net(
+            currency="EUR", unit_net=unit_net, vat_rate=vat_rate, qty=1)
+        out.append(OpsVariantPickerOut(
+            variant_id=int(v.id),
+            sku=v.sku or "",
+            barcode=v.barcode or "",
+            name=v.name or "",
+            product_id=(int(product.id) if product is not None else None),
+            product_name=(getattr(product, "name", "") or ""),
+            product_slug=(getattr(product, "slug", "") or ""),
+            thumbnail_url=_product_thumbnail_url(product),
+            is_active=bool(v.is_active),
+            unit_net=_to_money_str(money.net),
+            unit_gross=_to_money_str(money.gross),
+            stock_available=stock.get(int(v.id), 0),
+        ))
+    return out
+
+
 @router.get("/catalog/products", response=OpsCatalogProductsOut, auth=_auth)
 def ops_catalog_products(
     request,
