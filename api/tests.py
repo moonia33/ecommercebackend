@@ -1405,3 +1405,217 @@ class OpsInventoryReservationTests(TestCase):
             {"product_q": "4770000000000"}, HTTP_HOST="ops.local")
         ids = [r["id"] for r in res.json()["results"]]
         self.assertIn(oid, ids)
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class OpsLineEditDiscountTests(TestCase):
+    """Order line editing (qty/price/name) and order discounts
+    (percent/amount/coupon) with balance reconciliation."""
+
+    def setUp(self):
+        from catalog.models import TaxRate
+        from shipping.models import ShippingMethod, ShippingRate
+
+        self.client = Client()
+        self.shop = Shop.objects.create(
+            code="opsd", name="OpsD", primary_domain="ops.local",
+            default_language_code="lt", default_country_code="LT",
+            currency="EUR", is_active=True)
+        ShopLanguage.objects.create(
+            shop=self.shop, language_code="lt", is_active=True,
+            is_default=True, sort_order=0)
+        self.staff = User.objects.create_user(
+            email="staffd@example.com", password="pass1234", is_staff=True)
+        self.customer = User.objects.create_user(
+            email="custd@example.com", password="pass1234")
+
+        tax, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"})
+        import datetime
+        TaxRate.objects.get_or_create(
+            tax_class=tax, country_code="LT",
+            defaults={"rate": "0.21",
+                      "valid_from": datetime.date(2020, 1, 1),
+                      "is_active": True})
+
+        self.local_wh = Warehouse.objects.create(
+            code="locwh", name="Local WH", country_code="LT",
+            kind=Warehouse.Kind.LOCAL, sort_order=0, is_active=True)
+
+        cat = Category.objects.create(
+            name="C", slug=f"c4-{self._testMethodName.lower()}", is_active=True)
+        product = Product.objects.create(
+            sku="P-4", name="Reel", slug=f"p4-{self._testMethodName.lower()}",
+            tax_class=tax, category=cat, is_active=True)
+        self.variant = Variant.objects.create(
+            product=product, sku="V-400", name="v1",
+            price_eur="10.00", is_active=True)
+        InventoryItem.objects.create(
+            variant=self.variant, warehouse=self.local_wh, qty_on_hand=10)
+
+        sm, _ = ShippingMethod.objects.get_or_create(
+            code="dpd_locker", defaults={
+                "name": "DPD locker", "carrier_code": "dpd",
+                "is_active": True})
+        ShippingRate.objects.update_or_create(
+            method=sm, country_code="LT",
+            defaults={"net_eur": "2.00", "is_active": True})
+
+    def _auth(self):
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=self.staff.id)
+
+    def _create_order(self, qty=2):
+        res = self.client.post(
+            "/api/v1/ops/orders",
+            data={
+                "user_id": self.customer.id,
+                "shipping_method": "dpd_locker",
+                "lines": [{"variant_id": self.variant.id, "qty": qty}],
+            },
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        return res.json()["id"]
+
+    def _line(self, oid):
+        res = self.client.get(
+            f"/api/v1/ops/orders/{oid}", HTTP_HOST="ops.local")
+        return res.json()["matched_lines"][0]
+
+    def test_line_price_edit_gross(self):
+        from decimal import Decimal as D
+        self._auth()
+        oid = self._create_order(qty=2)
+        line = self._line(oid)
+
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{oid}/lines/{line['order_line_id']}",
+            data={"unit_gross": "9.50"}, content_type="application/json",
+            HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+
+        m = self._line(oid)
+        self.assertEqual(m["unit_gross"], "9.50")
+        self.assertEqual(m["line_total_gross"], "19.00")
+        order = Order.objects.get(id=oid)
+        # shipping 2.00 net * 1.21 = 2.42
+        self.assertEqual(order.total_gross, D("21.42"))
+
+    def test_line_qty_and_name_edit(self):
+        self._auth()
+        oid = self._create_order(qty=2)
+        line = self._line(oid)
+
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{oid}/lines/{line['order_line_id']}",
+            data={"qty": 3, "name": "Custom name"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        m = self._line(oid)
+        self.assertEqual(m["qty"], 3)
+        self.assertEqual(m["name"], "Custom name")
+
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{oid}/lines/{line['order_line_id']}",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+    def test_percent_discount_reduces_total(self):
+        from decimal import Decimal as D
+        self._auth()
+        oid = self._create_order(qty=2)  # items net 20.00
+
+        res = self.client.post(
+            f"/api/v1/ops/orders/{oid}/discount",
+            data={"kind": "percent", "value": "10"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+
+        out = res.json()
+        self.assertEqual(out["discounts"][0]["kind"], "manual")
+        self.assertEqual(out["discounts"][0]["gross"], "2.42")
+        order = Order.objects.get(id=oid)
+        self.assertEqual(order.total_gross, D("24.20") + D("2.42") - D("2.42"))
+
+    def test_amount_discount_capped_at_items(self):
+        from decimal import Decimal as D
+        self._auth()
+        oid = self._create_order(qty=1)  # items gross 12.10
+
+        res = self.client.post(
+            f"/api/v1/ops/orders/{oid}/discount",
+            data={"kind": "amount", "value": "5.00", "name": "Apology"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        d = res.json()["discounts"][0]
+        self.assertEqual(d["name"], "Apology")
+        self.assertEqual(d["gross"], "5.00")
+
+        res = self.client.post(
+            f"/api/v1/ops/orders/{oid}/discount",
+            data={"kind": "amount", "value": "999.00"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        order = Order.objects.get(id=oid)
+        # capped: discounts cover items only; shipping still due
+        self.assertGreater(order.total_gross, D("0.00"))
+        self.assertEqual(order.total_gross, order.shipping_gross)
+
+    def test_coupon_discount_applies_and_reserves(self):
+        from promotions.models import Coupon, CouponRedemption
+        self._auth()
+        Coupon.objects.create(
+            code="sale10", name="Sale 10%", percent_off=10, is_active=True)
+        oid = self._create_order(qty=2)  # items net 20.00 -> -2.00 net
+
+        res = self.client.post(
+            f"/api/v1/ops/orders/{oid}/discount",
+            data={"kind": "coupon", "code": "SALE10"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        d = res.json()["discounts"][0]
+        self.assertEqual(d["kind"], "coupon")
+        self.assertEqual(d["code"], "sale10")
+        self.assertEqual(d["net"], "2.00")
+        self.assertTrue(
+            CouponRedemption.objects.filter(order_id=oid).exists())
+
+        # second coupon rejected
+        Coupon.objects.create(code="x5", percent_off=5, is_active=True)
+        res = self.client.post(
+            f"/api/v1/ops/orders/{oid}/discount",
+            data={"kind": "coupon", "code": "x5"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 409)
+
+    def test_coupon_invalid_and_remove_releases(self):
+        from promotions.models import Coupon, CouponRedemption
+        self._auth()
+        oid = self._create_order(qty=1)
+
+        res = self.client.post(
+            f"/api/v1/ops/orders/{oid}/discount",
+            data={"kind": "coupon", "code": "nope"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+        coupon = Coupon.objects.create(
+            code="ok5", percent_off=5, is_active=True)
+        res = self.client.post(
+            f"/api/v1/ops/orders/{oid}/discount",
+            data={"kind": "coupon", "code": "ok5"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        did = res.json()["discounts"][0]["id"]
+        coupon.refresh_from_db()
+        self.assertEqual(int(coupon.times_redeemed), 1)
+
+        res = self.client.post(
+            f"/api/v1/ops/orders/{oid}/discounts/{did}/remove",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        self.assertEqual(res.json()["discounts"], [])
+        self.assertFalse(
+            CouponRedemption.objects.filter(order_id=oid).exists())
+        coupon.refresh_from_db()
+        self.assertEqual(int(coupon.times_redeemed), 0) 

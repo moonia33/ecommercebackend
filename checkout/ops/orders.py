@@ -539,11 +539,30 @@ def ops_add_order_line(request, order_id: int, payload: OpsOrderLineIn):
     return _serialize_ops_order_detail(_order_detail_qs(order.id))
 
 
+def _net_for_unit_gross(unit_gross: Decimal, vat_rate: Decimal) -> Decimal:
+    """Pick a unit_net whose computed unit_gross matches the target exactly."""
+    from pricing.services import compute_vat
+
+    unit_gross = Decimal(unit_gross)
+    if unit_gross <= 0:
+        return Decimal("0.00")
+    rate = Decimal(vat_rate or 0)
+    base = (unit_gross / (Decimal("1") + rate)).quantize(Decimal("0.01"))
+    for cents in range(0, 5):
+        for cand in (base + Decimal("0.01") * cents,
+                     base - Decimal("0.01") * cents):
+            if cand <= 0:
+                continue
+            if compute_vat(unit_net=cand, vat_rate=rate,
+                           qty=1).unit_gross == unit_gross:
+                return cand
+    return base
+
+
 @router.patch("/orders/{order_id}/lines/{line_id}", response=OpsOrderDetailOut, auth=_auth)
 def ops_update_order_line(request, order_id: int, line_id: int,
                           payload: OpsOrderLineUpdateIn):
-    """Set a line's quantity; qty=0 removes the line. Partial removal is a
-    quantity reduction — exchanges are remove+add."""
+    """Edit a line: qty (0 removes), unit price (gross or net), name."""
     _ensure_shop_context_if_strict(request)
     user = _require_ops_user(request)
     order = _get_order_for_ops(order_id, shop_id=_request_shop_id(request))
@@ -551,23 +570,53 @@ def ops_update_order_line(request, order_id: int, line_id: int,
     line = order.lines.filter(id=line_id).first()
     if line is None:
         raise HttpError(404, "Order line not found")
-    if payload.qty < 0:
+
+    if (payload.qty is None and payload.unit_gross is None
+            and payload.unit_net is None and payload.name is None):
+        raise HttpError(400, "Nothing to update")
+
+    new_qty = payload.qty if payload.qty is not None else int(line.qty)
+    if new_qty < 0:
         raise HttpError(400, "qty must be >= 0")
 
-    old_qty = line.qty
+    new_unit_net = None
+    old_unit_gross = Decimal(line.unit_gross or 0)
+    if payload.unit_gross is not None:
+        try:
+            target_gross = Decimal(str(payload.unit_gross)).quantize(Decimal("0.01"))
+        except Exception:
+            raise HttpError(400, "Invalid unit_gross")
+        if target_gross < 0:
+            raise HttpError(400, "unit_gross must be >= 0")
+        new_unit_net = _net_for_unit_gross(target_gross, line.vat_rate)
+    elif payload.unit_net is not None:
+        try:
+            new_unit_net = Decimal(str(payload.unit_net)).quantize(Decimal("0.01"))
+        except Exception:
+            raise HttpError(400, "Invalid unit_net")
+        if new_unit_net < 0:
+            raise HttpError(400, "unit_net must be >= 0")
+
+    new_name = None
+    if payload.name is not None:
+        new_name = payload.name.strip()
+        if not new_name:
+            raise HttpError(400, "name must not be empty")
+
+    old_qty = int(line.qty)
     old_name = line.name
     with transaction.atomic():
         from checkout.services import (
             release_inventory_for_line,
             reserve_inventory_for_line,
         )
-        if payload.qty == 0:
+        if new_qty == 0:
             released = release_inventory_for_line(order_line=line)
             line.delete()
             removed = True
             allocated = 0
         else:
-            delta = int(payload.qty) - int(old_qty)
+            delta = int(new_qty) - int(old_qty)
             released = 0
             allocated = 0
             if delta > 0:
@@ -575,12 +624,12 @@ def ops_update_order_line(request, order_id: int, line_id: int,
                     order_line=line, qty=delta, strict=False)
             elif delta < 0:
                 released = release_inventory_for_line(order_line=line, qty=-delta)
-            line.qty = payload.qty
-            line.total_net = line.unit_net * payload.qty
-            line.total_vat = line.unit_vat * payload.qty
-            line.total_gross = line.unit_gross * payload.qty
-            line.save(update_fields=[
-                "qty", "total_net", "total_vat", "total_gross"])
+            if new_unit_net is not None:
+                line.unit_net = new_unit_net
+            if new_name is not None:
+                line.name = new_name
+            line.qty = new_qty
+            line.save()  # recomputes unit_* and totals from unit_net+vat_rate+qty
             removed = False
 
     order.recalculate_totals()
@@ -590,30 +639,197 @@ def ops_update_order_line(request, order_id: int, line_id: int,
         "total_net", "total_vat", "total_gross", "updated_at",
     ])
 
+    if removed:
+        event_name = "ops_line_removed"
+        reason = f"Line removed: {old_name} x{old_qty}"
+    else:
+        event_name = "ops_line_updated"
+        changes = []
+        if new_qty != old_qty:
+            changes.append(f"qty {old_qty} -> {new_qty}")
+        if new_unit_net is not None:
+            line.refresh_from_db()
+            changes.append(
+                f"unit {old_unit_gross} -> {line.unit_gross} gross")
+        if new_name is not None and new_name != old_name:
+            changes.append("name")
+        reason = f"Line updated: {line.name} ({', '.join(changes) or 'no change'})"
+
     _track_order_event(
         order=order,
         user=user,
         kind=OrderEvent.Kind.NOTE,
-        name="ops_line_removed" if removed else "ops_line_qty_changed",
+        name=event_name,
         payload={
             "order_line_id": line_id,
             "product_name": old_name,
             "old_qty": old_qty,
-            "new_qty": payload.qty,
+            "new_qty": new_qty,
             "allocated_qty": allocated,
             "released_qty": released,
         },
     )
 
     from checkout.surcharges import reconcile_order_balance
-    reconcile_order_balance(
-        order=order,
-        reason=(
-            f"Line removed: {old_name} x{old_qty}" if removed
-            else f"Line qty: {old_name} {old_qty} -> {payload.qty}"
-        ),
-        user=user,
+    reconcile_order_balance(order=order, reason=reason, user=user)
+
+    return _serialize_ops_order_detail(_order_detail_qs(order.id))
+
+
+_ORDER_TOTAL_FIELDS = [
+    "items_net", "items_vat", "items_gross",
+    "shipping_net", "shipping_vat", "shipping_gross",
+    "total_net", "total_vat", "total_gross", "updated_at",
+]
+
+
+@router.post("/orders/{order_id}/discount", response=OpsOrderDetailOut, auth=_auth)
+def ops_add_order_discount(request, order_id: int, payload: OpsOrderDiscountIn):
+    """Apply a discount to an order: percent/amount (manual) or an existing
+    coupon code. Manual discounts apply to item totals (like coupons)."""
+    _ensure_shop_context_if_strict(request)
+    user = _require_ops_user(request)
+    order = _get_order_for_ops(order_id, shop_id=_request_shop_id(request))
+
+    kind = (payload.kind or "").strip().lower()
+    if kind not in {"percent", "amount", "coupon"}:
+        raise HttpError(400, "kind must be percent | amount | coupon")
+
+    with transaction.atomic():
+        locked = Order.objects.select_for_update().get(id=order.id)
+        locked.recalculate_totals()
+        items_net = Decimal(locked.items_net or 0)
+        items_vat = Decimal(locked.items_vat or 0)
+        items_gross = Decimal(locked.items_gross or 0)
+        eff_rate = (items_vat / items_net) if items_net > 0 else Decimal("0")
+        existing_net = sum(
+            (Decimal(d.net) for d in locked.discounts.all()), Decimal("0.00"))
+        existing_gross = sum(
+            (Decimal(d.gross) for d in locked.discounts.all()), Decimal("0.00"))
+
+        if kind == "coupon":
+            code = (payload.code or "").strip().lower()
+            if not code:
+                raise HttpError(400, "code is required")
+            if locked.discounts.filter(kind="coupon").exists():
+                raise HttpError(409, "Užsakymui jau pritaikytas kuponas")
+            from promotions.models import Coupon
+            coupon = Coupon.objects.filter(code=code).first()
+            if coupon is None or not coupon.is_valid_now():
+                raise HttpError(400, "Kuponas neegzistuoja arba nebegalioja")
+
+            eligible_net = Decimal("0.00")
+            for ln in locked.lines.select_related("offer").all():
+                if ln.offer_id and getattr(ln.offer, "never_discount", False):
+                    continue
+                eligible_net += Decimal(ln.total_net or 0)
+
+            net = coupon.get_discount_net_for(eligible_items_net=eligible_net)
+            net = min(net, max(Decimal("0.00"), eligible_net - existing_net))
+            free_ship = coupon.is_free_shipping_for(
+                shipping_method=locked.shipping_method)
+            if net <= 0 and not free_ship:
+                raise HttpError(400, "Kuponas netaikomas šioms prekėms")
+            vat = (net * eff_rate).quantize(Decimal("0.01"))
+            disc = OrderDiscount.objects.create(
+                order=locked, kind="coupon", code=code,
+                name=(coupon.name or code),
+                net=net, vat=vat, gross=net + vat)
+            if free_ship and Decimal(locked.shipping_gross or 0) > 0:
+                locked.shipping_net_manual = Decimal("0.00")
+                locked.save(update_fields=["shipping_net_manual"])
+            if not reserve_coupon_for_order(order_id=locked.id):
+                raise HttpError(409, "Kupono panaudojimų limitas pasiektas")
+            label = f"Kuponas {code}"
+        else:
+            try:
+                value = Decimal(str(payload.value or "")).quantize(Decimal("0.01"))
+            except Exception:
+                raise HttpError(400, "value is required")
+            if kind == "percent":
+                if value <= 0 or value > 100:
+                    raise HttpError(400, "percent must be 0 < p <= 100")
+                net = (items_net * value / Decimal("100")).quantize(Decimal("0.01"))
+                net = min(net, max(Decimal("0.00"), items_net - existing_net))
+                vat = (net * eff_rate).quantize(Decimal("0.01"))
+                gross = net + vat
+                default_name = f"Nuolaida {value}%"
+            else:
+                if value <= 0:
+                    raise HttpError(400, "amount must be > 0")
+                gross = min(value, max(Decimal("0.00"),
+                                       items_gross - existing_gross))
+                net = (gross / (Decimal("1") + eff_rate)).quantize(Decimal("0.01"))
+                vat = gross - net
+                default_name = "Nuolaida"
+            if net <= 0:
+                raise HttpError(400, "Discount would be zero")
+            disc = OrderDiscount.objects.create(
+                order=locked, kind="manual",
+                name=(payload.name or "").strip() or default_name,
+                net=net, vat=vat, gross=gross)
+            label = disc.name
+
+        locked.recalculate_totals()
+        locked.save(update_fields=_ORDER_TOTAL_FIELDS)
+
+    _track_order_event(
+        order=locked, user=user, kind=OrderEvent.Kind.NOTE,
+        name="ops_discount_added",
+        payload={
+            "discount_id": int(disc.id), "kind": disc.kind,
+            "code": disc.code or "", "name": disc.name or "",
+            "gross": str(disc.gross),
+        },
     )
+
+    from checkout.surcharges import reconcile_order_balance
+    reconcile_order_balance(
+        order=locked, reason=f"Discount applied: {label}", user=user)
+
+    return _serialize_ops_order_detail(_order_detail_qs(order.id))
+
+
+@router.post("/orders/{order_id}/discounts/{discount_id}/remove",
+             response=OpsOrderDetailOut, auth=_auth)
+def ops_remove_order_discount(request, order_id: int, discount_id: int):
+    """Remove a discount row; releases the coupon reservation if it was one."""
+    _ensure_shop_context_if_strict(request)
+    user = _require_ops_user(request)
+    order = _get_order_for_ops(order_id, shop_id=_request_shop_id(request))
+
+    disc = order.discounts.filter(id=discount_id).first()
+    if disc is None:
+        raise HttpError(404, "Discount not found")
+
+    label = disc.code or disc.name or f"#{disc.id}"
+    with transaction.atomic():
+        locked = Order.objects.select_for_update().get(id=order.id)
+        if disc.kind == "coupon":
+            release_coupon_for_order(order_id=locked.id)
+            # Restore shipping if this coupon had zeroed it.
+            from promotions.models import Coupon
+            coupon = Coupon.objects.filter(
+                code=(disc.code or "").strip().lower()).first()
+            if (coupon is not None
+                    and coupon.is_free_shipping_for(
+                        shipping_method=locked.shipping_method)
+                    and locked.shipping_net_manual == Decimal("0.00")):
+                locked.shipping_net_manual = None
+                locked.save(update_fields=["shipping_net_manual"])
+        disc.delete()
+        locked.recalculate_totals()
+        locked.save(update_fields=_ORDER_TOTAL_FIELDS)
+
+    _track_order_event(
+        order=locked, user=user, kind=OrderEvent.Kind.NOTE,
+        name="ops_discount_removed",
+        payload={"discount_id": int(discount_id), "label": label},
+    )
+
+    from checkout.surcharges import reconcile_order_balance
+    reconcile_order_balance(
+        order=locked, reason=f"Discount removed: {label}", user=user)
 
     return _serialize_ops_order_detail(_order_detail_qs(order.id))
 

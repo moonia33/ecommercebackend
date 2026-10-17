@@ -445,6 +445,7 @@ class OrderDiscount(models.Model):
     class Kind(models.TextChoices):
         COUPON = "coupon", "Coupon"
         PROMO = "promo", "Promo"
+        MANUAL = "manual", "Manual"
 
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="discounts")
     kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.COUPON)

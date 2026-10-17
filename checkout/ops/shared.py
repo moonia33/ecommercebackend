@@ -34,6 +34,7 @@ from checkout.models import (
     InventoryAllocation,
     OpsJob,
     Order,
+    OrderDiscount,
     OrderEvent,
     OrderLine,
     PaymentIntent,
@@ -41,7 +42,11 @@ from checkout.models import (
     Surcharge,
 )
 from checkout.services import capture_inventory_for_order, release_inventory_for_order
-from promotions.services import redeem_coupon_for_paid_order, release_coupon_for_order
+from promotions.services import (
+    redeem_coupon_for_paid_order,
+    release_coupon_for_order,
+    reserve_coupon_for_order,
+)
 
 
 router = Router(tags=["ops"])
@@ -291,7 +296,29 @@ class OpsOrderLineIn(Schema):
 
 
 class OpsOrderLineUpdateIn(Schema):
-    qty: int
+    qty: int | None = None
+    unit_gross: str | None = None
+    unit_net: str | None = None
+    name: str | None = None
+
+
+class OpsOrderDiscountIn(Schema):
+    # percent | amount (gross EUR) | coupon (existing coupon code)
+    kind: str
+    value: str | None = None
+    code: str = ""
+    name: str = ""
+
+
+class OpsOrderDiscountOut(Schema):
+    id: int
+    order_id: int
+    kind: str
+    code: str = ""
+    name: str = ""
+    net: str = "0"
+    vat: str = "0"
+    gross: str = "0"
 
 
 class OpsSurchargeCollectIn(Schema):
@@ -478,6 +505,9 @@ class OpsOrderTotalsOut(Schema):
     shipping_net: str = "0"
     shipping_vat: str = "0"
     shipping_gross: str = "0"
+    discounts_net: str = "0"
+    discounts_vat: str = "0"
+    discounts_gross: str = "0"
     total_net: str = "0"
     total_vat: str = "0"
     total_gross: str = "0"
@@ -510,6 +540,7 @@ class OpsOrderDetailOut(OpsOrderListItemOut):
     customer_stats: OpsCustomerStatsOut | None = None
     shipments: list[OpsShipmentRowOut] = []
     surcharges: list[OpsSurchargeOut] = []
+    discounts: list[OpsOrderDiscountOut] = []
 
 
 class OpsCustomerPhoneOut(Schema):
@@ -1153,6 +1184,14 @@ def _serialize_ops_order_detail(order: Order) -> OpsOrderDetailOut:
     except Exception:
         label_pdf_url = ""
 
+    d_net = Decimal("0.00")
+    d_vat = Decimal("0.00")
+    d_gross = Decimal("0.00")
+    for d in order.discounts.all():
+        d_net += Decimal(d.net)
+        d_vat += Decimal(d.vat)
+        d_gross += Decimal(d.gross)
+
     totals = OpsOrderTotalsOut(
         items_net=_to_money_str(order.items_net),
         items_vat=_to_money_str(order.items_vat),
@@ -1160,6 +1199,9 @@ def _serialize_ops_order_detail(order: Order) -> OpsOrderDetailOut:
         shipping_net=_to_money_str(order.shipping_net),
         shipping_vat=_to_money_str(order.shipping_vat),
         shipping_gross=_to_money_str(order.shipping_gross),
+        discounts_net=_to_money_str(d_net),
+        discounts_vat=_to_money_str(d_vat),
+        discounts_gross=_to_money_str(d_gross),
         total_net=_to_money_str(order.total_net),
         total_vat=_to_money_str(order.total_vat),
         total_gross=_to_money_str(_effective_order_total_gross(order)),
@@ -1214,6 +1256,19 @@ def _serialize_ops_order_detail(order: Order) -> OpsOrderDetailOut:
         payments=payments,
         customer_stats=_customer_order_stats(order.user_id, shop_id=shop_id),
         shipments=[_serialize_shipment(s) for s in order.shipments.all()],
+        discounts=[
+            OpsOrderDiscountOut(
+                id=int(d.id),
+                order_id=int(d.order_id),
+                kind=d.kind or "",
+                code=d.code or "",
+                name=d.name or "",
+                net=_to_money_str(d.net),
+                vat=_to_money_str(d.vat),
+                gross=_to_money_str(d.gross),
+            )
+            for d in order.discounts.all()
+        ],
         surcharges=[
             OpsSurchargeOut(
                 id=int(s.id),
@@ -1411,6 +1466,7 @@ def _order_detail_qs(order_id: int) -> Order:
                 to_attr="ops_matched_lines",
             ),
             "events",
+            "discounts",
         )
         .first()
     )

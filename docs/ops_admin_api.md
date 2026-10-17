@@ -624,9 +624,31 @@ shipping method — labels no longer fail on admin-created orders.
   shop-resolved prices and stock; used by the "add line" modal.
 - `POST /ops/orders/{id}/lines` — `{variant_id, qty, offer_id?}` adds a
   line priced from the shop price list; totals recalculated.
-- `PATCH /ops/orders/{id}/lines/{line_id}` — `{qty}` sets the quantity;
-  `qty=0` removes the line (partial removal = qty reduction; exchanges =
-  remove+add). Both endpoints return the full order detail.
+- `PATCH /ops/orders/{id}/lines/{line_id}` — `{qty?, unit_gross?,
+  unit_net?, name?}` edits the line. `qty=0` removes the line (partial
+  removal = qty reduction; exchanges = remove+add). `unit_gross` is the
+  admin-facing price incl. VAT — the backend picks a `unit_net` whose
+  computed gross matches exactly. Both endpoints return the full order
+  detail.
+
+### Order discounts
+
+- `POST /ops/orders/{id}/discount` — `{kind, value?, code?, name?}`:
+  - `kind=percent` — `value` = percent off item totals (manual).
+  - `kind=amount` — `value` = fixed discount in EUR **incl. VAT**,
+    capped at the remaining item gross (manual).
+  - `kind=coupon` — `code` = an existing `promotions.Coupon` code;
+    validates activity window + usage limits and reserves a redemption
+    (`times_redeemed` increments). One coupon per order. Coupons that
+    grant free shipping also zero the order shipping.
+  Manual discounts are stored as `OrderDiscount(kind=manual)` rows and
+  apply to items only (same semantics as storefront coupons).
+- `POST /ops/orders/{id}/discounts/{discount_id}/remove` — removes the
+  row; a coupon redemption is released (`times_redeemed` decremented)
+  and shipping is restored if the coupon had zeroed it.
+
+`GET /ops/orders/{id}` returns `discounts[]` and
+`totals.discounts_net|vat|gross`.
 
 Whenever `total_gross` changes on an order with a confirmed payment,
 `reconcile_order_balance()` maintains a single pending auto `Surcharge`:
