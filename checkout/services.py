@@ -397,3 +397,83 @@ def expire_pending_payment_reservations(*, now=None) -> int:
             expired += 1
 
     return expired
+
+
+def recompute_order_fulfillment_mode(*, order) -> None:
+    """Derive fulfillment_mode from the warehouses of the order's offers.
+
+    local only -> stock; remote only -> remote; mix -> mixed.
+    """
+    from catalog.models import Warehouse
+    from checkout.models import Order
+
+    kinds = set(
+        order.lines.exclude(offer_id=None)
+        .exclude(offer__warehouse_id=None)
+        .values_list("offer__warehouse__kind", flat=True)
+    )
+    if not kinds:
+        mode = Order.FulfillmentMode.STOCK
+    elif kinds == {Warehouse.Kind.REMOTE}:
+        mode = Order.FulfillmentMode.REMOTE
+    elif Warehouse.Kind.REMOTE in kinds:
+        mode = Order.FulfillmentMode.MIXED
+    else:
+        mode = Order.FulfillmentMode.STOCK
+
+    if order.fulfillment_mode != mode:
+        order.fulfillment_mode = mode
+        order.save(update_fields=["fulfillment_mode", "updated_at"])
+
+
+def recompute_order_delivery_eta(*, order, now=None) -> None:
+    """Aggregate per-line delivery windows into order ETA snapshot."""
+    from catalog.models import InventoryItem
+    from shipping.services import estimate_delivery_window
+
+    now = now or timezone.now()
+    agg_min = agg_max = agg_meta = None
+
+    lines = order.lines.select_related(
+        "variant", "variant__product", "offer").all()
+    for ln in lines:
+        try:
+            v = getattr(ln, "variant", None)
+            p = getattr(v, "product", None) if v is not None else None
+            offer = getattr(ln, "offer", None)
+            channel = (
+                "outlet"
+                if offer
+                and offer.offer_visibility == InventoryItem.OfferVisibility.OUTLET
+                else "normal"
+            )
+            dw = estimate_delivery_window(
+                now=now,
+                country_code=order.country_code,
+                channel=channel,
+                warehouse_id=int(offer.warehouse_id) if offer and offer.warehouse_id else None,
+                product_id=int(p.id) if p else None,
+                brand_id=int(p.brand_id) if p and p.brand_id else None,
+                category_id=int(p.category_id) if p and p.category_id else None,
+                product_group_id=int(getattr(p, "group_id", None))
+                if p and getattr(p, "group_id", None) else None,
+            )
+        except Exception:
+            dw = None
+        if dw is None:
+            continue
+        if agg_min is None or dw.min_date > agg_min:
+            agg_min = dw.min_date
+        if agg_max is None or dw.max_date > agg_max:
+            agg_max = dw.max_date
+        agg_meta = dw
+
+    order.delivery_min_date = agg_min
+    order.delivery_max_date = agg_max
+    order.delivery_eta_kind = str(getattr(agg_meta, "kind", "") or "") if agg_meta else ""
+    order.delivery_eta_rule_code = str(getattr(agg_meta, "rule_code", "") or "") if agg_meta else ""
+    order.delivery_eta_source = str(getattr(agg_meta, "source", "") or "") if agg_meta else ""
+    order.save(update_fields=[
+        "delivery_min_date", "delivery_max_date", "delivery_eta_kind",
+        "delivery_eta_rule_code", "delivery_eta_source", "updated_at",
+    ])

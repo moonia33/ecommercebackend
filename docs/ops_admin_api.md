@@ -564,3 +564,66 @@ Po bulk operacijos:
 2. poll'inti `GET /api/v1/ops/jobs/{job_id}` kas 2-5 s;
 3. stabdyti poll'inimą kai `status in ["success", "failed"]`;
 4. rodyti `result_payload` ir `error_message`.
+
+## Shipments registry (multi-parcel orders)
+
+An order can have multiple `Shipment` rows (e.g. admin corrects a wrongly
+picked locker, split delivery, customer return). Order-level
+`tracking_number` / `carrier_*` / `delivery_status` mirror the primary
+outbound shipment and stay backward-compatible.
+
+- `GET /ops/shipments/registry?tracking=&order_id=&kind=&status=&carrier_code=`
+  — search the shipment registry (tracking number substring search,
+  `kind=outbound|return`).
+- `POST /ops/orders/{id}/shipments` — register a shipment:
+  `{kind, shipping_method?, carrier_code?, tracking_number?, pickup_locker_id?, notes?}`.
+  Use `kind=return` to register a customer return parcel (DPD return service
+  assigns the tracking automatically after label generation, or enter it manually).
+- `PATCH /ops/shipments/{id}` — update carrier / method / locker /
+  tracking / status / kind.
+- `POST /ops/shipments/id/{id}/label` — generate the label **per shipment**
+  (DPD A6 / Unisend; writes to the shipment and mirrors the primary outbound
+  fields onto the order).
+- `POST /ops/shipments/{order_id}/label` — legacy order-scoped label;
+  resolves/creates the primary outbound shipment first.
+- `GET /ops/lockers?country_code=&q=` — locker directory for admin pickers.
+
+### Carrier / locker change with price delta
+
+- `PATCH /ops/orders/{id}/shipping` — body `{shipping_method?, pickup_locker_id?}`.
+  Recalculates shipping totals, returns `price_delta_gross` and syncs the
+  primary shipment. Positive delta -> create a surcharge.
+- `POST /ops/orders/{id}/surcharges` — body
+  `{amount_gross, reason?, method: montonio|bank_transfer, send_email?, language_code?}`.
+  Montonio method creates a Stargate payment link with a
+  `{order}-sur-{id}` merchant reference (the webhook marks it paid
+  automatically); bank_transfer uses the configured `PaymentMethod`
+  instructions (admin-editable, no redeploy). Emails via the seeded
+  `order_surcharge` template (lt/en/pl).
+- `GET /ops/orders/{id}/surcharges` — list.
+
+### Order creation & merge
+
+- `POST /ops/orders` — create an order for a customer email/user:
+  `{user_email|user_id, shipping_method, pickup_locker_id?, shipping_*,
+   shipping_net_manual?, status?, note?, lines: [{variant_id, qty}]}`.
+  Prices resolve from the shop price list; totals via `recalculate_totals`.
+- `POST /ops/orders/actions/merge` — `{primary_order_id, merged_order_ids}`.
+  Lines/fees/discounts/shipments/surcharges/payments/events move to the
+  primary order; merged orders are cancelled. Totals are recalculated.
+
+`GET /ops/orders/{id}` additionally returns `shipments[]` and `surcharges[]`.
+
+## Warehouses & fulfillment
+
+`Warehouse.kind = local|remote` (local = own stock, remote = imported
+supplier warehouses). `Order.fulfillment_mode` is derived automatically when
+lines change (post_save/post_delete on OrderLine): all local -> `stock`,
+any mix -> `mixed`, all remote -> `remote` (the legacy `dropship` value is
+remapped to `remote` by migration 0029).
+
+The delivery ETA snapshot (`delivery_min_date`/`delivery_max_date` +
+`delivery_eta_*`) is recomputed on the same signal via
+`shipping.estimate_delivery_window` aggregated over lines (worst-case wins).
+Configure `DeliveryRule` rows (LEAD_TIME or CYCLE) to feed it — no rules ->
+no ETA.

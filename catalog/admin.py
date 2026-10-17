@@ -727,13 +727,14 @@ class WarehouseAdmin(admin.ModelAdmin):
     list_display = (
         "code",
         "name",
+        "kind",
         "country_code",
         "city",
         "dispatch_days_min",
         "dispatch_days_max",
         "is_active",
     )
-    list_filter = ("is_active", "country_code")
+    list_filter = ("is_active", "kind", "country_code")
     search_fields = ("code", "name", "city")
     ordering = ("sort_order", "code")
 

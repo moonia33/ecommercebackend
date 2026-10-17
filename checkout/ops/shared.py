@@ -30,7 +30,7 @@ from catalog.models import (
     Variant,
     VariantOptionValue,
 )
-from checkout.models import OpsJob, Order, OrderEvent, OrderLine, PaymentIntent
+from checkout.models import OpsJob, Order, OrderEvent, OrderLine, PaymentIntent, Shipment, Surcharge
 from checkout.services import capture_inventory_for_order, release_inventory_for_order
 from promotions.services import redeem_coupon_for_paid_order, release_coupon_for_order
 
@@ -189,6 +189,118 @@ class OpsShipmentListOut(Schema):
     results: list[OpsShipmentOut]
 
 
+class OpsShipmentRowOut(Schema):
+    id: int
+    order_id: int
+    kind: str
+    status: str
+    shipping_method: str = ""
+    carrier_code: str = ""
+    carrier_shipment_id: str = ""
+    tracking_number: str = ""
+    pickup_locker_id: int | None = None
+    pickup_point_id: str = ""
+    pickup_point_name: str = ""
+    label_url: str = ""
+    label_generated_at: str = ""
+    notes: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class OpsShipmentCreateIn(Schema):
+    kind: str = "outbound"
+    shipping_method: str = ""
+    carrier_code: str = ""
+    tracking_number: str = ""
+    pickup_locker_id: int | None = None
+    notes: str = ""
+
+
+class OpsShipmentUpdateIn(Schema):
+    kind: str | None = None
+    status: str | None = None
+    shipping_method: str | None = None
+    carrier_code: str | None = None
+    tracking_number: str | None = None
+    carrier_shipment_id: str | None = None
+    pickup_locker_id: int | None = None
+    notes: str | None = None
+
+
+class OpsOrderShippingUpdateIn(Schema):
+    shipping_method: str | None = None
+    pickup_locker_id: int | None = None
+
+
+class OpsOrderShippingUpdateOut(Schema):
+    ok: bool
+    message: str = ""
+    order_id: int = 0
+    shipping_method: str = ""
+    shipping_gross: str = ""
+    price_delta_gross: str = ""
+    pickup_point_name: str = ""
+
+
+class OpsSurchargeIn(Schema):
+    amount_gross: str
+    reason: str = ""
+    method: str = "montonio"
+    send_email: bool = True
+    language_code: str | None = None
+
+
+class OpsSurchargeOut(Schema):
+    id: int
+    order_id: int
+    amount_gross: str
+    currency: str
+    method: str
+    status: str
+    reason: str = ""
+    payment_url: str = ""
+    emailed_at: str = ""
+    paid_at: str = ""
+    created_at: str = ""
+
+
+class OpsOrderCreateLineIn(Schema):
+    variant_id: int
+    qty: int = 1
+
+
+class OpsOrderCreateIn(Schema):
+    user_email: str = ""
+    user_id: int | None = None
+    shipping_method: str = "dpd_locker"
+    pickup_locker_id: int | None = None
+    shipping_full_name: str = ""
+    shipping_phone: str = ""
+    shipping_line1: str = ""
+    shipping_city: str = ""
+    shipping_postal_code: str = ""
+    shipping_country_code: str = "LT"
+    country_code: str = "LT"
+    shipping_net_manual: str | None = None
+    status: str = "pending_payment"
+    note: str = ""
+    lines: list[OpsOrderCreateLineIn] = []
+
+
+class OpsOrderMergeIn(Schema):
+    primary_order_id: int
+    merged_order_ids: list[int] = []
+
+
+class OpsLockerOptionOut(Schema):
+    id: int
+    name: str
+    country_code: str = ""
+    city: str = ""
+    address: str = ""
+
+
 class OpsPaymentOut(Schema):
     id: int
     order_id: int
@@ -335,6 +447,8 @@ class OpsOrderDetailOut(OpsOrderListItemOut):
     events: list[OpsAuditEventOut] = []
     payments: list[OpsPaymentOut] = []
     customer_stats: OpsCustomerStatsOut | None = None
+    shipments: list[OpsShipmentRowOut] = []
+    surcharges: list[OpsSurchargeOut] = []
 
 
 class OpsCustomerPhoneOut(Schema):
@@ -778,6 +892,7 @@ def _build_order_filter(filters: OpsOrderSearchIn, *, shop_id: int | None) -> tu
         order_q &= Q(
             fulfillment_mode__in=[
                 Order.FulfillmentMode.DROPSHIP,
+                Order.FulfillmentMode.REMOTE,
                 Order.FulfillmentMode.MIXED,
             ]
         )
@@ -989,6 +1104,23 @@ def _serialize_ops_order_detail(order: Order) -> OpsOrderDetailOut:
         events=events,
         payments=payments,
         customer_stats=_customer_order_stats(order.user_id, shop_id=shop_id),
+        shipments=[_serialize_shipment(s) for s in order.shipments.all()],
+        surcharges=[
+            OpsSurchargeOut(
+                id=int(s.id),
+                order_id=int(s.order_id),
+                amount_gross=_to_money_str(s.amount_gross),
+                currency=s.currency or "",
+                method=s.method,
+                status=s.status,
+                reason=s.reason or "",
+                payment_url=s.payment_url or "",
+                emailed_at=_to_iso(s.emailed_at),
+                paid_at=_to_iso(s.paid_at),
+                created_at=_to_iso(s.created_at),
+            )
+            for s in order.surcharges.all()
+        ],
     )
 
 
@@ -1117,17 +1249,68 @@ def _execute_ops_job(job: OpsJob, *, user) -> OpsJob:
     return job
 
 
-def _generate_order_label(order: Order, *, user):
-    shipping_method = (order.shipping_method or "").strip().lower()
+def _get_or_create_primary_shipment(order: Order, *, user=None) -> Shipment:
+    shipment = (
+        order.shipments.filter(kind=Shipment.Kind.OUTBOUND)
+        .order_by("-created_at", "-id")
+        .first()
+    )
+    if shipment is None:
+        shipment = Shipment.objects.create(
+            order=order,
+            kind=Shipment.Kind.OUTBOUND,
+            status=order.delivery_status or Shipment.Status.PENDING,
+            carrier_code=order.carrier_code or "",
+            shipping_method=order.shipping_method or "",
+            tracking_number=order.tracking_number or "",
+            carrier_shipment_id=order.carrier_shipment_id or "",
+            pickup_locker=order.pickup_locker,
+            pickup_point_id=order.pickup_point_id or "",
+            pickup_point_name=order.pickup_point_name or "",
+            created_by=user,
+        )
+    return shipment
+
+
+def _get_shipment_for_ops(shipment_id: int, *, shop_id: int | None) -> Shipment:
+    qs = Shipment.objects.select_related("order")
+    if shop_id is not None:
+        qs = qs.filter(order__shop_id=shop_id)
+    else:
+        qs = qs.filter(order__shop__isnull=True)
+    shipment = qs.filter(id=shipment_id).first()
+    if shipment is None:
+        raise HttpError(404, "Shipment not found")
+    return shipment
+
+
+def _generate_shipment_label(shipment: Shipment, *, user) -> None:
+    order = shipment.order
+    shipping_method = (
+        shipment.shipping_method or order.shipping_method or ""
+    ).strip().lower()
 
     if shipping_method in {"dpd_locker", "dpd_courier"}:
         from dpd.labels import generate_a6_label_pdf_for_order
 
-        generate_a6_label_pdf_for_order(order, store_on_order=True)
+        generate_a6_label_pdf_for_order(
+            order, store_on_order=False, shipment=shipment)
     elif shipping_method in {"unisend_pickup", "unisend_courier", "lpexpress", "lpexpress_courier"}:
         from unisend.labels import generate_label_pdf_for_order
 
-        generate_label_pdf_for_order(order, store_on_order=True)
+        # Unisend writes tracking/label to the order — mirror onto the shipment.
+        generate_label_pdf_for_order(order, store_on_order=False)
+        if order.tracking_number and not shipment.tracking_number:
+            shipment.tracking_number = order.tracking_number
+        shipment.carrier_code = order.carrier_code or "unisend"
+        shipment.carrier_shipment_id = order.carrier_shipment_id or ""
+        shipment.status = "packed"
+        shipment.label_generated_at = timezone.now()
+        shipment.save(update_fields=[
+            "tracking_number", "carrier_code", "carrier_shipment_id",
+            "status", "label_generated_at", "updated_at",
+        ])
+        shipment.apply_to_order_projection()
     else:
         raise HttpError(400, f"Shipping method '{shipping_method}' is not supported for label generation")
 
@@ -1137,11 +1320,52 @@ def _generate_order_label(order: Order, *, user):
         kind=OrderEvent.Kind.DELIVERY,
         name="ops_label_generated",
         payload={
+            "shipment_id": shipment.id,
             "shipping_method": shipping_method,
-            "carrier_code": order.carrier_code,
-            "carrier_shipment_id": order.carrier_shipment_id,
+            "carrier_code": shipment.carrier_code,
+            "carrier_shipment_id": shipment.carrier_shipment_id,
         },
     )
+
+
+def _serialize_shipment(s: Shipment) -> OpsShipmentRowOut:
+    label_url = ""
+    if s.shipping_label_pdf:
+        try:
+            label_url = s.shipping_label_pdf.url
+        except Exception:
+            label_url = ""
+    return OpsShipmentRowOut(
+        id=int(s.id),
+        order_id=int(s.order_id),
+        kind=s.kind,
+        status=s.status,
+        shipping_method=s.shipping_method or "",
+        carrier_code=s.carrier_code or "",
+        carrier_shipment_id=s.carrier_shipment_id or "",
+        tracking_number=s.tracking_number or "",
+        pickup_locker_id=int(s.pickup_locker_id) if s.pickup_locker_id else None,
+        pickup_point_id=s.pickup_point_id or "",
+        pickup_point_name=s.pickup_point_name or "",
+        label_url=label_url,
+        label_generated_at=_to_iso(s.label_generated_at),
+        notes=s.notes or "",
+        created_at=_to_iso(s.created_at),
+        updated_at=_to_iso(s.updated_at),
+    )
+
+
+def _generate_order_label(order: Order, *, user):
+    shipping_method = (order.shipping_method or "").strip().lower()
+
+    if shipping_method in {"dpd_locker", "dpd_courier", "unisend_pickup",
+                           "unisend_courier", "lpexpress", "lpexpress_courier"}:
+        # Route through the shipment layer; the primary outbound shipment
+        # mirrors back onto the order for backward compatibility.
+        shipment = _get_or_create_primary_shipment(order, user=user)
+        _generate_shipment_label(shipment, user=user)
+    else:
+        raise HttpError(400, f"Shipping method '{shipping_method}' is not supported for label generation")
 
 
 def _serialize_job(job: OpsJob) -> OpsJobOut:

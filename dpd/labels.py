@@ -116,14 +116,29 @@ def _sender_address(cfg: DpdShipmentConfig) -> dict[str, Any]:
     }
 
 
-def _receiver_address_for_order(order: Order) -> dict[str, Any]:
-    shipping_method = (order.shipping_method or "").strip()
+def _shipment_view(order: Order, shipment=None):
+    """Resolve effective shipping_method / pickup fields (shipment overrides order)."""
+    if shipment is None:
+        return (
+            (order.shipping_method or "").strip(),
+            (order.pickup_point_id or "").strip(),
+            getattr(order, "pickup_locker", None),
+        )
+    return (
+        (shipment.shipping_method or order.shipping_method or "").strip(),
+        (shipment.pickup_point_id or order.pickup_point_id or "").strip(),
+        shipment.pickup_locker or getattr(order, "pickup_locker", None),
+    )
+
+
+def _receiver_address_for_order(order: Order, shipment=None) -> dict[str, Any]:
+    shipping_method, _pudo, _locker = _shipment_view(order, shipment)
 
     full_name = (order.shipping_full_name or "").strip() or "Customer"
     phone = (order.shipping_phone or "").strip()
 
     if shipping_method == "dpd_locker":
-        pudo_id = (order.pickup_point_id or "").strip()
+        pudo_id = _pudo
         if not pudo_id:
             raise DpdLabelConfigError(
                 "dpd_locker: trūksta pickup point (pickup_point_id)")
@@ -169,8 +184,8 @@ def _receiver_address_for_order(order: Order) -> dict[str, Any]:
     }
 
 
-def _service_alias_for_order(order: Order, cfg: DpdShipmentConfig) -> str:
-    shipping_method = (order.shipping_method or "").strip()
+def _service_alias_for_order(order: Order, cfg: DpdShipmentConfig, shipment=None) -> str:
+    shipping_method, _pudo, _locker = _shipment_view(order, shipment)
     if shipping_method == "dpd_locker":
         return _require(cfg.service_alias_locker, key="DPD_SERVICE_ALIAS_LOCKER")
     return _require(cfg.service_alias_courier, key="DPD_SERVICE_ALIAS_COURIER")
@@ -196,13 +211,17 @@ def _extract_service_aliases(obj: Any) -> list[str]:
 def _autodetect_pudo_service_alias(
     order: Order,
     *,
+    shipment=None,
     cfg: DpdShipmentConfig,
     client: DpdClient,
 ) -> str | None:
     country_from = (cfg.sender_country or "").strip()
+    _sm, _pudo_id, locker = _shipment_view(order, shipment)
     country_to = ""
-    if getattr(order, "pickup_locker_id", None) and getattr(order, "pickup_locker", None):
-        country_to = str(getattr(order.pickup_locker, "country_code", "") or "").strip()
+    if locker is not None:
+        country_to = str(
+            getattr(_shipment_view(order, shipment)[2], "country_code", "") or ""
+        ).strip()
     if not country_to:
         country_to = str(order.shipping_country_code or order.country_code or "").strip()
 
@@ -250,16 +269,18 @@ def _autodetect_pudo_service_alias(
     return None
 
 
-def build_shipment_dto(order: Order, *, cfg: DpdShipmentConfig | None = None) -> dict[str, Any]:
+def build_shipment_dto(order: Order, *, cfg: DpdShipmentConfig | None = None,
+                       shipment=None) -> dict[str, Any]:
     cfg = cfg or _get_shipment_cfg()
 
     weight_kg = _estimate_order_weight_kg(order)
+    ref = f"{order.id}-s{shipment.id}" if shipment is not None else str(order.id)
     dto: dict[str, Any] = {
         "senderAddress": _sender_address(cfg),
-        "receiverAddress": _receiver_address_for_order(order),
-        "service": {"serviceAlias": _service_alias_for_order(order, cfg)},
+        "receiverAddress": _receiver_address_for_order(order, shipment=shipment),
+        "service": {"serviceAlias": _service_alias_for_order(order, cfg, shipment=shipment)},
         "parcels": [{"weight": weight_kg}],
-        "shipmentReferences": [str(order.id)],
+        "shipmentReferences": [ref],
         "contentDescription": "e-commerce",
     }
 
@@ -269,28 +290,33 @@ def build_shipment_dto(order: Order, *, cfg: DpdShipmentConfig | None = None) ->
     return dto
 
 
-def ensure_dpd_shipment(order: Order, *, client: DpdClient | None = None) -> tuple[str, str]:
-    if (order.carrier_code or "").strip() == "dpd" and (order.tracking_number or "").strip():
+def ensure_dpd_shipment(order: Order, *, client: DpdClient | None = None,
+                        shipment=None) -> tuple[str, str]:
+    if shipment is not None:
+        if (shipment.tracking_number or "").strip():
+            return (shipment.carrier_shipment_id or ""), shipment.tracking_number
+    elif (order.carrier_code or "").strip() == "dpd" and (order.tracking_number or "").strip():
         return (order.carrier_shipment_id or ""), order.tracking_number
 
-    if (order.shipping_method or "").strip() not in {"dpd_locker", "dpd_courier"}:
+    shipping_method = _shipment_view(order, shipment)[0]
+    if shipping_method not in {"dpd_locker", "dpd_courier"}:
         raise DpdLabelConfigError(
             "Šis užsakymas nėra DPD (dpd_locker/dpd_courier).")
 
     client = client or DpdClient()
     cfg = _get_shipment_cfg()
-    dto = build_shipment_dto(order, cfg=cfg)
+    dto = build_shipment_dto(order, cfg=cfg, shipment=shipment)
 
     try:
         created = client.create_shipments(shipments=[dto])
     except DpdApiError as e:
-        shipping_method = (order.shipping_method or "").strip()
         msg = str(e)
         if (
             shipping_method == "dpd_locker"
             and "main service type is not PUDO" in msg
         ):
-            pudo_alias = _autodetect_pudo_service_alias(order, cfg=cfg, client=client)
+            pudo_alias = _autodetect_pudo_service_alias(
+                order, shipment=shipment, cfg=cfg, client=client)
             if not pudo_alias:
                 raise DpdLabelConfigError(
                     "DPD: nurodytas paštomatas (pudoId), bet parinktas ne-PUDO serviceAlias. "
@@ -311,11 +337,20 @@ def ensure_dpd_shipment(order: Order, *, client: DpdClient | None = None) -> tup
     # DPD docs: parcelNumbers may be empty by default; parcel identifiers can be returned
     # only in specific flows (e.g. when label requested together with creation).
     # Still store shipment_id so we can generate labels later using shipmentIds.
-    order.carrier_code = "dpd"
-    order.carrier_shipment_id = shipment_id
-    if parcel:
-        order.tracking_number = parcel
-    order.save(update_fields=["carrier_code", "carrier_shipment_id", "tracking_number", "updated_at"])
+    if shipment is not None:
+        shipment.carrier_code = "dpd"
+        shipment.carrier_shipment_id = shipment_id
+        if parcel:
+            shipment.tracking_number = parcel
+        shipment.save(update_fields=[
+            "carrier_code", "carrier_shipment_id", "tracking_number", "updated_at"])
+        shipment.apply_to_order_projection()
+    else:
+        order.carrier_code = "dpd"
+        order.carrier_shipment_id = shipment_id
+        if parcel:
+            order.tracking_number = parcel
+        order.save(update_fields=["carrier_code", "carrier_shipment_id", "tracking_number", "updated_at"])
 
     return shipment_id, parcel
 
@@ -325,9 +360,10 @@ def generate_a6_label_pdf_for_order(
     *,
     client: DpdClient | None = None,
     store_on_order: bool = True,
+    shipment=None,
 ) -> bytes:
     client = client or DpdClient()
-    shipment_id, parcel = ensure_dpd_shipment(order, client=client)
+    shipment_id, parcel = ensure_dpd_shipment(order, client=client, shipment=shipment)
 
     payload: dict[str, Any] = {
         "downloadLabel": True,
@@ -358,10 +394,31 @@ def generate_a6_label_pdf_for_order(
         except Exception:
             parcel = ""
 
-    if parcel and not (order.tracking_number or "").strip():
+    if parcel and not (order.tracking_number or "").strip() and shipment is None:
         order.tracking_number = parcel
 
-    if store_on_order:
+    if shipment is not None:
+        if parcel and not (shipment.tracking_number or "").strip():
+            shipment.tracking_number = parcel
+        suffix = parcel or shipment_id or ""
+        filename = f"dpd_label_a6_order_{order.id}_s{shipment.id}_{suffix}.pdf"
+        shipment.shipping_label_pdf.save(filename, ContentFile(pdf), save=False)
+        shipment.label_generated_at = timezone.now()
+        shipment.status = "packed"
+        shipment.save(update_fields=[
+            "shipping_label_pdf", "label_generated_at", "status",
+            "tracking_number", "updated_at",
+        ])
+        shipment.apply_to_order_projection()
+        # Mirror the label to the order for backward compatibility.
+        order.shipping_label_pdf = shipment.shipping_label_pdf.name
+        order.shipping_label_generated_at = shipment.label_generated_at
+        order.delivery_status = Order.DeliveryStatus.PACKED
+        order.save(update_fields=[
+            "shipping_label_pdf", "shipping_label_generated_at",
+            "delivery_status", "tracking_number", "updated_at",
+        ])
+    elif store_on_order:
         suffix = parcel or shipment_id or ""
         filename = f"dpd_label_a6_order_{order.id}_{suffix}.pdf"
         order.shipping_label_pdf.save(filename, ContentFile(pdf), save=False)

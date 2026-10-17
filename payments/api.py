@@ -56,6 +56,17 @@ def montonio_webhook(request):
     order_uuid = str(decoded.get("uuid") or "")
 
     if not merchant_reference.isdigit():
+        # Surcharge references look like "{order_id}-sur-{surcharge_id}".
+        import re
+        m = re.match(r"^(\d+)-sur-(\d+)$", merchant_reference)
+        if m:
+            _handle_surcharge_webhook(
+                surcharge_id=int(m.group(2)),
+                payment_status=payment_status,
+                order_uuid=order_uuid,
+                decoded=decoded,
+            )
+            return {"status": "ok", "surcharge_id": int(m.group(2))}
         # Not our reference format — ack to stop retries.
         return {"status": "ok", "ignored": "unknown_reference"}
 
@@ -113,3 +124,34 @@ def montonio_webhook(request):
         pass
 
     return result
+
+
+def _handle_surcharge_webhook(*, surcharge_id: int, payment_status: str,
+                              order_uuid: str, decoded: dict) -> None:
+    from checkout.models import Surcharge
+
+    with transaction.atomic():
+        s = (
+            Surcharge.objects.select_for_update()
+            .filter(id=surcharge_id, method=Surcharge.Method.MONTONIO)
+            .first()
+        )
+        if s is None:
+            return
+        s.raw_response = {**(s.raw_response or {}), "last_webhook": decoded}
+        if order_uuid and not s.external_id:
+            s.external_id = order_uuid
+        if s.status == Surcharge.Status.PAID:
+            s.save(update_fields=["raw_response", "external_id", "updated_at"])
+            return
+        if payment_status == "PAID":
+            s.status = Surcharge.Status.PAID
+            s.paid_at = timezone.now()
+            s.save(update_fields=[
+                "status", "paid_at", "raw_response", "external_id", "updated_at"])
+        elif payment_status in {"VOIDED", "ABANDONED", "FAILED"}:
+            s.status = Surcharge.Status.FAILED
+            s.save(update_fields=[
+                "status", "raw_response", "external_id", "updated_at"])
+        else:
+            s.save(update_fields=["raw_response", "external_id", "updated_at"])

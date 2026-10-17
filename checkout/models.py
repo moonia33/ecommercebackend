@@ -109,7 +109,8 @@ class Order(models.Model):
 
     class FulfillmentMode(models.TextChoices):
         STOCK = "stock", "Stock"
-        DROPSHIP = "dropship", "Dropship"
+        DROPSHIP = "dropship", "Dropship"  # legacy — remapped to REMOTE
+        REMOTE = "remote", "Remote warehouse"
         MIXED = "mixed", "Mixed"
 
     class SupplierReservationStatus(models.TextChoices):
@@ -726,3 +727,165 @@ class OrderConsent(models.Model):
 
     def __str__(self) -> str:
         return f"order:{self.order_id} consent:{self.kind}@{self.document_version}"
+
+
+class Shipment(models.Model):
+    """A physical parcel belonging to an order (multi-parcel orders supported).
+
+    Source of truth for carrier tracking; Order.tracking_number /
+    carrier_code / delivery_status mirror the primary outbound shipment.
+    """
+
+    class Kind(models.TextChoices):
+        OUTBOUND = "outbound", "Outbound"
+        RETURN = "return", "Return to sender"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PACKED = "packed", "Packed, awaiting pickup"
+        PICKED_UP = "picked_up", "Picked up by carrier"
+        IN_TRANSIT = "in_transit", "In transit"
+        AT_PICKUP_POINT = "at_pickup_point", "At pickup point"
+        DELIVERED = "delivered", "Delivered"
+        RETURNING = "returning", "Returning to sender"
+        RETURNED = "returned", "Returned to sender"
+        CANCELLED = "cancelled", "Cancelled"
+        ERROR = "error", "Error"
+
+    order = models.ForeignKey(
+        Order, on_delete=models.CASCADE, related_name="shipments")
+    kind = models.CharField(
+        max_length=16, choices=Kind.choices, default=Kind.OUTBOUND)
+    status = models.CharField(
+        max_length=32, choices=Status.choices, default=Status.PENDING)
+
+    carrier_code = models.CharField(max_length=32, blank=True, default="")
+    shipping_method = models.CharField(max_length=50, blank=True, default="")
+    tracking_number = models.CharField(max_length=64, blank=True, default="")
+    carrier_shipment_id = models.CharField(max_length=80, blank=True, default="")
+
+    pickup_locker = models.ForeignKey(
+        "dpd.DpdLocker", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="shipments")
+    pickup_point_id = models.CharField(max_length=80, blank=True, default="")
+    pickup_point_name = models.CharField(max_length=255, blank=True, default="")
+
+    shipping_label_pdf = models.FileField(
+        upload_to="shipping_labels/%Y/%m/",
+        storage=_private_label_storage, null=True, blank=True)
+    label_generated_at = models.DateTimeField(null=True, blank=True)
+
+    notes = models.TextField(blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="created_shipments")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["tracking_number"]),
+            models.Index(fields=["order", "kind"]),
+            models.Index(fields=["carrier_code", "status"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"shipment:{self.id} order:{self.order_id} {self.kind} {self.tracking_number or '-'}"
+
+    def apply_to_order_projection(self) -> None:
+        """Mirror outbound shipment data onto the order (primary = latest outbound)."""
+        order = self.order
+        if self.kind != Shipment.Kind.OUTBOUND:
+            return
+        order.carrier_code = self.carrier_code or order.carrier_code
+        order.carrier_shipment_id = self.carrier_shipment_id or order.carrier_shipment_id
+        if self.tracking_number:
+            order.tracking_number = self.tracking_number
+        order.delivery_status = aggregate_delivery_status(order)
+        order.save(update_fields=[
+            "carrier_code", "carrier_shipment_id",
+            "tracking_number", "delivery_status", "updated_at",
+        ])
+
+
+# Status progress order used to aggregate an order's delivery_status
+# across multiple outbound shipments.
+_SHIPMENT_PROGRESS = {
+    "pending": 0, "awaiting_stock": 1, "packing": 2, "packed": 3,
+    "picked_up": 4, "in_transit": 5, "at_pickup_point": 6,
+    "delivered": 7, "returned": 7,
+}
+
+
+def aggregate_delivery_status(order: Order) -> str:
+    """Order-level status = worst-case progress of outbound shipments.
+
+    All terminal (delivered/returned) -> delivered if any delivered else returned.
+    Any in flight -> the least-advanced in-flight status (split shipments
+    surface as the slowest parcel).
+    """
+    statuses = list(
+        order.shipments.filter(kind=Shipment.Kind.OUTBOUND)
+        .values_list("status", flat=True)
+    )
+    if not statuses:
+        return order.delivery_status or Order.DeliveryStatus.PENDING
+    if all(s in {"delivered", "returned", "cancelled"} for s in statuses):
+        if any(s == "delivered" for s in statuses):
+            return "delivered"
+        if any(s == "returned" for s in statuses):
+            return "returned"
+        return "cancelled"
+    in_flight = [s for s in statuses if s not in {"delivered", "returned", "cancelled"}]
+    worst = min(in_flight, key=lambda s: _SHIPMENT_PROGRESS.get(s, 0))
+    return worst
+
+
+class Surcharge(models.Model):
+    """Post-order additional charge (carrier change, price correction)."""
+
+    class Method(models.TextChoices):
+        MONTONIO = "montonio", "Montonio link"
+        BANK_TRANSFER = "bank_transfer", "Bank transfer"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PAID = "paid", "Paid"
+        FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    order = models.ForeignKey(
+        Order, on_delete=models.CASCADE, related_name="surcharges")
+    reason = models.CharField(max_length=255, blank=True, default="")
+    amount_gross = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3, default="EUR")
+
+    method = models.CharField(max_length=20, choices=Method.choices)
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.PENDING)
+
+    payment_url = models.URLField(max_length=2048, blank=True, default="")
+    external_id = models.CharField(max_length=120, blank=True, default="")
+    raw_response = models.JSONField(default=dict, blank=True)
+
+    emailed_at = models.DateTimeField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="created_surcharges")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["order", "status"])]
+
+    @property
+    def reference(self) -> str:
+        return f"{self.order_id}-sur-{self.id}"
+
+    def __str__(self) -> str:
+        return f"surcharge:{self.id} order:{self.order_id} {self.amount_gross}{self.currency}"

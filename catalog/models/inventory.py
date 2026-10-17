@@ -6,8 +6,16 @@ from .variants import Variant
 
 
 class Warehouse(models.Model):
+    class Kind(models.TextChoices):
+        LOCAL = "local", "Local"
+        REMOTE = "remote", "Remote (supplier/imported)"
+
     code = models.SlugField(max_length=100, unique=True)
     name = models.CharField(max_length=255)
+
+    # local = our stock; remote = supplier/imported stock arriving later
+    kind = models.CharField(
+        max_length=16, choices=Kind.choices, default=Kind.LOCAL)
 
     # ISO 3166-1 alpha-2 (e.g. LT)
     country_code = models.CharField(max_length=2)

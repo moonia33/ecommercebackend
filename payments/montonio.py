@@ -71,29 +71,43 @@ def _address_payload(order) -> dict:
     }
 
 
-def build_order_payload(*, order, language_code: str | None = None) -> dict:
+def build_order_payload(*, order, language_code: str | None = None,
+                        amount_override: Decimal | None = None,
+                        merchant_reference: str | None = None,
+                        description: str | None = None) -> dict:
     """Montonio Stargate order payload (JWT claims)."""
-    grand_total = Decimal(order.total_gross)
+    grand_total = Decimal(
+        amount_override if amount_override is not None else order.total_gross
+    )
     locale = (language_code or getattr(settings, "MONTONIO_LOCALE", "lt") or "lt").lower()[:2]
 
-    line_items = [
-        {
-            "name": (ln.name or ln.sku or "")[:128],
-            "quantity": int(ln.qty),
-            "finalPrice": float(Decimal(ln.total_gross)),
-        }
-        for ln in order.lines.all()
-    ]
-    if order.shipping_gross and Decimal(order.shipping_gross) > 0:
-        line_items.append(
+    if amount_override is not None:
+        line_items = [
             {
-                "name": "Shipping",
+                "name": (description or f"Order {order.id} surcharge")[:128],
                 "quantity": 1,
-                "finalPrice": float(Decimal(order.shipping_gross)),
+                "finalPrice": float(grand_total),
             }
-        )
+        ]
+    else:
+        line_items = [
+            {
+                "name": (ln.name or ln.sku or "")[:128],
+                "quantity": int(ln.qty),
+                "finalPrice": float(Decimal(ln.total_gross)),
+            }
+            for ln in order.lines.all()
+        ]
+        if order.shipping_gross and Decimal(order.shipping_gross) > 0:
+            line_items.append(
+                {
+                    "name": "Shipping",
+                    "quantity": 1,
+                    "finalPrice": float(Decimal(order.shipping_gross)),
+                }
+            )
 
-    merchant_reference = str(order.id)
+    merchant_reference = merchant_reference or str(order.id)
 
     return {
         "accessKey": access_key(),
@@ -111,7 +125,7 @@ def build_order_payload(*, order, language_code: str | None = None) -> dict:
             "method": "paymentInitiation",
             "methodDisplay": "Pay with your bank",
             "methodOptions": {
-                "paymentDescription": f"Order {merchant_reference}",
+                "paymentDescription": description or f"Order {merchant_reference}",
                 "preferredCountry": (order.country_code or "LT"),
                 "preferredLocale": locale,
             },
@@ -122,12 +136,21 @@ def build_order_payload(*, order, language_code: str | None = None) -> dict:
 
 
 def create_order_payment(*, order, language_code: str | None = None,
+                         amount_override: Decimal | None = None,
+                         merchant_reference: str | None = None,
+                         description: str | None = None,
                          timeout: int = 20) -> MontonioOrderResult:
     """Create a Montonio Stargate order and return the redirect URL."""
     if not is_configured():
         raise MontonioError("Montonio is not configured (missing access/secret key)")
 
-    payload = build_order_payload(order=order, language_code=language_code)
+    payload = build_order_payload(
+        order=order,
+        language_code=language_code,
+        amount_override=amount_override,
+        merchant_reference=merchant_reference,
+        description=description,
+    )
     token = jwt.encode(payload, secret_key(), algorithm="HS256")
     # PyJWT may return bytes on old versions
     if isinstance(token, bytes):

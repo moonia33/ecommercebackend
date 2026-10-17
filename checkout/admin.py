@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.urls import path, reverse
 from django.utils import timezone
 
-from .models import Cart, CartItem, FeeRule, Order, OrderConsent, OrderDiscount, OrderEvent, OrderFee, OrderLine, PaymentIntent
+from .models import Cart, CartItem, FeeRule, Order, OrderConsent, OrderDiscount, OrderEvent, OrderFee, OrderLine, PaymentIntent, Shipment, Surcharge
 
 
 class CartItemInline(admin.TabularInline):
@@ -142,6 +142,28 @@ class OrderDiscountInline(admin.TabularInline):
         return False
 
 
+class ShipmentInline(admin.TabularInline):
+    model = Shipment
+    extra = 0
+    fields = (
+        "kind", "status", "shipping_method", "carrier_code",
+        "tracking_number", "carrier_shipment_id",
+        "pickup_point_id", "pickup_point_name",
+        "label_generated_at", "notes",
+    )
+    readonly_fields = ("label_generated_at",)
+
+
+class SurchargeInline(admin.TabularInline):
+    model = Surcharge
+    extra = 0
+    fields = (
+        "amount_gross", "currency", "method", "status",
+        "reason", "payment_url", "emailed_at", "paid_at",
+    )
+    readonly_fields = ("payment_url", "emailed_at", "paid_at")
+
+
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = (
@@ -237,7 +259,7 @@ class OrderAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
-    inlines = (OrderConsentInline, OrderDiscountInline, OrderFeeInline, OrderLineInline,)
+    inlines = (OrderConsentInline, OrderDiscountInline, OrderFeeInline, OrderLineInline, ShipmentInline, SurchargeInline,)
 
     class Form(forms.ModelForm):
         shipping_method = forms.ChoiceField(required=True)

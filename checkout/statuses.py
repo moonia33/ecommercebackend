@@ -99,6 +99,11 @@ STATUS_LABELS: dict[str, dict[str, dict[str, str]]] = {
             "en": "Dropship",
             "pl": "Bezpośrednio od dostawcy",
         },
+        "remote": {
+            "lt": "Iš nuotolinio sandėlio",
+            "en": "From remote warehouse",
+            "pl": "Ze zdalnego magazynu",
+        },
         "mixed": {
             "lt": "Mišrus",
             "en": "Mixed",

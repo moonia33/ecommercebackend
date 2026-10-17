@@ -197,6 +197,7 @@ class OpsOrderSearchTests(TestCase):
         warehouse = Warehouse.objects.create(
             code="remote_wh_1",
             name="Remote WH",
+            kind="remote",
             country_code="PL",
             is_active=True,
         )
@@ -485,3 +486,234 @@ class OrderStatusLabelsTests(TestCase):
         self.assertEqual(o["status_label"], "Paid")
         self.assertEqual(o["delivery_status_label"], "Parcel in transit")
         self.assertEqual(o["payment_status_label"], "Pending")
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class OpsShipmentsAndOrderManagementTests(TestCase):
+    def setUp(self):
+        from catalog.models import TaxRate
+        from shipping.models import ShippingMethod, ShippingRate
+        from checkout.models import Shipment, Surcharge  # noqa: F401
+
+        self.client = Client()
+        self.shop = Shop.objects.create(
+            code="ops", name="Ops Shop", primary_domain="ops.local",
+            default_language_code="lt", default_country_code="LT",
+            currency="EUR", is_active=True,
+        )
+        ShopLanguage.objects.create(
+            shop=self.shop, language_code="lt", is_active=True,
+            is_default=True, sort_order=0)
+
+        self.staff = User.objects.create_user(
+            email="staff@example.com", password="pass1234", is_staff=True)
+        self.customer = User.objects.create_user(
+            email="cust@example.com", password="pass1234")
+
+        tax, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"})
+        import datetime
+        TaxRate.objects.create(
+            tax_class=tax, country_code="LT", rate="0.21",
+            valid_from=datetime.date(2020, 1, 1), is_active=True)
+
+        self.local_wh = Warehouse.objects.create(
+            code="main", name="Main WH", country_code="LT", is_active=True)
+        self.remote_wh = Warehouse.objects.create(
+            code="sup1", name="Supplier WH", country_code="PL",
+            kind="remote", is_active=True)
+
+        suffix = self._testMethodName.lower()
+        cat = Category.objects.create(
+            name="C", slug=f"c-{suffix}", is_active=True)
+        product = Product.objects.create(
+            sku="P-1", name="Drill", slug=f"p-{suffix}",
+            tax_class=tax, category=cat, is_active=True)
+        self.variant = Variant.objects.create(
+            product=product, sku="V-1", name="v1",
+            price_eur="10.00", is_active=True)
+        self.variant2 = Variant.objects.create(
+            product=product, sku="V-2", name="v2",
+            price_eur="20.00", is_active=True)
+        self.local_offer = InventoryItem.objects.create(
+            variant=self.variant, warehouse=self.local_wh, qty_on_hand=10)
+        self.remote_offer = InventoryItem.objects.create(
+            variant=self.variant2, warehouse=self.remote_wh, qty_on_hand=5)
+
+        sm_locker, _ = ShippingMethod.objects.get_or_create(
+            code="dpd_locker", defaults={
+                "name": "DPD locker", "carrier_code": "dpd",
+                "requires_pickup_point": True, "is_active": True})
+        sm_courier, _ = ShippingMethod.objects.get_or_create(
+            code="dpd_courier", defaults={
+                "name": "DPD courier", "carrier_code": "dpd",
+                "is_active": True})
+        sm_locker.is_active = True
+        sm_locker.save()
+        sm_courier.is_active = True
+        sm_courier.save()
+        ShippingRate.objects.update_or_create(
+            method=sm_locker, country_code="LT",
+            defaults={"net_eur": "2.00", "is_active": True})
+        ShippingRate.objects.update_or_create(
+            method=sm_courier, country_code="LT",
+            defaults={"net_eur": "5.00", "is_active": True})
+
+        self.order = Order.objects.create(
+            user=self.customer, shop=self.shop,
+            status=Order.Status.PAID,
+            shipping_method="dpd_locker", country_code="LT",
+        )
+        OrderLine.objects.create(
+            order=self.order, variant=self.variant, offer=self.local_offer,
+            sku="V-1", name="Drill", unit_net="10.00", vat_rate="0.21",
+            qty=1, total_net="10.00", total_vat="2.10", total_gross="12.10")
+        self.order.recalculate_totals()
+        self.order.save()
+
+    def _auth(self):
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=self.staff.id)
+
+    def test_fulfillment_mode_auto_local(self):
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.fulfillment_mode, "stock")
+
+    def test_fulfillment_mode_mixed_and_remote(self):
+        from checkout.models import Shipment  # noqa
+        OrderLine.objects.create(
+            order=self.order, variant=self.variant2, offer=self.remote_offer,
+            sku="V-2", name="Drill2", unit_net="20.00", vat_rate="0.21",
+            qty=1, total_net="20.00", total_vat="4.20", total_gross="24.20")
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.fulfillment_mode, "mixed")
+
+        o2 = Order.objects.create(user=self.customer, shop=self.shop,
+                                  status=Order.Status.PAID)
+        OrderLine.objects.create(
+            order=o2, variant=self.variant2, offer=self.remote_offer,
+            sku="V-2", name="x", unit_net="20.00", vat_rate="0.21",
+            qty=1, total_net="20.00", total_vat="4.20", total_gross="24.20")
+        o2.refresh_from_db()
+        self.assertEqual(o2.fulfillment_mode, "remote")
+
+    def test_shipment_create_registry_search_and_update(self):
+        self._auth()
+        res = self.client.post(
+            f"/api/v1/ops/orders/{self.order.id}/shipments",
+            data={"kind": "outbound", "tracking_number": "ABC123"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        sid = res.json()["id"]
+        self.assertEqual(res.json()["tracking_number"], "ABC123")
+
+        res = self.client.get(
+            "/api/v1/ops/shipments/registry",
+            {"tracking": "abc12"}, HTTP_HOST="ops.local")
+        self.assertEqual(len(res.json()), 1)
+        self.assertEqual(res.json()[0]["id"], sid)
+
+        res = self.client.post(
+            f"/api/v1/ops/orders/{self.order.id}/shipments",
+            data={"kind": "return", "tracking_number": "RET999",
+                  "notes": "customer return"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.json()["kind"], "return")
+
+        res = self.client.patch(
+            f"/api/v1/ops/shipments/{sid}",
+            data={"carrier_code": "dpd", "status": "in_transit"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.tracking_number, "ABC123")
+        self.assertEqual(self.order.delivery_status, "in_transit")
+
+    def test_aggregate_delivery_status(self):
+        from checkout.models import Shipment, aggregate_delivery_status
+        Shipment.objects.create(order=self.order, kind="outbound",
+                                status="in_transit")
+        s2 = Shipment.objects.create(order=self.order, kind="outbound",
+                                     status="delivered")
+        self.assertEqual(aggregate_delivery_status(self.order), "in_transit")
+        s2.status = "delivered"
+        s2.save()
+        Shipment.objects.filter(order=self.order).update(status="delivered")
+        self.assertEqual(aggregate_delivery_status(self.order), "delivered")
+
+    def test_update_order_shipping_price_delta(self):
+        self._auth()
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{self.order.id}/shipping",
+            data={"shipping_method": "dpd_courier"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        payload = res.json()
+        # locker 2.00 net vs courier 5.00 net -> delta = 3.63 gross (21%)
+        self.assertEqual(payload["shipping_method"], "dpd_courier")
+        self.assertEqual(payload["price_delta_gross"], "3.63")
+
+    def test_surcharge_bank_transfer(self):
+        self._auth()
+        res = self.client.post(
+            f"/api/v1/ops/orders/{self.order.id}/surcharges",
+            data={"amount_gross": "3.63", "reason": "carrier change",
+                  "method": "bank_transfer", "send_email": False},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        payload = res.json()
+        self.assertEqual(payload["status"], "pending")
+        self.assertEqual(payload["amount_gross"], "3.63")
+
+        from checkout.models import Surcharge
+        s = Surcharge.objects.get(id=payload["id"])
+        self.assertEqual(s.reference, f"{self.order.id}-sur-{s.id}")
+
+    def test_ops_create_order(self):
+        self._auth()
+        res = self.client.post(
+            "/api/v1/ops/orders",
+
+            data={
+                "user_email": "newcustomer@example.com",
+                "shipping_method": "dpd_courier",
+                "shipping_full_name": "Jonas Jonaitis",
+                "shipping_line1": "Gatve 1",
+                "shipping_city": "Kaunas",
+                "shipping_postal_code": "44000",
+                "shipping_country_code": "LT",
+                "lines": [{"variant_id": self.variant.id, "qty": 2}],
+            },
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        payload = res.json()
+        self.assertEqual(payload["totals"]["items_gross"], "24.20")
+        # dpd_courier shipping = 5.00 net * 1.21 = 6.05 gross
+        self.assertEqual(payload["totals"]["shipping_gross"], "6.05")
+
+    def test_ops_merge_orders(self):
+        self._auth()
+        o2 = Order.objects.create(
+            user=self.customer, shop=self.shop,
+            status=Order.Status.PENDING_PAYMENT,
+            shipping_method="dpd_locker", country_code="LT")
+        OrderLine.objects.create(
+            order=o2, variant=self.variant2, offer=self.remote_offer,
+            sku="V-2", name="Drill2", unit_net="20.00", vat_rate="0.21",
+            qty=1, total_net="20.00", total_vat="4.20", total_gross="24.20")
+        o2.recalculate_totals()
+        o2.save()
+
+        res = self.client.post(
+            "/api/v1/ops/orders/actions/merge",
+            data={"primary_order_id": self.order.id,
+                  "merged_order_ids": [o2.id]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+
+        o2.refresh_from_db()
+        self.assertEqual(o2.status, Order.Status.CANCELLED)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.lines.count(), 2)
+        # 12.10 + 24.20 = 36.30 items gross
+        self.assertEqual(str(self.order.items_gross), "36.30")
