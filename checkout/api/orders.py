@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from django.http import FileResponse
+
 from api.i18n import get_request_language_code
 from checkout.statuses import get_status_label, get_status_options
 
@@ -290,6 +292,41 @@ def get_order(request, order_id: int):
     if not o:
         raise HttpError(404, "Order not found")
 
+    return _build_order_detail(o, get_request_language_code(request))
+
+
+@router.get("/orders/{order_id}/invoice", auth=_auth)
+def download_order_invoice(request, order_id: int):
+    """Latest issued sales invoice PDF for the customer's own order."""
+    _ensure_shop_context_if_strict(request)
+    user = _require_user(request)
+    shop_id = _request_shop_id(request)
+
+    order_qs = Order.objects.filter(user=user, id=order_id)
+    order_qs = order_qs.filter(shop_id=shop_id) if shop_id is not None else order_qs.filter(shop__isnull=True)
+    order = order_qs.first()
+    if order is None:
+        raise HttpError(404, "Order not found")
+
+    from billing.models import Invoice
+
+    invoice = (
+        Invoice.objects.filter(order=order, kind=Invoice.Kind.SALES,
+                               status=Invoice.Status.ISSUED)
+        .exclude(pdf="")
+        .order_by("-issue_date", "-id")
+        .first()
+    )
+    if invoice is None:
+        raise HttpError(404, "Invoice not issued yet")
+    return FileResponse(
+        invoice.pdf.open("rb"),
+        content_type="application/pdf",
+        filename=f"{invoice.number}.pdf",
+    )
+
+
+def _build_order_detail(o, language_code: str):
     lines_out: list[OrderLineOut] = []
     agg_min = None
     agg_max = None
@@ -388,7 +425,6 @@ def get_order(request, order_id: int):
     if pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER:
         payment_instructions = _bank_transfer_instructions_for(order_id=o.id, country_code=o.country_code)
 
-    language_code = get_request_language_code(request)
     labels = _localized_status_labels(o, pi, language_code)
 
     delivery_window = None
@@ -409,6 +445,14 @@ def get_order(request, order_id: int):
             "source": str((agg_meta or {}).get("source") or ""),
         }
 
+    invoice_number = ""
+    if getattr(o, "delivered_at", None):
+        from billing.models import Invoice
+        inv = Invoice.objects.filter(
+            order_id=o.id, kind=Invoice.Kind.SALES,
+            status=Invoice.Status.ISSUED).values_list("number", flat=True).first()
+        invoice_number = inv or ""
+
     return OrderOut(
         id=o.id,
         status=o.status,
@@ -426,6 +470,8 @@ def get_order(request, order_id: int):
         shipping_method=o.shipping_method,
         carrier_code=o.carrier_code,
         tracking_number=o.tracking_number,
+        delivered_at=(o.delivered_at.isoformat() if o.delivered_at else ""),
+        invoice_number=invoice_number,
         payment_provider=(pi.provider if pi else ""),
         payment_provider_label=labels["payment_provider_label"],
         payment_status=(pi.status if pi else ""),

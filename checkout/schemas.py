@@ -186,6 +186,8 @@ class OrderOut(Schema):
     shipping_method: str
     carrier_code: str = ""
     tracking_number: str = ""
+    delivered_at: str = ""
+    invoice_number: str = ""
 
     payment_provider: str = ""
     payment_provider_label: str = ""

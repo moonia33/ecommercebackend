@@ -33,6 +33,9 @@ class OutboundEmail(models.Model):
     body_text = models.TextField(blank=True)
     body_html = models.TextField(blank=True)
 
+    # Storage-relative file paths attached at send time (e.g. invoice PDFs).
+    attachments = models.JSONField(default=list, blank=True)
+
     status = models.CharField(
         max_length=16, choices=Status.choices, default=Status.PENDING)
     error_message = models.TextField(blank=True)

@@ -22,3 +22,6 @@ bleach>=6.1.0
 markdownify>=0.12.1
 pillow-avif-plugin>=1.4.6
 whitenoise>=6.7
+
+# Invoice PDF rendering (HTML -> PDF)
+weasyprint>=62.0

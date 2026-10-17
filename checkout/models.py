@@ -174,8 +174,9 @@ class Order(models.Model):
     delivery_status = models.CharField(
         max_length=32, choices=DeliveryStatus.choices, default=DeliveryStatus.PENDING
     )
-    # Set when the order first reaches DELIVERED or AT_PICKUP_POINT
-    # (locker arrival = customer can take possession; return window anchor).
+    # Set by signal when delivery_status first reaches DELIVERED
+    # (courier / locker pickup / store pickup) — return-window anchor
+    # and sales-invoice trigger.
     delivered_at = models.DateTimeField(null=True, blank=True)
 
     # Delivery ETA snapshot (order-level, aggregated)

@@ -199,8 +199,16 @@ Būsenų atvaizdavimas:
 | `returned` | Siunta grąžinta siuntėjui | |
 | `cancelled` / `error` | Atšaukta / Klaida | |
 
-- `Order.delivered_at` (ISO datetime) nustatomas kai `delivery_status → delivered` arba `at_pickup_point` — naudoti grąžinimo langui.
+- `Order.delivered_at` (ISO datetime) nustatomas kai `delivery_status → delivered` — klientas realiai atsiėmė (kurjeris, paštomato atsiėmimas, parduotuvė). Return window ir sąskaita skaičiuojami nuo šio momento.
 - Paštomato užsakymams (`shipping_method` su `pickup`/`locker`) `delivered` label'as API'e automatiškai rodomas kaip „Atsiimta iš paštomato“ — machine kodas lieka `delivered`.
+
+## Sąskaitos faktūros
+
+Pereitus `delivery_status → delivered` backend'as automatiškai išrašo sąskaitą (serija per shop'ą: `SF-<metai>-NNNN`), sugeneruoja PDF ir išsiunčia el. paštu. Kredito sąskaitos (`KRF-*`) — grąžinimams.
+
+- `OrderOut.delivered_at` — pristatymo/atsiėmimo timestamp.
+- `OrderOut.invoice_number` — išrašytos sąskaitos numeris (`""` kol neišrašyta).
+- `GET /checkout/orders/{id}/invoice` — PDF atsisiuntimas (autentifikuota, tik savo užsakymas). Rodyti download mygtuką kai `invoice_number` netuščias.
 
 ## 7. DPD / Unisend pickup sąrašai
 

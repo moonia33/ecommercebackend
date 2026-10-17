@@ -169,6 +169,7 @@ INSTALLED_APPS = [
     "shipping",
     "payments",
     "checkout",
+    "billing.apps.BillingConfig",
     "promotions",
     "dpd",
     "unisend",
@@ -340,6 +341,24 @@ if MEDIA_STORAGE == "s3":
         },
         "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
     }
+
+    # Private documents (invoices, shipping labels): separate bucket with NO
+    # public access/custom domain. Signed URLs only when needed; app streams.
+    AWS_PRIVATE_BUCKET_NAME = env("AWS_PRIVATE_BUCKET_NAME", default="")
+    if AWS_PRIVATE_BUCKET_NAME:
+        STORAGES["private"] = {
+            "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+            "OPTIONS": {
+                "bucket_name": AWS_PRIVATE_BUCKET_NAME,
+                "endpoint_url": AWS_S3_ENDPOINT_URL,
+                "region_name": AWS_S3_REGION_NAME or None,
+                "custom_domain": None,
+                "default_acl": "private",
+                "querystring_auth": True,
+                "addressing_style": AWS_S3_ADDRESSING_STYLE,
+                "file_overwrite": False,
+            },
+        }
 
 # --- API/front-end integration ---
 # Default dev origins for SvelteKit

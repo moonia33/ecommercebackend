@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="{{ invoice.language_code|default:'lt' }}">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 18mm 15mm; }
+  body { font-family: "DejaVu Sans", sans-serif; font-size: 10pt; color: #111; }
+  h1 { font-size: 16pt; margin: 0 0 4mm; }
+  .muted { color: #555; font-size: 9pt; }
+  .parties { width: 100%; margin: 6mm 0; }
+  .parties td { width: 50%; vertical-align: top; }
+  table.lines { width: 100%; border-collapse: collapse; margin-top: 4mm; }
+  .lines th, .lines td { border-bottom: 0.3pt solid #999; padding: 2mm; text-align: left; }
+  .lines td.num, .lines th.num { text-align: right; }
+  .totals { width: 60mm; margin-left: auto; margin-top: 4mm; }
+  .totals td { padding: 1mm 2mm; }
+  .totals .grand td { font-weight: bold; border-top: 0.6pt solid #111; }
+  .footer { margin-top: 10mm; font-size: 8.5pt; color: #555; }
+</style>
+</head>
+<body>
+  {% if invoice.kind == 'credit' %}
+  <h1>KREDITO SĄSKAITA FAKTŪRA {{ invoice.number }}</h1>
+  {% else %}
+  <h1>SĄSKAITA FAKTŪRA {{ invoice.number }}</h1>
+  {% endif %}
+  <div class="muted">
+    Išrašyta: {{ invoice.issue_date }}{% if invoice.credit_of %} · Susijusi sąskaita: {{ invoice.credit_of.number }}{% endif %}
+    · Užsakymas #{{ order.id }}
+  </div>
+
+  <table class="parties">
+    <tr>
+      <td>
+        <strong>{{ seller.legal_name }}</strong><br>
+        {% if seller.company_code %}Įmonės kodas: {{ seller.company_code }}<br>{% endif %}
+        {% if seller.vat_code %}PVM kodas: {{ seller.vat_code }}<br>{% endif %}
+        {% if seller.address_line1 %}{{ seller.address_line1 }}, {% endif %}
+        {{ seller.postal_code }} {{ seller.city }}{% if seller.country_code %}, {{ seller.country_code }}{% endif %}<br>
+        {% if seller.phone %}Tel. {{ seller.phone }}<br>{% endif %}
+        {% if seller.email %}{{ seller.email }}{% endif %}
+      </td>
+      <td>
+        <strong>Pirkėjas</strong><br>
+        {{ buyer.full_name }}{% if buyer.company %}<br>{{ buyer.company }}{% endif %}<br>
+        {% if buyer.address_line1 %}{{ buyer.address_line1 }}, {% endif %}
+        {{ buyer.postal_code }} {{ buyer.city }}{% if buyer.country_code %}, {{ buyer.country_code }}{% endif %}<br>
+        {% if buyer.phone %}Tel. {{ buyer.phone }}<br>{% endif %}
+        {% if buyer.email %}{{ buyer.email }}{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <table class="lines">
+    <thead>
+      <tr>
+        <th>Pavadinimas</th><th>Kodas</th>
+        <th class="num">Kiekis</th><th class="num">Kaina</th>
+        <th class="num">PVM %</th><th class="num">Suma</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ln in lines %}
+      <tr>
+        <td>{{ ln.name }}</td>
+        <td class="muted">{{ ln.sku }}</td>
+        <td class="num">{{ ln.qty }}</td>
+        <td class="num">{{ ln.unit_net }}</td>
+        <td class="num">{{ ln.vat_rate }}</td>
+        <td class="num">{{ ln.total_gross }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <table class="totals">
+    <tr><td>Suma be PVM</td><td class="num">{{ totals.net }} {{ invoice.currency }}</td></tr>
+    <tr><td>PVM</td><td class="num">{{ totals.vat }} {{ invoice.currency }}</td></tr>
+    <tr class="grand"><td>Iš viso</td><td class="num">{{ totals.gross }} {{ invoice.currency }}</td></tr>
+  </table>
+
+  {% if seller.iban %}
+  <div class="footer">
+    Mokėjimas: {{ seller.bank_name }} · {{ seller.iban }}{% if seller.swift %} · {{ seller.swift }}{% endif %}
+  </div>
+  {% endif %}
+  {% if seller.footer %}<div class="footer">{{ seller.footer|linebreaksbr }}</div>{% endif %}
+</body>
+</html>

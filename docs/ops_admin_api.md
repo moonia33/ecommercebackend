@@ -158,6 +158,18 @@ Veiksmas:
 - nustato `order.delivery_status = picked_up` (vieninga būsena: vežėjas paėmė siuntą)
 - `OrderEvent(name="ops_mark_shipped")`
 
+## GET `/api/v1/ops/invoices?order_id=`
+
+Sąskaitų sąrašas (filter pagal užsakymą): `number`, `kind` (`sales`/`credit`), `issue_date`, `total_gross`, `emailed_at`, `has_pdf`.
+
+## GET `/api/v1/ops/invoices/{invoice_id}/pdf`
+
+PDF stream'as (autentifikuota — failai privačiame bucket'e, ne CDN).
+
+## POST `/api/v1/ops/invoices/{invoice_id}/resend`
+
+Pakartotinai siunčia sąskaitą klientui el. paštu.
+
 ## POST `/api/v1/ops/shipments/{shipment_id}/refresh-tracking`
 
 Veiksmas:

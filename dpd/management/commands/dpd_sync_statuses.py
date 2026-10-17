@@ -1,5 +1,4 @@
 from django.core.management.base import BaseCommand
-from django.utils import timezone
 
 from checkout.models import Order
 from dpd.client import DpdApiError, DpdClient
@@ -59,21 +58,11 @@ class Command(BaseCommand):
             if new_status is None or new_status == order.delivery_status:
                 continue
 
-            fields = {"delivery_status": new_status}
-            if (
-                new_status
-                in {
-                    Order.DeliveryStatus.DELIVERED,
-                    Order.DeliveryStatus.AT_PICKUP_POINT,
-                }
-                and order.delivered_at is None
-            ):
-                fields["delivered_at"] = timezone.now()
-
             if not dry_run:
-                for k, v in fields.items():
-                    setattr(order, k, v)
-                order.save(update_fields=list(fields) + ["updated_at"])
+                # delivered_at is anchored by the Order signal on the
+                # transition to DELIVERED (customer took possession).
+                order.delivery_status = new_status
+                order.save(update_fields=["delivery_status", "updated_at"])
             updated += 1
 
         self.stdout.write(

@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from celery import shared_task
+from django.core.files.storage import default_storage
 from django.core.mail import EmailMultiAlternatives
 from django.utils import timezone
 
@@ -25,6 +26,10 @@ def send_email_task(self, outbound_email_id: int):
         )
         if outbound.body_html:
             msg.attach_alternative(outbound.body_html, "text/html")
+        for path in outbound.attachments or []:
+            name = str(path).rsplit("/", 1)[-1] or "attachment"
+            with default_storage.open(path, "rb") as f:
+                msg.attach(name, f.read())
         msg.send(fail_silently=False)
     except Exception as exc:
         outbound.status = OutboundEmail.Status.FAILED

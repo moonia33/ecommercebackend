@@ -31,6 +31,7 @@ def send_templated_email(
     context: dict[str, Any] | None = None,
     from_email: str | None = None,
     language_code: str | None = None,
+    attachments: list[str] | None = None,
 ) -> SendEmailResult:
     """Send an email based on a DB-stored template.
 
@@ -93,6 +94,7 @@ def send_templated_email(
         subject=subject,
         body_text=body_text,
         body_html=body_html,
+        attachments=list(attachments or []),
         status=OutboundEmail.Status.PENDING,
     )
 
