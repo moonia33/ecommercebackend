@@ -134,7 +134,7 @@ class InvoiceEmailTests(InvoiceBase):
         self.assertTrue(ok)
         outbound = OutboundEmail.objects.latest("id")
         self.assertEqual(outbound.to_email, "buyer@example.com")
-        self.assertEqual(outbound.attachments, ["invoices/2026/SF-2026-0001.pdf"])
+        self.assertEqual(outbound.attachments, ["private:invoices/2026/SF-2026-0001.pdf"])
         self.assertEqual(outbound.template_key, "invoice_issued")
         inv.refresh_from_db()
         self.assertIsNotNone(inv.emailed_at)

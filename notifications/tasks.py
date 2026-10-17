@@ -1,9 +1,26 @@
 from datetime import timedelta
 
 from celery import shared_task
-from django.core.files.storage import default_storage
+from django.core.files.storage import storages
 from django.core.mail import EmailMultiAlternatives
 from django.utils import timezone
+
+
+def _resolve_attachment(ref: str):
+    """Attachment refs are 'storage_alias:path'; bare path -> default.
+
+    Falls back to default when the alias isn't configured (e.g. no
+    private bucket in dev — files then live in default storage).
+    """
+    if ":" in ref:
+        alias, _, path = ref.partition(":")
+        if alias and alias != "default":
+            try:
+                return storages[alias], path
+            except Exception:
+                pass
+        ref = path
+    return storages["default"], ref
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -26,9 +43,10 @@ def send_email_task(self, outbound_email_id: int):
         )
         if outbound.body_html:
             msg.attach_alternative(outbound.body_html, "text/html")
-        for path in outbound.attachments or []:
-            name = str(path).rsplit("/", 1)[-1] or "attachment"
-            with default_storage.open(path, "rb") as f:
+        for ref in outbound.attachments or []:
+            storage, path = _resolve_attachment(str(ref))
+            name = path.rsplit("/", 1)[-1] or "attachment"
+            with storage.open(path, "rb") as f:
                 msg.attach(name, f.read())
         msg.send(fail_silently=False)
     except Exception as exc:

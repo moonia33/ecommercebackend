@@ -211,7 +211,7 @@ def send_invoice_email(invoice: Invoice) -> bool:
 
     attachment = ""
     if invoice.pdf:
-        attachment = invoice.pdf.name
+        attachment = f"private:{invoice.pdf.name}"
     res = send_templated_email(
         template_key="invoice_issued",
         to_email=to_email,
