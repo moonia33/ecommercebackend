@@ -684,16 +684,20 @@ history — PrestaShop DPD module style.
   removal releases it (`qty_reserved`, or `qty_on_hand` when the
   allocation was already captured). `reserve_inventory_for_line` /
   `release_inventory_for_line` in `checkout/services.py`.
-- `supplier_reservation_status` is auto-derived after every line/stock
-  change: any remote-warehouse allocation **or** unallocated line qty
-  → `pending`; fully covered by local warehouses → `not_needed`.
-  Manual states (`reserved`, `failed`, `cancelled`) are never overwritten.
+- `supplier_reservation_status` is a **manual** flag managed by the
+  manager — it tracks "I ordered these items at the supplier / I'm
+  waiting for the parcel". It is NOT derived from internal stock
+  allocations. The ops "confirm" action bumps `not_needed -> pending`
+  as a reminder; everything else is set by hand.
 - `PATCH /ops/orders/{id}/supplier` — manual supplier workflow:
   `{supplier_reservation_status?, supplier_reference?, supplier_notes?}`;
   `reserved` stamps `supplier_reserved_at`.
 - `supplier_code` on `GET /ops/orders` matches `line.offer.warehouse.code`
   **and** active allocations' warehouses — so "orders with unshipped
-  items from supplier X" is `supplier_code=<wh_code>&delivery_status!=delivered`.
+  items from supplier X" is `supplier_code=<wh_code>` + a delivery/status
+  filter. `product_q` matches SKU/name/**barcode (EAN)** — a scanner can
+  be used to find the order for an arriving item. `supplier_status`
+  filters by the manual reservation state.
 - `matched_lines[]` carries `warehouse_code/name/country/kind`,
   `allocated_qty`, `unallocated_qty` per line.
 

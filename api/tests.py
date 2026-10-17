@@ -1243,7 +1243,10 @@ class OpsInventoryReservationTests(TestCase):
         order = Order.objects.get(id=out["id"])
         self.assertEqual(order.supplier_reservation_status, "not_needed")
 
-    def test_remote_item_marks_supplier_pending(self):
+    def test_remote_item_reserves_but_status_stays_manual(self):
+        """Remote-warehouse stock is reserved internally, but
+        supplier_reservation_status stays a manual flag (not_needed) —
+        the manager marks 'awaiting supplier' by hand."""
         self._auth()
         res = self._create_order(self.variant_remote.id, qty=2)
         self.assertEqual(res.status_code, 200, res.content[:300])
@@ -1251,17 +1254,17 @@ class OpsInventoryReservationTests(TestCase):
         self.assertEqual(int(self.remote_offer.qty_reserved), 2)
 
         order = Order.objects.get(id=res.json()["id"])
-        self.assertEqual(order.supplier_reservation_status, "pending")
+        self.assertEqual(order.supplier_reservation_status, "not_needed")
         m = res.json()["matched_lines"][0]
         self.assertEqual(m["warehouse_code"], "suppx")
         self.assertEqual(m["warehouse_kind"], "remote")
 
-    def test_unstocked_item_marks_supplier_pending_unallocated(self):
+    def test_unstocked_item_stays_unallocated(self):
         self._auth()
         res = self._create_order(self.variant_nostock.id, qty=1)
         self.assertEqual(res.status_code, 200, res.content[:300])
         order = Order.objects.get(id=res.json()["id"])
-        self.assertEqual(order.supplier_reservation_status, "pending")
+        self.assertEqual(order.supplier_reservation_status, "not_needed")
         m = res.json()["matched_lines"][0]
         self.assertEqual(m["unallocated_qty"], 1)
         self.assertEqual(m["warehouse_code"], "")
@@ -1317,8 +1320,8 @@ class OpsInventoryReservationTests(TestCase):
         self.remote_offer.refresh_from_db()
         self.assertEqual(int(self.remote_offer.qty_reserved), 2)
         order = Order.objects.get(id=oid)
-        # local + remote mix -> supplier pending
-        self.assertEqual(order.supplier_reservation_status, "pending")
+        # supplier flag is manual — stock state doesn't change it
+        self.assertEqual(order.supplier_reservation_status, "not_needed")
 
 
     def test_supplier_patch_sets_status_and_reference(self):
@@ -1337,10 +1340,6 @@ class OpsInventoryReservationTests(TestCase):
         self.assertEqual(order.supplier_reservation_status, "reserved")
         self.assertIsNotNone(order.supplier_reserved_at)
         self.assertEqual(order.supplier_reference, "PO-777")
-        from checkout.services import sync_supplier_reservation_status
-        sync_supplier_reservation_status(order=order)
-        order.refresh_from_db()
-        self.assertEqual(order.supplier_reservation_status, "reserved")
 
     def test_merge_moves_allocations_to_primary(self):
         from checkout.models import InventoryAllocation
@@ -1361,7 +1360,8 @@ class OpsInventoryReservationTests(TestCase):
         self.assertFalse(
             InventoryAllocation.objects.filter(order_id=oid2).exists())
         order = Order.objects.get(id=oid1)
-        self.assertEqual(order.supplier_reservation_status, "pending")
+        # manual flag — merge must not touch it
+        self.assertEqual(order.supplier_reservation_status, "not_needed")
 
     def test_supplier_code_filter_matches_allocations(self):
         self._auth()
@@ -1371,5 +1371,37 @@ class OpsInventoryReservationTests(TestCase):
             "/api/v1/ops/orders",
             {"supplier_code": "suppx"}, HTTP_HOST="ops.local")
         self.assertEqual(res.status_code, 200)
+        ids = [r["id"] for r in res.json()["results"]]
+        self.assertIn(oid, ids)
+
+    def test_supplier_status_and_barcode_filters(self):
+        self._auth()
+        res = self._create_order(self.variant_remote.id, qty=1)
+        oid = res.json()["id"]
+
+        # manager marks the order manually after ordering at the supplier
+        self.client.patch(
+            f"/api/v1/ops/orders/{oid}/supplier",
+            data={"supplier_reservation_status": "pending"},
+            content_type="application/json", HTTP_HOST="ops.local")
+
+        res = self.client.get(
+            "/api/v1/ops/orders",
+            {"supplier_status": "pending"}, HTTP_HOST="ops.local")
+        ids = [r["id"] for r in res.json()["results"]]
+        self.assertIn(oid, ids)
+
+        res = self.client.get(
+            "/api/v1/ops/orders",
+            {"supplier_status": "reserved"}, HTTP_HOST="ops.local")
+        ids = [r["id"] for r in res.json()["results"]]
+        self.assertNotIn(oid, ids)
+
+        # barcode (EAN) lookup through product_q — scanner input
+        self.variant_remote.barcode = "4770000000000"
+        self.variant_remote.save(update_fields=["barcode"])
+        res = self.client.get(
+            "/api/v1/ops/orders",
+            {"product_q": "4770000000000"}, HTTP_HOST="ops.local")
         ids = [r["id"] for r in res.json()["results"]]
         self.assertIn(oid, ids)

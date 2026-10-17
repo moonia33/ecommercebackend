@@ -59,6 +59,7 @@ class OpsOrderSearchIn(Schema):
     q: str = ""
     product_q: str = ""
     supplier_code: str = ""
+    supplier_status: str = ""
     manufacturer_q: str = ""
     remote_only: bool = False
     eta_from: date | None = None
@@ -908,6 +909,7 @@ def _build_line_filter(filters: OpsOrderSearchIn, *, prefix: str = "") -> Q:
             Q(**{f"{p}sku__icontains": product_q})
             | Q(**{f"{p}name__icontains": product_q})
             | Q(**{f"{p}variant__sku__icontains": product_q})
+            | Q(**{f"{p}variant__barcode__icontains": product_q})
             | Q(**{f"{p}variant__product__name__icontains": product_q})
             | Q(**{f"{p}variant__product__slug__icontains": product_q})
         )
@@ -954,6 +956,11 @@ def _build_order_filter(filters: OpsOrderSearchIn, *, shop_id: int | None) -> tu
         order_q &= Q(shipping_method__icontains="pickup")
     elif shipping_type == "courier":
         order_q &= ~Q(shipping_method__icontains="pickup")
+
+    supplier_status = (filters.supplier_status or "").strip()
+    if supplier_status:
+        order_q &= Q(supplier_reservation_status__in=[
+            s.strip() for s in supplier_status.split(",") if s.strip()])
 
     q = (filters.q or "").strip()
     if q:

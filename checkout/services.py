@@ -477,48 +477,6 @@ def release_inventory_for_line(*, order_line, qty: int | None = None) -> int:
     return released
 
 
-def sync_supplier_reservation_status(*, order) -> None:
-    """Auto-derive order.supplier_reservation_status from line allocations:
-    a remote-warehouse allocation or any unallocated line qty means the goods
-    still have to come from a supplier -> pending; fully covered by local
-    warehouses -> not_needed. Manual states (reserved/failed/cancelled) are
-    never overwritten."""
-    from catalog.models import Warehouse
-    from checkout.models import Order, OrderLine
-
-    Status = Order.SupplierReservationStatus
-    if order.supplier_reservation_status in {
-        Status.RESERVED, Status.FAILED, Status.CANCELLED,
-    }:
-        return
-
-    needs_supplier = False
-    lines = list(
-        OrderLine.objects.filter(order_id=int(order.id))
-        .prefetch_related("inventory_allocations__inventory_item__warehouse")
-    )
-    for line in lines:
-        active = [
-            a for a in line.inventory_allocations.all()
-            if a.status != "released"
-        ]
-        if sum(int(a.qty) for a in active) < int(line.qty):
-            needs_supplier = True
-            continue
-        for a in active:
-            wh = getattr(getattr(a, "inventory_item", None), "warehouse", None)
-            if wh is not None and wh.kind == Warehouse.Kind.REMOTE:
-                needs_supplier = True
-                break
-        if needs_supplier:
-            continue
-
-    new_status = Status.PENDING if needs_supplier else Status.NOT_NEEDED
-    if order.supplier_reservation_status != new_status:
-        order.supplier_reservation_status = new_status
-        order.save(update_fields=["supplier_reservation_status", "updated_at"])
-
-
 def expire_pending_payment_reservations(*, now=None) -> int:
     from checkout.models import Order, PaymentIntent
 

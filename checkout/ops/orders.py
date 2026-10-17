@@ -508,16 +508,12 @@ def ops_add_order_line(request, order_id: int, payload: OpsOrderLineIn):
         line = _add_order_line(
             order=order, variant=variant, qty=payload.qty, offer=offer, user=user)
 
-        from checkout.services import (
-            reserve_inventory_for_line,
-            sync_supplier_reservation_status,
-        )
+        from checkout.services import reserve_inventory_for_line
         try:
             allocated = reserve_inventory_for_line(
                 order_line=line, qty=payload.qty, strict=bool(offer))
         except ValueError as exc:
             raise HttpError(409, str(exc) or "Not enough stock")
-        sync_supplier_reservation_status(order=order)
 
     _track_order_event(
         order=order,
@@ -564,7 +560,6 @@ def ops_update_order_line(request, order_id: int, line_id: int,
         from checkout.services import (
             release_inventory_for_line,
             reserve_inventory_for_line,
-            sync_supplier_reservation_status,
         )
         if payload.qty == 0:
             released = release_inventory_for_line(order_line=line)
@@ -587,7 +582,6 @@ def ops_update_order_line(request, order_id: int, line_id: int,
             line.save(update_fields=[
                 "qty", "total_net", "total_vat", "total_gross"])
             removed = False
-        sync_supplier_reservation_status(order=order)
 
     order.recalculate_totals()
     order.save(update_fields=[
@@ -821,10 +815,7 @@ def ops_create_order(request, payload: OpsOrderCreateIn):
         order.recalculate_totals()
         order.save()
 
-        from checkout.services import (
-            reserve_inventory_for_line,
-            sync_supplier_reservation_status,
-        )
+        from checkout.services import reserve_inventory_for_line
         unallocated = []
         for line in created_lines:
             got = reserve_inventory_for_line(
@@ -835,7 +826,6 @@ def ops_create_order(request, payload: OpsOrderCreateIn):
                     "sku": line.sku,
                     "missing": int(line.qty) - int(got),
                 })
-        sync_supplier_reservation_status(order=order)
 
         if payload.note:
             OrderEvent.objects.create(
@@ -913,8 +903,8 @@ def ops_merge_orders(request, payload: OpsOrderMergeIn):
             actor_user=user,
             payload={"merged_order_ids": merged},
         )
-        from checkout.services import sync_supplier_reservation_status
-        sync_supplier_reservation_status(order=primary)
+        # Supplier reservation status is a manual workflow flag — merging
+        # orders does not change it (the manager sets it by hand).
 
     from checkout.surcharges import reconcile_order_balance
     reconcile_order_balance(
