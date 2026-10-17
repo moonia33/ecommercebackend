@@ -160,7 +160,7 @@ def ops_update_order_shipping(request, order_id: int, payload: OpsOrderShippingU
 
     if locker is not None:
         order.pickup_locker = locker
-        order.pickup_point_id = str(getattr(locker, "parcel_shop_id", "") or "")
+        order.pickup_point_id = str(getattr(locker, "locker_id", "") or "")
         order.pickup_point_name = str(getattr(locker, "name", "") or "")
         order.pickup_point_raw = {
             "id": locker.id,
@@ -692,7 +692,7 @@ def ops_create_order(request, payload: OpsOrderCreateIn):
             if locker is None:
                 raise HttpError(404, "Locker not found")
             order.pickup_locker = locker
-            order.pickup_point_id = str(getattr(locker, "parcel_shop_id", "") or "")
+            order.pickup_point_id = str(getattr(locker, "locker_id", "") or "")
             order.pickup_point_name = str(getattr(locker, "name", "") or "")
             order.save(update_fields=[
                 "pickup_locker", "pickup_point_id", "pickup_point_name"])

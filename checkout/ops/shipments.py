@@ -111,7 +111,7 @@ def ops_create_shipment(request, order_id: int, payload: OpsShipmentCreateIn):
         carrier_code=(payload.carrier_code or "").strip(),
         tracking_number=(payload.tracking_number or "").strip(),
         pickup_locker=locker,
-        pickup_point_id=str(getattr(locker, "parcel_shop_id", "") or ""),
+        pickup_point_id=str(getattr(locker, "locker_id", "") or ""),
         pickup_point_name=str(getattr(locker, "name", "") or ""),
         notes=payload.notes or "",
         created_by=user,
@@ -171,7 +171,7 @@ def ops_update_shipment(request, shipment_id: int, payload: OpsShipmentUpdateIn)
             if locker is None:
                 raise HttpError(404, "Locker not found")
             shipment.pickup_locker = locker
-            shipment.pickup_point_id = str(getattr(locker, "parcel_shop_id", "") or "")
+            shipment.pickup_point_id = str(getattr(locker, "locker_id", "") or "")
             shipment.pickup_point_name = str(getattr(locker, "name", "") or "")
         else:
             shipment.pickup_locker = None
@@ -267,7 +267,7 @@ def ops_list_lockers(request, country_code: str = "", q: str = ""):
         qs = qs.filter(
             Q(name__icontains=term)
             | Q(city__icontains=term)
-            | Q(parcel_shop_id__icontains=term)
+            | Q(locker_id__icontains=term)
         )
     return [
         OpsLockerOptionOut(

@@ -477,7 +477,7 @@ def preferred_pickup_point(order, *, shipping_method: str = "") -> dict | None:
     try:
         from dpd.models import DpdLocker
         locker = DpdLocker.objects.filter(
-            parcel_shop_id=pref.pickup_point_id).first()
+            locker_id=pref.pickup_point_id).first()
     except Exception:
         locker = None
     return {

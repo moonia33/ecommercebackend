@@ -1045,6 +1045,30 @@ class OpsOrderEditingBalanceTests(TestCase):
         order.shipping_method = "unisend_pickup"
         self.assertIsNone(preferred_pickup_point(order))
 
+    def test_shipment_locker_populates_pudo_id(self):
+        from dpd.models import DpdLocker
+        locker = DpdLocker.objects.create(
+            locker_id="LT11111", name="Test locker", city="Vilnius",
+            country_code="LT", is_active=True)
+        order = self._mk_paid_order()
+        self._auth()
+        res = self.client.post(
+            f"/api/v1/ops/orders/{order.id}/shipments",
+            data={"kind": "outbound", "shipping_method": "dpd_locker",
+                  "pickup_locker_id": locker.id},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["pickup_point_id"], "LT11111")
+
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{order.id}/shipping",
+            data={"shipping_method": "dpd_locker",
+                  "pickup_locker_id": locker.id},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        order.refresh_from_db()
+        self.assertEqual(order.pickup_point_id, "LT11111")
+
     def test_label_regen_forks_shipment(self):
         from unittest.mock import patch
         from django.utils import timezone
