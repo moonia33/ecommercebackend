@@ -44,7 +44,16 @@ def ops_list_orders(request, filters: OpsOrderSearchIn = Query(...)):
             "variant__product__brand",
             "offer__warehouse",
         )
-        .prefetch_related("variant__product__images")
+        .prefetch_related(
+            "variant__product__images",
+            Prefetch(
+                "inventory_allocations",
+                queryset=InventoryAllocation.objects
+                .exclude(status=InventoryAllocation.Status.RELEASED)
+                .select_related("inventory_item__warehouse"),
+                to_attr="ops_active_allocs",
+            ),
+        )
         .order_by("id")
     )
     if has_line_filters:
@@ -358,6 +367,55 @@ def ops_update_order_address(request, order_id: int,
     return _serialize_ops_order_detail(_order_detail_qs(order.id))
 
 
+@router.patch("/orders/{order_id}/supplier", response=OpsOrderDetailOut, auth=_auth)
+def ops_update_order_supplier(request, order_id: int,
+                              payload: OpsOrderSupplierUpdateIn):
+    """Manual supplier-reservation tracking: status (pending when the supplier
+    is being contacted, reserved when confirmed, failed/cancelled),
+    supplier reference and internal notes."""
+    _ensure_shop_context_if_strict(request)
+    user = _require_ops_user(request)
+    order = _get_order_for_ops(order_id, shop_id=_request_shop_id(request))
+
+    changed: list[str] = []
+    if payload.supplier_reservation_status is not None:
+        status = payload.supplier_reservation_status.strip()
+        valid = {c.value for c in Order.SupplierReservationStatus}
+        if status not in valid:
+            raise HttpError(400, f"Invalid supplier_reservation_status '{status}'")
+        order.supplier_reservation_status = status
+        now = timezone.now()
+        if status == Order.SupplierReservationStatus.RESERVED:
+            if order.supplier_reserved_at is None:
+                order.supplier_reserved_at = now
+        else:
+            order.supplier_reserved_at = None
+        changed.extend(["supplier_reservation_status", "supplier_reserved_at"])
+    if payload.supplier_reference is not None:
+        order.supplier_reference = payload.supplier_reference.strip()
+        changed.append("supplier_reference")
+    if payload.supplier_notes is not None:
+        order.supplier_notes = payload.supplier_notes
+        changed.append("supplier_notes")
+
+    if not changed:
+        raise HttpError(400, "No fields to update")
+    order.save(update_fields=changed + ["updated_at"])
+
+    _track_order_event(
+        order=order,
+        user=user,
+        kind=OrderEvent.Kind.FULFILLMENT,
+        name="ops_supplier_updated",
+        payload={
+            "fields": changed,
+            "supplier_reservation_status": order.supplier_reservation_status,
+            "supplier_reference": order.supplier_reference,
+        },
+    )
+    return _serialize_ops_order_detail(_order_detail_qs(order.id))
+
+
 def _surcharge_to_out(s: Surcharge) -> OpsSurchargeOut:
     return OpsSurchargeOut(
         id=int(s.id),
@@ -446,8 +504,20 @@ def ops_add_order_line(request, order_id: int, payload: OpsOrderLineIn):
         if offer is None:
             raise HttpError(404, "Offer not found")
 
-    line = _add_order_line(
-        order=order, variant=variant, qty=payload.qty, offer=offer, user=user)
+    with transaction.atomic():
+        line = _add_order_line(
+            order=order, variant=variant, qty=payload.qty, offer=offer, user=user)
+
+        from checkout.services import (
+            reserve_inventory_for_line,
+            sync_supplier_reservation_status,
+        )
+        try:
+            allocated = reserve_inventory_for_line(
+                order_line=line, qty=payload.qty, strict=bool(offer))
+        except ValueError as exc:
+            raise HttpError(409, str(exc) or "Not enough stock")
+        sync_supplier_reservation_status(order=order)
 
     _track_order_event(
         order=order,
@@ -458,6 +528,7 @@ def ops_add_order_line(request, order_id: int, payload: OpsOrderLineIn):
             "order_line_id": line.id,
             "variant_id": variant.id,
             "qty": payload.qty,
+            "allocated_qty": int(allocated),
             "total_gross": str(line.total_gross),
         },
     )
@@ -489,17 +560,34 @@ def ops_update_order_line(request, order_id: int, line_id: int,
 
     old_qty = line.qty
     old_name = line.name
-    if payload.qty == 0:
-        line.delete()
-        removed = True
-    else:
-        line.qty = payload.qty
-        line.total_net = line.unit_net * payload.qty
-        line.total_vat = line.unit_vat * payload.qty
-        line.total_gross = line.unit_gross * payload.qty
-        line.save(update_fields=[
-            "qty", "total_net", "total_vat", "total_gross"])
-        removed = False
+    with transaction.atomic():
+        from checkout.services import (
+            release_inventory_for_line,
+            reserve_inventory_for_line,
+            sync_supplier_reservation_status,
+        )
+        if payload.qty == 0:
+            released = release_inventory_for_line(order_line=line)
+            line.delete()
+            removed = True
+            allocated = 0
+        else:
+            delta = int(payload.qty) - int(old_qty)
+            released = 0
+            allocated = 0
+            if delta > 0:
+                allocated = reserve_inventory_for_line(
+                    order_line=line, qty=delta, strict=False)
+            elif delta < 0:
+                released = release_inventory_for_line(order_line=line, qty=-delta)
+            line.qty = payload.qty
+            line.total_net = line.unit_net * payload.qty
+            line.total_vat = line.unit_vat * payload.qty
+            line.total_gross = line.unit_gross * payload.qty
+            line.save(update_fields=[
+                "qty", "total_net", "total_vat", "total_gross"])
+            removed = False
+        sync_supplier_reservation_status(order=order)
 
     order.recalculate_totals()
     order.save(update_fields=[
@@ -518,6 +606,8 @@ def ops_update_order_line(request, order_id: int, line_id: int,
             "product_name": old_name,
             "old_qty": old_qty,
             "new_qty": payload.qty,
+            "allocated_qty": allocated,
+            "released_qty": released,
         },
     )
 
@@ -697,6 +787,7 @@ def ops_create_order(request, payload: OpsOrderCreateIn):
             order.save(update_fields=[
                 "pickup_locker", "pickup_point_id", "pickup_point_name"])
 
+        created_lines = []
         for li in payload.lines:
             v = Variant.objects.select_related("product", "product__tax_class").filter(
                 id=li.variant_id).first()
@@ -712,7 +803,7 @@ def ops_create_order(request, payload: OpsOrderCreateIn):
                 country_code=country, tax_class=v.product.tax_class)
             unit = money_from_net(currency="EUR", unit_net=unit_net, vat_rate=vat_rate, qty=1)
             m = money_from_net(currency="EUR", unit_net=unit_net, vat_rate=vat_rate, qty=qty)
-            OrderLine.objects.create(
+            created_lines.append(OrderLine.objects.create(
                 order=order,
                 variant=v,
                 sku=v.sku,
@@ -725,10 +816,26 @@ def ops_create_order(request, payload: OpsOrderCreateIn):
                 total_net=m.net,
                 total_vat=m.vat,
                 total_gross=m.gross,
-            )
+            ))
 
         order.recalculate_totals()
         order.save()
+
+        from checkout.services import (
+            reserve_inventory_for_line,
+            sync_supplier_reservation_status,
+        )
+        unallocated = []
+        for line in created_lines:
+            got = reserve_inventory_for_line(
+                order_line=line, qty=int(line.qty), strict=False)
+            if int(got) < int(line.qty):
+                unallocated.append({
+                    "order_line_id": int(line.id),
+                    "sku": line.sku,
+                    "missing": int(line.qty) - int(got),
+                })
+        sync_supplier_reservation_status(order=order)
 
         if payload.note:
             OrderEvent.objects.create(
@@ -743,7 +850,10 @@ def ops_create_order(request, payload: OpsOrderCreateIn):
             kind=OrderEvent.Kind.NOTE,
             name="ops_order_created",
             actor_user=user,
-            payload={"user": getattr(user, "email", "") or ""},
+            payload={
+                "user": getattr(user, "email", "") or "",
+                "unallocated_lines": unallocated,
+            },
         )
 
     return _serialize_ops_order_detail(_order_detail_qs(order.id))
@@ -779,6 +889,7 @@ def ops_merge_orders(request, payload: OpsOrderMergeIn):
             src.discounts.update(order=primary)
             src.shipments.update(order=primary)
             src.surcharges.update(order=primary)
+            InventoryAllocation.objects.filter(order=src).update(order=primary)
             PaymentIntent.objects.filter(order=src).update(order=primary)
             src.events.update(order=primary)
 
@@ -802,6 +913,8 @@ def ops_merge_orders(request, payload: OpsOrderMergeIn):
             actor_user=user,
             payload={"merged_order_ids": merged},
         )
+        from checkout.services import sync_supplier_reservation_status
+        sync_supplier_reservation_status(order=primary)
 
     from checkout.surcharges import reconcile_order_balance
     reconcile_order_balance(

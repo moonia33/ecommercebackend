@@ -30,7 +30,16 @@ from catalog.models import (
     Variant,
     VariantOptionValue,
 )
-from checkout.models import OpsJob, Order, OrderEvent, OrderLine, PaymentIntent, Shipment, Surcharge
+from checkout.models import (
+    InventoryAllocation,
+    OpsJob,
+    Order,
+    OrderEvent,
+    OrderLine,
+    PaymentIntent,
+    Shipment,
+    Surcharge,
+)
 from checkout.services import capture_inventory_for_order, release_inventory_for_order
 from promotions.services import redeem_coupon_for_paid_order, release_coupon_for_order
 
@@ -128,6 +137,9 @@ class OpsOrderMatchLineOut(Schema):
     warehouse_code: str = ""
     warehouse_name: str = ""
     warehouse_country: str = ""
+    warehouse_kind: str = ""
+    allocated_qty: int = 0
+    unallocated_qty: int = 0
     brand_name: str = ""
     unit_net: str = "0"
     unit_vat: str = "0"
@@ -250,6 +262,12 @@ class OpsOrderShippingUpdateOut(Schema):
     pickup_point_name: str = ""
     new_shipment_id: int | None = None
     balance_due: str = ""
+
+
+class OpsOrderSupplierUpdateIn(Schema):
+    supplier_reservation_status: str | None = None
+    supplier_reference: str | None = None
+    supplier_notes: str | None = None
 
 
 class OpsOrderAddressUpdateIn(Schema):
@@ -896,7 +914,14 @@ def _build_line_filter(filters: OpsOrderSearchIn, *, prefix: str = "") -> Q:
 
     supplier_code = (filters.supplier_code or "").strip()
     if supplier_code:
-        line_q &= Q(**{f"{p}offer__warehouse__code__iexact": supplier_code})
+        line_q &= (
+            Q(**{f"{p}offer__warehouse__code__iexact": supplier_code})
+            | Q(**{f"{p}inventory_allocations__inventory_item__warehouse__code__iexact": supplier_code},
+                **{f"{p}inventory_allocations__status__in": [
+                    InventoryAllocation.Status.RESERVED,
+                    InventoryAllocation.Status.CAPTURED,
+                ]})
+        )
 
     manufacturer_q = (filters.manufacturer_q or "").strip()
     if manufacturer_q:
@@ -978,10 +1003,25 @@ def _serialize_ops_order(order: Order) -> OpsOrderListItemOut:
         product = getattr(variant, "product", None) if variant is not None else None
         brand = getattr(product, "brand", None) if product is not None else None
         offer = getattr(line, "offer", None)
+        allocs = [
+            a for a in getattr(line, "ops_active_allocs", [])
+            if getattr(a, "status", "") != InventoryAllocation.Status.RELEASED
+        ]
+        allocated_qty = sum(int(a.qty) for a in allocs)
+        # Prefer the line's offer; fall back to the first active allocation.
         warehouse = getattr(offer, "warehouse", None) if offer is not None else None
+        if warehouse is None and allocs:
+            warehouse = getattr(
+                getattr(allocs[0], "inventory_item", None), "warehouse", None)
         thumbnail_url = _product_thumbnail_url(product)
 
         warehouse_code = (getattr(warehouse, "code", "") or "").strip()
+        for a in allocs:
+            wh = getattr(getattr(a, "inventory_item", None), "warehouse", None)
+            wh_code = (getattr(wh, "code", "") or "").strip() if wh else ""
+            if wh_code and wh_code not in seen_suppliers:
+                seen_suppliers.add(wh_code)
+                suppliers.append(wh_code)
         if warehouse_code and warehouse_code not in seen_suppliers:
             seen_suppliers.add(warehouse_code)
             suppliers.append(warehouse_code)
@@ -1002,6 +1042,9 @@ def _serialize_ops_order(order: Order) -> OpsOrderListItemOut:
                 warehouse_code=warehouse_code,
                 warehouse_name=((getattr(warehouse, "name", "") or "") if warehouse is not None else ""),
                 warehouse_country=((getattr(warehouse, "country_code", "") or "") if warehouse is not None else ""),
+                warehouse_kind=((getattr(warehouse, "kind", "") or "") if warehouse is not None else ""),
+                allocated_qty=allocated_qty,
+                unallocated_qty=max(0, int(line.qty or 0) - allocated_qty),
                 brand_name=((getattr(brand, "name", "") or "") if brand is not None else ""),
                 unit_net=_to_money_str(getattr(line, "unit_net", None)),
                 unit_vat=_to_money_str(getattr(line, "unit_vat", None)),
@@ -1347,7 +1390,16 @@ def _order_detail_qs(order_id: int) -> Order:
                 "lines",
                 queryset=OrderLine.objects.select_related(
                     "variant__product__brand", "offer__warehouse")
-                .prefetch_related("variant__product__images")
+                .prefetch_related(
+                    "variant__product__images",
+                    Prefetch(
+                        "inventory_allocations",
+                        queryset=InventoryAllocation.objects
+                        .exclude(status=InventoryAllocation.Status.RELEASED)
+                        .select_related("inventory_item__warehouse"),
+                        to_attr="ops_active_allocs",
+                    ),
+                )
                 .order_by("id"),
                 to_attr="ops_matched_lines",
             ),

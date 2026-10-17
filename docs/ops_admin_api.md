@@ -669,9 +669,33 @@ history — PrestaShop DPD module style.
   `{user_email|user_id, shipping_method, pickup_locker_id?, shipping_*,
    shipping_net_manual?, status?, note?, lines: [{variant_id, qty}]}`.
   Prices resolve from the shop price list; totals via `recalculate_totals`.
+  Stock is **reserved per line** (`InventoryAllocation`, `qty_reserved`):
+  available qty is taken from warehouses in sort order and `line.offer` is
+  backfilled to the first allocated item. Lines that cannot be fully
+  allocated stay partially unallocated (order is still created — the goods
+  are expected from a supplier).
 - `POST /ops/orders/actions/merge` — `{primary_order_id, merged_order_ids}`.
-  Lines/fees/discounts/shipments/surcharges/payments/events move to the
-  primary order; merged orders are cancelled. Totals are recalculated.
+  Lines/fees/discounts/shipments/surcharges/payments/events/inventory
+  allocations move to the primary order; merged orders are cancelled.
+
+### Inventory reservations & supplier reservation
+
+- Line add / qty increase reserves additional stock; qty decrease /
+  removal releases it (`qty_reserved`, or `qty_on_hand` when the
+  allocation was already captured). `reserve_inventory_for_line` /
+  `release_inventory_for_line` in `checkout/services.py`.
+- `supplier_reservation_status` is auto-derived after every line/stock
+  change: any remote-warehouse allocation **or** unallocated line qty
+  → `pending`; fully covered by local warehouses → `not_needed`.
+  Manual states (`reserved`, `failed`, `cancelled`) are never overwritten.
+- `PATCH /ops/orders/{id}/supplier` — manual supplier workflow:
+  `{supplier_reservation_status?, supplier_reference?, supplier_notes?}`;
+  `reserved` stamps `supplier_reserved_at`.
+- `supplier_code` on `GET /ops/orders` matches `line.offer.warehouse.code`
+  **and** active allocations' warehouses — so "orders with unshipped
+  items from supplier X" is `supplier_code=<wh_code>&delivery_status!=delivered`.
+- `matched_lines[]` carries `warehouse_code/name/country/kind`,
+  `allocated_qty`, `unallocated_qty` per line.
 
 `GET /ops/orders/{id}` additionally returns `shipments[]` and `surcharges[]`.
 

@@ -1135,3 +1135,241 @@ class OpsOrderEditingBalanceTests(TestCase):
         self.assertEqual(fresh.tracking_number, "")
         order.refresh_from_db()
         self.assertEqual(order.tracking_number, "")
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class OpsInventoryReservationTests(TestCase):
+    """Admin order management must keep warehouse reservations in sync:
+    create/add/qty/remove/merge -> InventoryAllocation + offer + supplier flag."""
+
+    def setUp(self):
+        from catalog.models import TaxRate
+        from shipping.models import ShippingMethod, ShippingRate
+
+        self.client = Client()
+        self.shop = Shop.objects.create(
+            code="opsr", name="OpsR", primary_domain="ops.local",
+            default_language_code="lt", default_country_code="LT",
+            currency="EUR", is_active=True)
+        ShopLanguage.objects.create(
+            shop=self.shop, language_code="lt", is_active=True,
+            is_default=True, sort_order=0)
+        self.staff = User.objects.create_user(
+            email="staffr@example.com", password="pass1234", is_staff=True)
+        self.customer = User.objects.create_user(
+            email="custr@example.com", password="pass1234")
+
+        tax, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"})
+        import datetime
+        TaxRate.objects.get_or_create(
+            tax_class=tax, country_code="LT",
+            defaults={"rate": "0.21",
+                      "valid_from": datetime.date(2020, 1, 1),
+                      "is_active": True})
+
+        self.local_wh = Warehouse.objects.create(
+            code="locwh", name="Local WH", country_code="LT",
+            kind=Warehouse.Kind.LOCAL, sort_order=0, is_active=True)
+        self.remote_wh = Warehouse.objects.create(
+            code="suppx", name="Supplier X", country_code="PL",
+            kind=Warehouse.Kind.REMOTE, sort_order=10, is_active=True)
+
+        cat = Category.objects.create(
+            name="C", slug=f"c3-{self._testMethodName.lower()}", is_active=True)
+        product = Product.objects.create(
+            sku="P-3", name="Reel", slug=f"p3-{self._testMethodName.lower()}",
+            tax_class=tax, category=cat, is_active=True)
+        self.variant = Variant.objects.create(
+            product=product, sku="V-100", name="v1",
+            price_eur="10.00", is_active=True)
+        self.variant_remote = Variant.objects.create(
+            product=product, sku="V-200", name="v2",
+            price_eur="20.00", is_active=True)
+        self.variant_nostock = Variant.objects.create(
+            product=product, sku="V-300", name="v3",
+            price_eur="5.00", is_active=True)
+        self.local_offer = InventoryItem.objects.create(
+            variant=self.variant, warehouse=self.local_wh, qty_on_hand=10)
+        self.remote_offer = InventoryItem.objects.create(
+            variant=self.variant_remote, warehouse=self.remote_wh,
+            qty_on_hand=50)
+
+        sm, _ = ShippingMethod.objects.get_or_create(
+            code="dpd_locker", defaults={
+                "name": "DPD locker", "carrier_code": "dpd",
+                "is_active": True})
+        ShippingRate.objects.update_or_create(
+            method=sm, country_code="LT",
+            defaults={"net_eur": "2.00", "is_active": True})
+
+    def _auth(self):
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=self.staff.id)
+
+    def _create_order(self, variant_id, qty=1):
+        return self.client.post(
+            "/api/v1/ops/orders",
+            data={
+                "user_id": self.customer.id,
+                "shipping_method": "dpd_locker",
+                "lines": [{"variant_id": variant_id, "qty": qty}],
+            },
+            content_type="application/json", HTTP_HOST="ops.local")
+
+    def test_create_order_reserves_stock_and_sets_offer(self):
+        from checkout.models import InventoryAllocation
+        self._auth()
+        res = self._create_order(self.variant.id, qty=3)
+        self.assertEqual(res.status_code, 200, res.content[:300])
+
+        self.local_offer.refresh_from_db()
+        self.assertEqual(int(self.local_offer.qty_reserved), 3)
+
+        line = OrderLine.objects.get(sku="V-100")
+        self.assertEqual(line.offer_id, self.local_offer.id)
+        alloc = InventoryAllocation.objects.get(order_line=line)
+        self.assertEqual(alloc.status, "reserved")
+        self.assertEqual(int(alloc.qty), 3)
+        self.assertEqual(alloc.inventory_item_id, self.local_offer.id)
+
+        out = res.json()
+        m = out["matched_lines"][0]
+        self.assertEqual(m["warehouse_code"], "locwh")
+        self.assertEqual(m["warehouse_kind"], "local")
+        self.assertEqual(m["allocated_qty"], 3)
+        self.assertEqual(m["unallocated_qty"], 0)
+
+        order = Order.objects.get(id=out["id"])
+        self.assertEqual(order.supplier_reservation_status, "not_needed")
+
+    def test_remote_item_marks_supplier_pending(self):
+        self._auth()
+        res = self._create_order(self.variant_remote.id, qty=2)
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        self.remote_offer.refresh_from_db()
+        self.assertEqual(int(self.remote_offer.qty_reserved), 2)
+
+        order = Order.objects.get(id=res.json()["id"])
+        self.assertEqual(order.supplier_reservation_status, "pending")
+        m = res.json()["matched_lines"][0]
+        self.assertEqual(m["warehouse_code"], "suppx")
+        self.assertEqual(m["warehouse_kind"], "remote")
+
+    def test_unstocked_item_marks_supplier_pending_unallocated(self):
+        self._auth()
+        res = self._create_order(self.variant_nostock.id, qty=1)
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        order = Order.objects.get(id=res.json()["id"])
+        self.assertEqual(order.supplier_reservation_status, "pending")
+        m = res.json()["matched_lines"][0]
+        self.assertEqual(m["unallocated_qty"], 1)
+        self.assertEqual(m["warehouse_code"], "")
+
+    def test_line_add_qty_change_and_remove_adjust_reservation(self):
+        self._auth()
+        res = self._create_order(self.variant.id, qty=2)
+        oid = res.json()["id"]
+        line_id = res.json()["matched_lines"][0]["order_line_id"]
+
+        self.local_offer.refresh_from_db()
+        self.assertEqual(int(self.local_offer.qty_reserved), 2)
+
+        # increase to 5
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{oid}/lines/{line_id}",
+            data={"qty": 5}, content_type="application/json",
+            HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.local_offer.refresh_from_db()
+        self.assertEqual(int(self.local_offer.qty_reserved), 5)
+
+        # decrease to 1
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{oid}/lines/{line_id}",
+            data={"qty": 1}, content_type="application/json",
+            HTTP_HOST="ops.local")
+        self.local_offer.refresh_from_db()
+        self.assertEqual(int(self.local_offer.qty_reserved), 1)
+
+        # remove entirely
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{oid}/lines/{line_id}",
+            data={"qty": 0}, content_type="application/json",
+            HTTP_HOST="ops.local")
+        self.local_offer.refresh_from_db()
+        self.assertEqual(int(self.local_offer.qty_reserved), 0)
+        from checkout.models import InventoryAllocation
+        self.assertFalse(
+            InventoryAllocation.objects.filter(
+                order_line_id=line_id).exists())
+
+    def test_add_line_reserves_new_line(self):
+        self._auth()
+        res = self._create_order(self.variant.id, qty=1)
+        oid = res.json()["id"]
+
+        res = self.client.post(
+            f"/api/v1/ops/orders/{oid}/lines",
+            data={"variant_id": self.variant_remote.id, "qty": 2},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.remote_offer.refresh_from_db()
+        self.assertEqual(int(self.remote_offer.qty_reserved), 2)
+        order = Order.objects.get(id=oid)
+        # local + remote mix -> supplier pending
+        self.assertEqual(order.supplier_reservation_status, "pending")
+
+
+    def test_supplier_patch_sets_status_and_reference(self):
+        self._auth()
+        res = self._create_order(self.variant_remote.id, qty=1)
+        oid = res.json()["id"]
+
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{oid}/supplier",
+            data={"supplier_reservation_status": "reserved",
+                  "supplier_reference": "PO-777",
+                  "supplier_notes": "confirmed by supplier"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        order = Order.objects.get(id=oid)
+        self.assertEqual(order.supplier_reservation_status, "reserved")
+        self.assertIsNotNone(order.supplier_reserved_at)
+        self.assertEqual(order.supplier_reference, "PO-777")
+        from checkout.services import sync_supplier_reservation_status
+        sync_supplier_reservation_status(order=order)
+        order.refresh_from_db()
+        self.assertEqual(order.supplier_reservation_status, "reserved")
+
+    def test_merge_moves_allocations_to_primary(self):
+        from checkout.models import InventoryAllocation
+        self._auth()
+        res1 = self._create_order(self.variant.id, qty=1)
+        res2 = self._create_order(self.variant_remote.id, qty=1)
+        oid1, oid2 = res1.json()["id"], res2.json()["id"]
+
+        res = self.client.post(
+            "/api/v1/ops/orders/actions/merge",
+            data={"primary_order_id": oid1, "merged_order_ids": [oid2]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(
+            set(InventoryAllocation.objects.filter(
+                order_id=oid1).values_list("qty", flat=True)),
+            {1, 1})
+        self.assertFalse(
+            InventoryAllocation.objects.filter(order_id=oid2).exists())
+        order = Order.objects.get(id=oid1)
+        self.assertEqual(order.supplier_reservation_status, "pending")
+
+    def test_supplier_code_filter_matches_allocations(self):
+        self._auth()
+        res = self._create_order(self.variant_remote.id, qty=1)
+        oid = res.json()["id"]
+        res = self.client.get(
+            "/api/v1/ops/orders",
+            {"supplier_code": "suppx"}, HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        ids = [r["id"] for r in res.json()["results"]]
+        self.assertIn(oid, ids)

@@ -253,6 +253,16 @@ def reserve_inventory_for_order(*, order_id: int) -> None:
         InventoryItem.objects.bulk_update(updates, ["qty_reserved", "updated_at"])
     if allocations_to_create:
         InventoryAllocation.objects.bulk_create(allocations_to_create)
+        # Backfill line.offer from the first allocated item so admin/UI can
+        # show the source warehouse for lines placed without an explicit offer.
+        first_alloc_by_line: dict[int, int] = {}
+        for a in allocations_to_create:
+            first_alloc_by_line.setdefault(int(a.order_line_id), int(a.inventory_item_id))
+        for ln in lines:
+            inv_id = first_alloc_by_line.get(int(ln.id))
+            if not ln.offer_id and inv_id:
+                ln.offer_id = inv_id
+                ln.save(update_fields=["offer"])
 
 
 def capture_inventory_for_order(*, order_id: int) -> None:
@@ -343,6 +353,170 @@ def release_inventory_for_order(*, order_id: int) -> None:
         InventoryItem.objects.bulk_update(inv_updates, ["qty_reserved", "updated_at"])
     if alloc_updates:
         InventoryAllocation.objects.bulk_update(alloc_updates, ["status", "updated_at"])
+
+
+def reserve_inventory_for_line(*, order_line, qty: int | None = None,
+                               strict: bool = True) -> int:
+    """Reserve inventory for a single OrderLine (admin line-add / qty increase).
+    Same warehouse ordering as reserve_inventory_for_order; when the line pins
+    an offer, only that item is used. Returns the allocated qty. With
+    strict=True a shortfall raises ValueError."""
+    from catalog.models import InventoryItem
+    from checkout.models import InventoryAllocation
+
+    line = order_line
+    need = int(qty if qty is not None else line.qty)
+    if need <= 0 or not line.variant_id:
+        return 0
+
+    items = list(
+        InventoryItem.objects.select_related("warehouse")
+        .select_for_update()
+        .filter(variant_id=int(line.variant_id))
+        .order_by("warehouse__sort_order", "warehouse__code", "id")
+    )
+    if line.offer_id:
+        items = [i for i in items if int(i.id) == int(line.offer_id)]
+    if not items:
+        if strict:
+            raise ValueError("No inventory for variant")
+        return 0
+
+    allocated = 0
+    first_inv = None
+    updates: list[InventoryItem] = []
+    now = timezone.now()
+    for inv in items:
+        if need <= 0:
+            break
+        available = max(0, int(inv.qty_on_hand) - int(inv.qty_reserved))
+        take = min(available, need)
+        if take <= 0:
+            continue
+        inv.qty_reserved = int(inv.qty_reserved) + int(take)
+        inv.updated_at = now
+        updates.append(inv)
+        InventoryAllocation.objects.create(
+            order_id=int(line.order_id),
+            order_line=line,
+            inventory_item=inv,
+            qty=int(take),
+            status=InventoryAllocation.Status.RESERVED,
+        )
+        if first_inv is None:
+            first_inv = inv
+        allocated += int(take)
+        need -= int(take)
+
+    if updates:
+        InventoryItem.objects.bulk_update(updates, ["qty_reserved", "updated_at"])
+    if first_inv is not None and not line.offer_id:
+        line.offer_id = int(first_inv.id)
+        line.save(update_fields=["offer"])
+
+    if strict and need > 0:
+        raise ValueError("Not enough stock")
+    return allocated
+
+
+def release_inventory_for_line(*, order_line, qty: int | None = None) -> int:
+    """Release allocations for one OrderLine (line removed / qty reduced).
+    RESERVED rows give qty_reserved back; CAPTURED rows return qty_on_hand
+    (goods already deducted stay in the warehouse). Returns released qty."""
+    from catalog.models import InventoryItem
+    from checkout.models import InventoryAllocation
+
+    line = order_line
+    remaining = qty if qty is not None else None
+
+    rows = list(
+        InventoryAllocation.objects.select_for_update()
+        .filter(
+            order_line_id=int(line.id),
+            status__in=[
+                InventoryAllocation.Status.RESERVED,
+                InventoryAllocation.Status.CAPTURED,
+            ],
+        )
+        .order_by("id")
+    )
+    # One Python instance per inventory row — several allocations may point to
+    # the same item and a per-allocation copy would overwrite earlier deltas.
+    inv_items = {
+        i.id: i
+        for i in InventoryItem.objects.select_for_update()
+        .filter(id__in={r.inventory_item_id for r in rows})
+        .order_by("id")
+    }
+    released = 0
+    now = timezone.now()
+    for r in rows:
+        if remaining is not None and remaining <= 0:
+            break
+        take = int(r.qty) if remaining is None else min(int(r.qty), int(remaining))
+        if take <= 0:
+            continue
+        inv = inv_items.get(r.inventory_item_id)
+        if inv is None:
+            continue
+        if r.status == InventoryAllocation.Status.RESERVED:
+            inv.qty_reserved = max(0, int(inv.qty_reserved) - take)
+        else:
+            inv.qty_on_hand = int(inv.qty_on_hand) + take
+        inv.updated_at = now
+        inv.save(update_fields=["qty_reserved", "qty_on_hand", "updated_at"])
+        r.qty = int(r.qty) - take
+        r.status = (
+            InventoryAllocation.Status.RELEASED if int(r.qty) <= 0 else r.status
+        )
+        r.updated_at = now
+        r.save(update_fields=["qty", "status", "updated_at"])
+        released += take
+        if remaining is not None:
+            remaining -= take
+    return released
+
+
+def sync_supplier_reservation_status(*, order) -> None:
+    """Auto-derive order.supplier_reservation_status from line allocations:
+    a remote-warehouse allocation or any unallocated line qty means the goods
+    still have to come from a supplier -> pending; fully covered by local
+    warehouses -> not_needed. Manual states (reserved/failed/cancelled) are
+    never overwritten."""
+    from catalog.models import Warehouse
+    from checkout.models import Order, OrderLine
+
+    Status = Order.SupplierReservationStatus
+    if order.supplier_reservation_status in {
+        Status.RESERVED, Status.FAILED, Status.CANCELLED,
+    }:
+        return
+
+    needs_supplier = False
+    lines = list(
+        OrderLine.objects.filter(order_id=int(order.id))
+        .prefetch_related("inventory_allocations__inventory_item__warehouse")
+    )
+    for line in lines:
+        active = [
+            a for a in line.inventory_allocations.all()
+            if a.status != "released"
+        ]
+        if sum(int(a.qty) for a in active) < int(line.qty):
+            needs_supplier = True
+            continue
+        for a in active:
+            wh = getattr(getattr(a, "inventory_item", None), "warehouse", None)
+            if wh is not None and wh.kind == Warehouse.Kind.REMOTE:
+                needs_supplier = True
+                break
+        if needs_supplier:
+            continue
+
+    new_status = Status.PENDING if needs_supplier else Status.NOT_NEEDED
+    if order.supplier_reservation_status != new_status:
+        order.supplier_reservation_status = new_status
+        order.save(update_fields=["supplier_reservation_status", "updated_at"])
 
 
 def expire_pending_payment_reservations(*, now=None) -> int:
