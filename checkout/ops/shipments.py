@@ -202,7 +202,7 @@ def ops_generate_label_for_shipment(request, shipment_id: int):
     _ensure_shop_context_if_strict(request)
     user = _require_ops_user(request)
     shipment = _get_shipment_for_ops(shipment_id, shop_id=_request_shop_id(request))
-    _generate_shipment_label(shipment, user=user)
+    shipment = _generate_shipment_label(shipment, user=user)
     return OpsActionResultOut(
         ok=True, message="Label generated",
         updated_ids=[shipment.id], failed_ids=[])

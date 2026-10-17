@@ -591,16 +591,54 @@ outbound shipment and stay backward-compatible.
 ### Carrier / locker change with price delta
 
 - `PATCH /ops/orders/{id}/shipping` — body `{shipping_method?, pickup_locker_id?}`.
-  Recalculates shipping totals, returns `price_delta_gross` and syncs the
-  primary shipment. Positive delta -> create a surcharge.
-- `POST /ops/orders/{id}/surcharges` — body
-  `{amount_gross, reason?, method: montonio|bank_transfer, send_email?, language_code?}`.
-  Montonio method creates a Stargate payment link with a
+  Recalculates shipping totals, returns `price_delta_gross`,
+  `balance_due` and `new_shipment_id`. A method/locker change always
+  creates a NEW outbound shipment (the previous pending/packed one is
+  cancelled); on paid orders the balance delta automatically becomes a
+  pending surcharge/refund row.
+
+### Order line editing (automatic balance)
+
+- `POST /ops/orders/{id}/lines` — `{variant_id, qty, offer_id?}` adds a
+  line priced from the shop price list; totals recalculated.
+- `PATCH /ops/orders/{id}/lines/{line_id}` — `{qty}` sets the quantity;
+  `qty=0` removes the line (partial removal = qty reduction; exchanges =
+  remove+add). Both endpoints return the full order detail.
+
+Whenever `total_gross` changes on an order with a confirmed payment,
+`reconcile_order_balance()` maintains a single pending auto `Surcharge`:
+
+- positive delta -> `direction=charge` (customer owes)
+- negative delta -> `direction=refund` (we owe; resolved manually)
+- zero -> pending auto rows are cancelled
+
+Unpaid orders never get surcharge rows — editing just changes the total.
+The amount is never entered manually for auto rows.
+
+### Surcharge lifecycle
+
+- `POST /ops/orders/{id}/surcharges` — manual charge
+  `{amount_gross, reason?, method: montonio|bank_transfer, send_email?}`
+  (kept for edge cases; auto rows are preferred).
+- `GET /ops/orders/{id}/surcharges` — list (direction/source included).
+- `POST /ops/surcharges/{id}/collect` — `{method, send_email?}` picks the
+  collection channel: `montonio` generates a Stargate payment link with a
   `{order}-sur-{id}` merchant reference (the webhook marks it paid
-  automatically); bank_transfer uses the configured `PaymentMethod`
+  automatically); `bank_transfer` emails the configured `PaymentMethod`
   instructions (admin-editable, no redeploy). Emails via the seeded
   `order_surcharge` template (lt/en/pl).
-- `GET /ops/orders/{id}/surcharges` — list.
+- `POST /ops/surcharges/{id}/mark-paid` / `cancel` / `resolve`
+  (resolve = refund direction, money returned manually).
+
+`GET /ops/orders/{id}` additionally returns `shipments[]`, `surcharges[]`,
+and `totals.paid_gross`/`totals.balance_due`.
+
+### Label regeneration
+
+`POST /ops/shipments/id/{id}/label` on a shipment that already has
+`label_generated_at` forks it: a fresh outbound shipment is created for
+the new label (new tracking), the old one is cancelled and kept as
+history — PrestaShop DPD module style.
 
 ### Order creation & merge
 

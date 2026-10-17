@@ -799,10 +799,9 @@ class Shipment(models.Model):
         order = self.order
         if self.kind != Shipment.Kind.OUTBOUND:
             return
-        order.carrier_code = self.carrier_code or order.carrier_code
-        order.carrier_shipment_id = self.carrier_shipment_id or order.carrier_shipment_id
-        if self.tracking_number:
-            order.tracking_number = self.tracking_number
+        order.carrier_code = self.carrier_code
+        order.carrier_shipment_id = self.carrier_shipment_id
+        order.tracking_number = self.tracking_number
         order.delivery_status = aggregate_delivery_status(order)
         order.save(update_fields=[
             "carrier_code", "carrier_shipment_id",
@@ -844,7 +843,18 @@ def aggregate_delivery_status(order: Order) -> str:
 
 
 class Surcharge(models.Model):
-    """Post-order additional charge (carrier change, price correction)."""
+    """Post-order balance adjustment: charge (customer owes) or refund
+    (customer is owed). Auto rows are maintained by
+    reconcile_order_balance(); method stays empty until the admin
+    picks a collection channel."""
+
+    class Direction(models.TextChoices):
+        CHARGE = "charge", "Charge"
+        REFUND = "refund", "Refund"
+
+    class Source(models.TextChoices):
+        AUTO = "auto", "Auto"
+        MANUAL = "manual", "Manual"
 
     class Method(models.TextChoices):
         MONTONIO = "montonio", "Montonio link"
@@ -853,16 +863,22 @@ class Surcharge(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         PAID = "paid", "Paid"
+        RESOLVED = "resolved", "Resolved"
         FAILED = "failed", "Failed"
         CANCELLED = "cancelled", "Cancelled"
 
     order = models.ForeignKey(
         Order, on_delete=models.CASCADE, related_name="surcharges")
+    direction = models.CharField(
+        max_length=10, choices=Direction.choices, default=Direction.CHARGE)
+    source = models.CharField(
+        max_length=10, choices=Source.choices, default=Source.MANUAL)
     reason = models.CharField(max_length=255, blank=True, default="")
     amount_gross = models.DecimalField(max_digits=12, decimal_places=2)
     currency = models.CharField(max_length=3, default="EUR")
 
-    method = models.CharField(max_length=20, choices=Method.choices)
+    method = models.CharField(
+        max_length=20, choices=Method.choices, blank=True, default="")
     status = models.CharField(
         max_length=16, choices=Status.choices, default=Status.PENDING)
 

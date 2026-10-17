@@ -717,3 +717,242 @@ class OpsShipmentsAndOrderManagementTests(TestCase):
         self.assertEqual(self.order.lines.count(), 2)
         # 12.10 + 24.20 = 36.30 items gross
         self.assertEqual(str(self.order.items_gross), "36.30")
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class OpsOrderEditingBalanceTests(TestCase):
+    """Order line editing + automatic charge/refund balance on paid orders."""
+
+    def _mk_paid_order(self):
+        from checkout.models import PaymentIntent
+        order = Order.objects.create(
+            user=self.customer, shop=self.shop,
+            status=Order.Status.PAID,
+            shipping_method="dpd_locker", country_code="LT")
+        OrderLine.objects.create(
+            order=order, variant=self.variant, offer=self.local_offer,
+            sku="V-1", name="Drill", unit_net="10.00", vat_rate="0.21",
+            qty=1, total_net="10.00", total_vat="2.10", total_gross="12.10")
+        order.recalculate_totals()
+        order.save()
+        PaymentIntent.objects.create(
+            order=order, provider="montonio",
+            status=PaymentIntent.Status.SUCCEEDED,
+            amount_gross=order.total_gross)
+        return order
+
+    def setUp(self):
+        from catalog.models import TaxRate
+        from shipping.models import ShippingMethod, ShippingRate
+
+        self.client = Client()
+        self.shop = Shop.objects.create(
+            code="opsx", name="Ops2", primary_domain="ops.local",
+            default_language_code="lt", default_country_code="LT",
+            currency="EUR", is_active=True)
+        ShopLanguage.objects.create(
+            shop=self.shop, language_code="lt", is_active=True,
+            is_default=True, sort_order=0)
+        self.staff = User.objects.create_user(
+            email="staff2@example.com", password="pass1234", is_staff=True)
+        self.customer = User.objects.create_user(
+            email="cust2@example.com", password="pass1234")
+
+        tax, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"})
+        import datetime
+        TaxRate.objects.get_or_create(
+            tax_class=tax, country_code="LT",
+            defaults={"rate": "0.21",
+                      "valid_from": datetime.date(2020, 1, 1),
+                      "is_active": True})
+
+        self.local_wh = Warehouse.objects.create(
+            code="main2", name="Main WH2", country_code="LT", is_active=True)
+        cat = Category.objects.create(
+            name="C", slug=f"c2-{self._testMethodName.lower()}", is_active=True)
+        product = Product.objects.create(
+            sku="P-2", name="Drill", slug=f"p2-{self._testMethodName.lower()}",
+            tax_class=tax, category=cat, is_active=True)
+        self.variant = Variant.objects.create(
+            product=product, sku="V-10", name="v1",
+            price_eur="10.00", is_active=True)
+        self.variant2 = Variant.objects.create(
+            product=product, sku="V-20", name="v2",
+            price_eur="20.00", is_active=True)
+        self.local_offer = InventoryItem.objects.create(
+            variant=self.variant, warehouse=self.local_wh, qty_on_hand=10)
+        self.local_offer2 = InventoryItem.objects.create(
+            variant=self.variant2, warehouse=self.local_wh, qty_on_hand=10)
+
+        for code, name, net in [("dpd_locker", "DPD locker", "2.00"),
+                                ("dpd_courier", "DPD courier", "5.00")]:
+            sm, _ = ShippingMethod.objects.get_or_create(
+                code=code, defaults={
+                    "name": name, "carrier_code": "dpd", "is_active": True})
+            sm.is_active = True
+            sm.save()
+            ShippingRate.objects.update_or_create(
+                method=sm, country_code="LT",
+                defaults={"net_eur": net, "is_active": True})
+
+    def _auth(self):
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=self.staff.id)
+
+    def test_line_add_paid_order_creates_pending_charge(self):
+        from checkout.models import PaymentIntent, Surcharge
+        order = self._mk_paid_order()
+        self._auth()
+
+        res = self.client.post(
+            f"/api/v1/ops/orders/{order.id}/lines",
+            data={"variant_id": self.variant2.id, "qty": 1},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.json()["matched_lines"]), 2)
+
+        order.refresh_from_db()
+        # total = 12.10 + 24.20 + shipping 2.42 = 38.72
+        self.assertEqual(str(order.total_gross), "38.72")
+
+        s = order.surcharges.get()
+        self.assertEqual(s.direction, "charge")
+        self.assertEqual(s.source, "auto")
+        self.assertEqual(s.status, "pending")
+        self.assertEqual(str(s.amount_gross), "24.20")
+        self.assertEqual(s.method, "")
+        self.assertEqual(res.json()["totals"]["balance_due"], "24.20")
+        self.assertEqual(res.json()["totals"]["paid_gross"], str(
+            PaymentIntent.objects.get(order=order).amount_gross))
+
+    def test_line_remove_paid_order_creates_pending_refund(self):
+        order = self._mk_paid_order()
+        line = order.lines.get()
+        self._auth()
+
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{order.id}/lines/{line.id}",
+            data={"qty": 0},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.json()["matched_lines"]), 0)
+
+        order.refresh_from_db()
+        # items 0, shipping 2.42 -> total 2.42; paid was 14.52 -> refund 12.10
+        self.assertEqual(str(order.total_gross), "2.42")
+        s = order.surcharges.get()
+        self.assertEqual(s.direction, "refund")
+        self.assertEqual(str(s.amount_gross), "12.10")
+
+    def test_line_qty_reduce_updates_pending_balance(self):
+        order = self._mk_paid_order()
+        line = order.lines.get()
+        self._auth()
+
+        # increase qty 1 -> 3: +2 * 12.10 = +24.20 charge
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{order.id}/lines/{line.id}",
+            data={"qty": 3},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        s = order.surcharges.get()
+        self.assertEqual(str(s.amount_gross), "24.20")
+
+        # reduce back to 1: balance clears -> pending row cancelled
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{order.id}/lines/{line.id}",
+            data={"qty": 1},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        s.refresh_from_db()
+        self.assertEqual(s.status, "cancelled")
+
+    def test_line_add_unpaid_order_no_surcharge(self):
+        order = Order.objects.create(
+            user=self.customer, shop=self.shop,
+            status=Order.Status.PENDING_PAYMENT,
+            shipping_method="dpd_locker", country_code="LT")
+        OrderLine.objects.create(
+            order=order, variant=self.variant, offer=self.local_offer,
+            sku="V-1", name="Drill", unit_net="10.00", vat_rate="0.21",
+            qty=1, total_net="10.00", total_vat="2.10", total_gross="12.10")
+        order.recalculate_totals()
+        order.save()
+        self._auth()
+
+        res = self.client.post(
+            f"/api/v1/ops/orders/{order.id}/lines",
+            data={"variant_id": self.variant2.id, "qty": 1},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(order.surcharges.count(), 0)
+
+    def test_shipping_change_new_shipment_and_auto_charge(self):
+        from checkout.models import Shipment
+        order = self._mk_paid_order()
+        self._auth()
+
+        # first change: creates an outbound shipment
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{order.id}/shipping",
+            data={"shipping_method": "dpd_courier"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        payload = res.json()
+        self.assertTrue(payload["new_shipment_id"])
+        self.assertEqual(payload["balance_due"], "3.63")
+        s1 = Shipment.objects.get(id=payload["new_shipment_id"])
+        self.assertEqual(s1.shipping_method, "dpd_courier")
+        self.assertEqual(s1.status, "pending")
+
+        s = order.surcharges.get()
+        self.assertEqual(s.direction, "charge")
+        self.assertEqual(str(s.amount_gross), "3.63")
+
+        # second change back to locker: another new shipment, old cancelled,
+        # balance clears -> pending charge cancelled
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{order.id}/shipping",
+            data={"shipping_method": "dpd_locker"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        s1.refresh_from_db()
+        self.assertEqual(s1.status, "cancelled")
+        self.assertEqual(order.shipments.filter(
+            status="pending", kind="outbound").count(), 1)
+        s.refresh_from_db()
+        self.assertEqual(s.status, "cancelled")
+
+    def test_label_regen_forks_shipment(self):
+        from unittest.mock import patch
+        from django.utils import timezone
+        from checkout.models import Shipment
+
+        order = self._mk_paid_order()
+        shipment = Shipment.objects.create(
+            order=order, kind="outbound", status="packed",
+            shipping_method="dpd_locker", carrier_code="dpd",
+            tracking_number="OLD123", carrier_shipment_id="SHIP-OLD",
+            label_generated_at=timezone.now())
+        self._auth()
+
+        with patch(
+            "dpd.labels.generate_a6_label_pdf_for_order"
+        ) as gen:
+            res = self.client.post(
+                f"/api/v1/ops/shipments/id/{shipment.id}/label",
+                content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        gen.assert_called_once()
+        new_id = res.json()["updated_ids"][0]
+        self.assertNotEqual(new_id, shipment.id)
+
+        shipment.refresh_from_db()
+        self.assertEqual(shipment.status, "cancelled")
+        self.assertEqual(shipment.tracking_number, "OLD123")
+        fresh = Shipment.objects.get(id=new_id)
+        self.assertEqual(fresh.status, "pending")
+        self.assertEqual(fresh.tracking_number, "")
+        order.refresh_from_db()
+        self.assertEqual(order.tracking_number, "")

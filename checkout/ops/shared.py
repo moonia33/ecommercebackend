@@ -241,6 +241,24 @@ class OpsOrderShippingUpdateOut(Schema):
     shipping_gross: str = ""
     price_delta_gross: str = ""
     pickup_point_name: str = ""
+    new_shipment_id: int | None = None
+    balance_due: str = ""
+
+
+class OpsOrderLineIn(Schema):
+    variant_id: int
+    qty: int = 1
+    offer_id: int | None = None
+
+
+class OpsOrderLineUpdateIn(Schema):
+    qty: int
+
+
+class OpsSurchargeCollectIn(Schema):
+    method: str = "montonio"
+    send_email: bool = True
+    language_code: str | None = None
 
 
 class OpsSurchargeIn(Schema):
@@ -254,9 +272,11 @@ class OpsSurchargeIn(Schema):
 class OpsSurchargeOut(Schema):
     id: int
     order_id: int
+    direction: str = "charge"
+    source: str = "manual"
     amount_gross: str
     currency: str
-    method: str
+    method: str = ""
     status: str
     reason: str = ""
     payment_url: str = ""
@@ -423,6 +443,8 @@ class OpsOrderTotalsOut(Schema):
     total_vat: str = "0"
     total_gross: str = "0"
     currency: str = "EUR"
+    paid_gross: str = "0"
+    balance_due: str = "0"
 
 
 class OpsCustomerStatsOut(Schema):
@@ -1057,6 +1079,8 @@ def _serialize_ops_order_detail(order: Order) -> OpsOrderDetailOut:
         total_vat=_to_money_str(order.total_vat),
         total_gross=_to_money_str(_effective_order_total_gross(order)),
         currency=(order.currency or "EUR"),
+        paid_gross=_to_money_str(_paid_gross(order)),
+        balance_due=_to_money_str(_balance_due(order)),
     )
 
     events = [
@@ -1109,9 +1133,11 @@ def _serialize_ops_order_detail(order: Order) -> OpsOrderDetailOut:
             OpsSurchargeOut(
                 id=int(s.id),
                 order_id=int(s.order_id),
+                direction=s.direction,
+                source=s.source,
                 amount_gross=_to_money_str(s.amount_gross),
                 currency=s.currency or "",
-                method=s.method,
+                method=s.method or "",
                 status=s.status,
                 reason=s.reason or "",
                 payment_url=s.payment_url or "",
@@ -1251,7 +1277,10 @@ def _execute_ops_job(job: OpsJob, *, user) -> OpsJob:
 
 def _get_or_create_primary_shipment(order: Order, *, user=None) -> Shipment:
     shipment = (
-        order.shipments.filter(kind=Shipment.Kind.OUTBOUND)
+        order.shipments.filter(
+            kind=Shipment.Kind.OUTBOUND,
+        )
+        .exclude(status=Shipment.Status.CANCELLED)
         .order_by("-created_at", "-id")
         .first()
     )
@@ -1272,6 +1301,39 @@ def _get_or_create_primary_shipment(order: Order, *, user=None) -> Shipment:
     return shipment
 
 
+def _order_detail_qs(order_id: int) -> Order:
+    """Order re-fetched with the prefetches _serialize_ops_order_detail needs."""
+    return (
+        Order.objects.filter(id=order_id)
+        .select_related("payment_intent", "shop", "user", "pickup_locker")
+        .annotate(matched_items_count=Count("lines", distinct=True))
+        .prefetch_related(
+            Prefetch(
+                "lines",
+                queryset=OrderLine.objects.select_related(
+                    "variant__product__brand", "offer__warehouse")
+                .prefetch_related("variant__product__images")
+                .order_by("id"),
+                to_attr="ops_matched_lines",
+            ),
+            "events",
+        )
+        .first()
+    )
+
+
+def _get_surcharge_for_ops(surcharge_id: int, *, shop_id: int | None) -> Surcharge:
+    qs = Surcharge.objects.select_related("order")
+    if shop_id is not None:
+        qs = qs.filter(order__shop_id=shop_id)
+    else:
+        qs = qs.filter(order__shop__isnull=True)
+    s = qs.filter(id=surcharge_id).first()
+    if s is None:
+        raise HttpError(404, "Surcharge not found")
+    return s
+
+
 def _get_shipment_for_ops(shipment_id: int, *, shop_id: int | None) -> Shipment:
     qs = Shipment.objects.select_related("order")
     if shop_id is not None:
@@ -1284,7 +1346,80 @@ def _get_shipment_for_ops(shipment_id: int, *, shop_id: int | None) -> Shipment:
     return shipment
 
 
-def _generate_shipment_label(shipment: Shipment, *, user) -> None:
+def _replace_shipment_for_carrier_change(
+    *,
+    order: Order,
+    shipping_method: str,
+    pickup_locker=None,
+    pickup_point_id: str = "",
+    pickup_point_name: str = "",
+    user=None,
+) -> Shipment:
+    """Carrier/destination change -> a NEW outbound shipment (PrestaShop DPD
+    style). The previous one is cancelled when it was not yet handed to a
+    carrier; if it is already on the way it is preserved untouched."""
+    previous = (
+        order.shipments.filter(kind=Shipment.Kind.OUTBOUND)
+        .exclude(status=Shipment.Status.CANCELLED)
+        .order_by("-created_at", "-id")
+        .first()
+    )
+    if previous is not None and previous.status in {
+        Shipment.Status.PENDING,
+        Shipment.Status.PACKED,
+    }:
+        previous.status = Shipment.Status.CANCELLED
+        previous.notes = (
+            (previous.notes or "")
+            + ("" if not previous.notes else " ")
+            + "Cancelled: shipping method changed"
+        ).strip()
+        previous.save(update_fields=["status", "notes", "updated_at"])
+
+    shipment = Shipment.objects.create(
+        order=order,
+        kind=Shipment.Kind.OUTBOUND,
+        status=Shipment.Status.PENDING,
+        shipping_method=shipping_method or "",
+        pickup_locker=pickup_locker,
+        pickup_point_id=pickup_point_id or "",
+        pickup_point_name=pickup_point_name or "",
+        created_by=user,
+    )
+    shipment.apply_to_order_projection()
+    return shipment
+
+
+def _fork_labelled_shipment(shipment: Shipment, *, user=None) -> Shipment:
+    """Label already generated -> clone into a fresh shipment so a new
+    label gets its own tracking number; the old label stays historical."""
+    fresh = Shipment.objects.create(
+        order=shipment.order,
+        kind=shipment.kind,
+        status=Shipment.Status.PENDING,
+        shipping_method=shipment.shipping_method,
+        pickup_locker=shipment.pickup_locker,
+        pickup_point_id=shipment.pickup_point_id,
+        pickup_point_name=shipment.pickup_point_name,
+        notes=shipment.notes,
+        created_by=user,
+    )
+    old_status = shipment.status
+    if old_status in {Shipment.Status.PENDING, Shipment.Status.PACKED}:
+        shipment.status = Shipment.Status.CANCELLED
+        shipment.notes = (
+            (shipment.notes or "")
+            + ("" if not shipment.notes else " ")
+            + "Cancelled: label regenerated"
+        ).strip()
+        shipment.save(update_fields=["status", "notes", "updated_at"])
+    fresh.apply_to_order_projection()
+    return fresh
+
+
+def _generate_shipment_label(shipment: Shipment, *, user) -> Shipment:
+    if shipment.label_generated_at:
+        shipment = _fork_labelled_shipment(shipment, user=user)
     order = shipment.order
     shipping_method = (
         shipment.shipping_method or order.shipping_method or ""
@@ -1326,6 +1461,7 @@ def _generate_shipment_label(shipment: Shipment, *, user) -> None:
             "carrier_shipment_id": shipment.carrier_shipment_id,
         },
     )
+    return shipment
 
 
 def _serialize_shipment(s: Shipment) -> OpsShipmentRowOut:
@@ -1353,6 +1489,18 @@ def _serialize_shipment(s: Shipment) -> OpsShipmentRowOut:
         created_at=_to_iso(s.created_at),
         updated_at=_to_iso(s.updated_at),
     )
+
+
+def _paid_gross(order: Order) -> Decimal:
+    from checkout.surcharges import paid_amount_gross
+
+    return paid_amount_gross(order=order)
+
+
+def _balance_due(order: Order) -> Decimal:
+    from checkout.surcharges import balance_due
+
+    return balance_due(order=order)
 
 
 def _generate_order_label(order: Order, *, user):

@@ -72,23 +72,7 @@ def ops_order_detail(request, order_id: int):
     shop_id = _request_shop_id(request)
 
     order = _get_order_for_ops(order_id, shop_id=shop_id)
-    order = (
-        Order.objects.filter(id=order.id)
-        .select_related("payment_intent", "shop", "user", "pickup_locker")
-        .annotate(matched_items_count=Count("lines", distinct=True))
-        .prefetch_related(
-            Prefetch(
-                "lines",
-                queryset=OrderLine.objects.select_related("variant__product__brand", "offer__warehouse")
-                .prefetch_related("variant__product__images")
-                .order_by("id"),
-                to_attr="ops_matched_lines",
-            ),
-            "events",
-        )
-        .first()
-    )
-    return _serialize_ops_order_detail(order)
+    return _serialize_ops_order_detail(_order_detail_qs(order.id))
 
 
 @router.post("/orders/{order_id}/actions/confirm", response=OpsActionResultOut, auth=_auth)
@@ -151,8 +135,10 @@ def ops_orders_bulk_actions(request, payload: OpsOrderBulkActionIn):
 def ops_update_order_shipping(request, order_id: int, payload: OpsOrderShippingUpdateIn):
     """Change carrier method and/or pickup locker on an order.
 
-    Recalculates shipping price and returns the gross delta — when positive,
-    the admin can then create a surcharge (Montonio link / bank transfer).
+    A method/locker change always creates a NEW outbound shipment (the
+    previous pending/packed one is cancelled) so an old label/tracking is
+    never silently reused. Recalculates shipping price; for paid orders the
+    delta automatically becomes a pending surcharge/refund row.
     """
     _ensure_shop_context_if_strict(request)
     user = _require_ops_user(request)
@@ -160,6 +146,7 @@ def ops_update_order_shipping(request, order_id: int, payload: OpsOrderShippingU
 
     old_gross = Decimal(order.shipping_gross or 0)
     old_method = order.shipping_method or ""
+    old_locker_id = order.pickup_locker_id
 
     if payload.shipping_method is not None:
         order.shipping_method = payload.shipping_method.strip()
@@ -189,6 +176,9 @@ def ops_update_order_shipping(request, order_id: int, payload: OpsOrderShippingU
         order.pickup_point_name = ""
         order.pickup_point_raw = {}
 
+    method_changed = (order.shipping_method or "") != old_method
+    locker_changed = locker is not None and locker.id != old_locker_id
+
     order.save(update_fields=[
         "shipping_method", "pickup_locker", "pickup_point_id",
         "pickup_point_name", "pickup_point_raw", "updated_at",
@@ -199,22 +189,26 @@ def ops_update_order_shipping(request, order_id: int, payload: OpsOrderShippingU
         "total_net", "total_vat", "total_gross", "updated_at",
     ])
 
-    # Keep the primary outbound shipment in sync.
-    if order.shipments.exists():
-        primary = _get_or_create_primary_shipment(order, user=user)
-        primary.shipping_method = order.shipping_method
-        if locker is not None or order.pickup_locker is None:
-            primary.pickup_locker = order.pickup_locker
-            primary.pickup_point_id = order.pickup_point_id
-            primary.pickup_point_name = order.pickup_point_name
-        primary.save(update_fields=[
-            "shipping_method", "pickup_locker",
-            "pickup_point_id", "pickup_point_name", "updated_at",
-        ])
-        primary.apply_to_order_projection()
+    new_shipment = None
+    if method_changed or locker_changed:
+        new_shipment = _replace_shipment_for_carrier_change(
+            order=order,
+            shipping_method=order.shipping_method,
+            pickup_locker=order.pickup_locker,
+            pickup_point_id=order.pickup_point_id,
+            pickup_point_name=order.pickup_point_name,
+            user=user,
+        )
 
     new_gross = Decimal(order.shipping_gross or 0)
     delta = (new_gross - old_gross).quantize(Decimal("0.01"))
+
+    from checkout.surcharges import balance_due, reconcile_order_balance
+    reconcile_order_balance(
+        order=order,
+        reason=f"Shipping changed: {old_method or '-'} -> {order.shipping_method or '-'}",
+        user=user,
+    )
 
     _track_order_event(
         order=order,
@@ -228,6 +222,7 @@ def ops_update_order_shipping(request, order_id: int, payload: OpsOrderShippingU
             "shipping_gross": str(new_gross),
             "price_delta_gross": str(delta),
             "pickup_point_id": order.pickup_point_id or "",
+            "new_shipment_id": new_shipment.id if new_shipment else None,
         },
     )
 
@@ -239,7 +234,249 @@ def ops_update_order_shipping(request, order_id: int, payload: OpsOrderShippingU
         shipping_gross=str(new_gross),
         price_delta_gross=str(delta),
         pickup_point_name=order.pickup_point_name or "",
+        new_shipment_id=new_shipment.id if new_shipment else None,
+        balance_due=str(balance_due(order=order)),
     )
+
+
+def _surcharge_to_out(s: Surcharge) -> OpsSurchargeOut:
+    return OpsSurchargeOut(
+        id=int(s.id),
+        order_id=int(s.order_id),
+        direction=s.direction,
+        source=s.source,
+        amount_gross=str(s.amount_gross),
+        currency=s.currency,
+        method=s.method or "",
+        status=s.status,
+        reason=s.reason or "",
+        payment_url=s.payment_url or "",
+        emailed_at=_to_iso(s.emailed_at),
+        paid_at=_to_iso(s.paid_at),
+        created_at=_to_iso(s.created_at),
+    )
+
+
+def _add_order_line(*, order: Order, variant, qty: int, offer=None, user=None) -> OrderLine:
+    from catalog.models import Variant
+    from checkout.api.shared import resolve_shop_variant_price
+    from checkout.services import get_vat_rate_for, money_from_net
+
+    country = (order.country_code or "LT").upper()
+    priced = resolve_shop_variant_price(
+        variant=variant,
+        shop_id=(order.shop_id if order.shop_id else None),
+        channel_type="retail",
+    )
+    unit_net = getattr(priced, "unit_net", priced)
+    if unit_net is None:
+        raise HttpError(400, "Variant has no price in this shop")
+    vat_rate = get_vat_rate_for(
+        country_code=country,
+        tax_class=variant.product.tax_class if variant.product_id else None)
+    unit = money_from_net(
+        currency=order.currency or "EUR", unit_net=unit_net,
+        vat_rate=vat_rate, qty=1)
+    m = money_from_net(
+        currency=order.currency or "EUR", unit_net=unit_net,
+        vat_rate=vat_rate, qty=qty)
+
+    line = OrderLine.objects.create(
+        order=order,
+        offer=offer,
+        variant=variant,
+        sku=variant.sku or "",
+        name=variant.product.name if variant.product_id else (variant.sku or ""),
+        unit_net=unit.net,
+        vat_rate=vat_rate,
+        unit_vat=unit.vat,
+        unit_gross=unit.gross,
+        qty=qty,
+        total_net=m.net,
+        total_vat=m.vat,
+        total_gross=m.gross,
+    )
+    order.recalculate_totals()
+    order.save(update_fields=[
+        "items_net", "items_vat", "items_gross",
+        "shipping_net", "shipping_vat", "shipping_gross",
+        "total_net", "total_vat", "total_gross", "updated_at",
+    ])
+    return line
+
+
+@router.post("/orders/{order_id}/lines", response=OpsOrderDetailOut, auth=_auth)
+def ops_add_order_line(request, order_id: int, payload: OpsOrderLineIn):
+    """Add a product line to an existing order (admin order editing)."""
+    _ensure_shop_context_if_strict(request)
+    user = _require_ops_user(request)
+    order = _get_order_for_ops(order_id, shop_id=_request_shop_id(request))
+
+    from catalog.models import Variant
+    variant = Variant.objects.select_related("product", "product__tax_class").filter(
+        id=payload.variant_id).first()
+    if variant is None:
+        raise HttpError(404, "Variant not found")
+    if payload.qty < 1:
+        raise HttpError(400, "qty must be >= 1")
+
+    offer = None
+    if payload.offer_id:
+        from catalog.models import InventoryItem
+        offer = InventoryItem.objects.filter(id=payload.offer_id).first()
+        if offer is None:
+            raise HttpError(404, "Offer not found")
+
+    line = _add_order_line(
+        order=order, variant=variant, qty=payload.qty, offer=offer, user=user)
+
+    _track_order_event(
+        order=order,
+        user=user,
+        kind=OrderEvent.Kind.NOTE,
+        name="ops_line_added",
+        payload={
+            "order_line_id": line.id,
+            "variant_id": variant.id,
+            "qty": payload.qty,
+            "total_gross": str(line.total_gross),
+        },
+    )
+
+    from checkout.surcharges import reconcile_order_balance
+    reconcile_order_balance(
+        order=order,
+        reason=f"Line added: {line.name} x{payload.qty}",
+        user=user,
+    )
+
+    return _serialize_ops_order_detail(_order_detail_qs(order.id))
+
+
+@router.patch("/orders/{order_id}/lines/{line_id}", response=OpsOrderDetailOut, auth=_auth)
+def ops_update_order_line(request, order_id: int, line_id: int,
+                          payload: OpsOrderLineUpdateIn):
+    """Set a line's quantity; qty=0 removes the line. Partial removal is a
+    quantity reduction — exchanges are remove+add."""
+    _ensure_shop_context_if_strict(request)
+    user = _require_ops_user(request)
+    order = _get_order_for_ops(order_id, shop_id=_request_shop_id(request))
+
+    line = order.lines.filter(id=line_id).first()
+    if line is None:
+        raise HttpError(404, "Order line not found")
+    if payload.qty < 0:
+        raise HttpError(400, "qty must be >= 0")
+
+    old_qty = line.qty
+    old_name = line.name
+    if payload.qty == 0:
+        line.delete()
+        removed = True
+    else:
+        line.qty = payload.qty
+        line.total_net = line.unit_net * payload.qty
+        line.total_vat = line.unit_vat * payload.qty
+        line.total_gross = line.unit_gross * payload.qty
+        line.save(update_fields=[
+            "qty", "total_net", "total_vat", "total_gross"])
+        removed = False
+
+    order.recalculate_totals()
+    order.save(update_fields=[
+        "items_net", "items_vat", "items_gross",
+        "shipping_net", "shipping_vat", "shipping_gross",
+        "total_net", "total_vat", "total_gross", "updated_at",
+    ])
+
+    _track_order_event(
+        order=order,
+        user=user,
+        kind=OrderEvent.Kind.NOTE,
+        name="ops_line_removed" if removed else "ops_line_qty_changed",
+        payload={
+            "order_line_id": line_id,
+            "product_name": old_name,
+            "old_qty": old_qty,
+            "new_qty": payload.qty,
+        },
+    )
+
+    from checkout.surcharges import reconcile_order_balance
+    reconcile_order_balance(
+        order=order,
+        reason=(
+            f"Line removed: {old_name} x{old_qty}" if removed
+            else f"Line qty: {old_name} {old_qty} -> {payload.qty}"
+        ),
+        user=user,
+    )
+
+    return _serialize_ops_order_detail(_order_detail_qs(order.id))
+
+
+@router.get("/surcharges/{surcharge_id}", response=OpsSurchargeOut, auth=_auth)
+def ops_get_surcharge(request, surcharge_id: int):
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+    s = _get_surcharge_for_ops(surcharge_id, shop_id=_request_shop_id(request))
+    return _surcharge_to_out(s)
+
+
+@router.post("/surcharges/{surcharge_id}/collect", response=OpsSurchargeOut, auth=_auth)
+def ops_collect_surcharge(request, surcharge_id: int,
+                          payload: OpsSurchargeCollectIn):
+    """Pick how a pending charge is collected: montonio payment link or
+    bank-transfer instructions; optionally email the customer."""
+    _ensure_shop_context_if_strict(request)
+    user = _require_ops_user(request)
+    s = _get_surcharge_for_ops(surcharge_id, shop_id=_request_shop_id(request))
+
+    from checkout.surcharges import collect_surcharge
+    try:
+        s = collect_surcharge(
+            surcharge=s,
+            method=payload.method,
+            language_code=payload.language_code,
+            user=user,
+            send_email=payload.send_email,
+        )
+    except ValueError as exc:
+        raise HttpError(400, str(exc))
+    except Exception as exc:
+        raise HttpError(502, f"Surcharge collection failed: {exc}")
+    return _surcharge_to_out(s)
+
+
+@router.post("/surcharges/{surcharge_id}/mark-paid", response=OpsSurchargeOut, auth=_auth)
+def ops_mark_surcharge_paid(request, surcharge_id: int):
+    _ensure_shop_context_if_strict(request)
+    user = _require_ops_user(request)
+    s = _get_surcharge_for_ops(surcharge_id, shop_id=_request_shop_id(request))
+    from checkout.surcharges import mark_surcharge_paid
+    return _surcharge_to_out(mark_surcharge_paid(surcharge=s, user=user))
+
+
+@router.post("/surcharges/{surcharge_id}/resolve", response=OpsSurchargeOut, auth=_auth)
+def ops_resolve_surcharge(request, surcharge_id: int):
+    """Resolve a pending refund row (money returned to the customer)."""
+    _ensure_shop_context_if_strict(request)
+    user = _require_ops_user(request)
+    s = _get_surcharge_for_ops(surcharge_id, shop_id=_request_shop_id(request))
+    from checkout.surcharges import resolve_refund
+    try:
+        return _surcharge_to_out(resolve_refund(surcharge=s, user=user))
+    except ValueError as exc:
+        raise HttpError(400, str(exc))
+
+
+@router.post("/surcharges/{surcharge_id}/cancel", response=OpsSurchargeOut, auth=_auth)
+def ops_cancel_surcharge(request, surcharge_id: int):
+    _ensure_shop_context_if_strict(request)
+    user = _require_ops_user(request)
+    s = _get_surcharge_for_ops(surcharge_id, shop_id=_request_shop_id(request))
+    from checkout.surcharges import cancel_surcharge
+    return _surcharge_to_out(cancel_surcharge(surcharge=s, user=user))
 
 
 @router.post("/orders/{order_id}/surcharges", response=OpsSurchargeOut, auth=_auth)
@@ -270,19 +507,7 @@ def ops_create_surcharge(request, order_id: int, payload: OpsSurchargeIn):
     except Exception as exc:
         raise HttpError(502, f"Surcharge failed: {exc}")
 
-    return OpsSurchargeOut(
-        id=int(s.id),
-        order_id=int(s.order_id),
-        amount_gross=str(s.amount_gross),
-        currency=s.currency,
-        method=s.method,
-        status=s.status,
-        reason=s.reason or "",
-        payment_url=s.payment_url or "",
-        emailed_at=_to_iso(s.emailed_at),
-        paid_at=_to_iso(s.paid_at),
-        created_at=_to_iso(s.created_at),
-    )
+    return _surcharge_to_out(s)
 
 
 @router.get("/orders/{order_id}/surcharges", response=list[OpsSurchargeOut], auth=_auth)
@@ -290,22 +515,7 @@ def ops_list_surcharges(request, order_id: int):
     _ensure_shop_context_if_strict(request)
     _require_ops_user(request)
     order = _get_order_for_ops(order_id, shop_id=_request_shop_id(request))
-    return [
-        OpsSurchargeOut(
-            id=int(s.id),
-            order_id=int(s.order_id),
-            amount_gross=str(s.amount_gross),
-            currency=s.currency,
-            method=s.method,
-            status=s.status,
-            reason=s.reason or "",
-            payment_url=s.payment_url or "",
-            emailed_at=_to_iso(s.emailed_at),
-            paid_at=_to_iso(s.paid_at),
-            created_at=_to_iso(s.created_at),
-        )
-        for s in order.surcharges.all()
-    ]
+    return [_surcharge_to_out(s) for s in order.surcharges.all()]
 
 
 @router.post("/orders", response=OpsOrderDetailOut, auth=_auth)
@@ -417,7 +627,7 @@ def ops_create_order(request, payload: OpsOrderCreateIn):
             payload={"user": getattr(user, "email", "") or ""},
         )
 
-    return _serialize_ops_order_detail(order)
+    return _serialize_ops_order_detail(_order_detail_qs(order.id))
 
 
 @router.post("/orders/actions/merge", response=OpsActionResultOut, auth=_auth)
@@ -473,6 +683,13 @@ def ops_merge_orders(request, payload: OpsOrderMergeIn):
             actor_user=user,
             payload={"merged_order_ids": merged},
         )
+
+    from checkout.surcharges import reconcile_order_balance
+    reconcile_order_balance(
+        order=primary,
+        reason=f"Orders merged: {merged}",
+        user=user,
+    )
 
     return OpsActionResultOut(
         ok=True,
