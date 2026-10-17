@@ -399,6 +399,66 @@ def expire_pending_payment_reservations(*, now=None) -> int:
     return expired
 
 
+def order_shipping_snapshot(order) -> dict:
+    """Effective receiver data for carrier integrations.
+
+    Order-level shipping fields win; missing values fall back to the
+    customer's saved shipping address (is_default_shipping first), then
+    the primary phone, then the user record. Orders created in admin may
+    have no shipping_* fields even though the customer profile does.
+    """
+    user = getattr(order, "user", None)
+    addr = None
+    if user is not None:
+        try:
+            addr = (
+                user.addresses.filter(is_default_shipping=True).first()
+                or user.addresses.first()
+            )
+        except Exception:
+            addr = None
+    phone_row = None
+    if user is not None:
+        try:
+            phone_row = user.phones.first()  # ordered -is_primary first
+        except Exception:
+            phone_row = None
+
+    def pick(order_val: str, *fallbacks) -> str:
+        v = (order_val or "").strip()
+        if v:
+            return v
+        for fb in fallbacks:
+            v = (fb or "").strip()
+            if v:
+                return v
+        return ""
+
+    return {
+        "full_name": pick(
+            order.shipping_full_name,
+            getattr(addr, "full_name", ""),
+            getattr(user, "get_full_name", lambda: "")() if user else "",
+        ) or "Customer",
+        "company": pick(order.shipping_company, getattr(addr, "company", "")),
+        "line1": pick(order.shipping_line1, getattr(addr, "line1", "")),
+        "city": pick(order.shipping_city, getattr(addr, "city", "")),
+        "postal_code": pick(
+            order.shipping_postal_code, getattr(addr, "postal_code", "")),
+        "country_code": pick(
+            order.shipping_country_code,
+            order.country_code,
+            getattr(addr, "country_code", ""),
+        ),
+        "phone": pick(
+            order.shipping_phone,
+            getattr(addr, "phone", ""),
+            getattr(phone_row, "phone", ""),
+        ),
+        "email": pick(getattr(user, "email", "") or ""),
+    }
+
+
 def recompute_order_fulfillment_mode(*, order) -> None:
     """Derive fulfillment_mode from the warehouses of the order's offers.
 

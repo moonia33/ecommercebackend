@@ -132,10 +132,13 @@ def _shipment_view(order: Order, shipment=None):
 
 
 def _receiver_address_for_order(order: Order, shipment=None) -> dict[str, Any]:
+    from checkout.services import order_shipping_snapshot
+
     shipping_method, _pudo, _locker = _shipment_view(order, shipment)
 
-    full_name = (order.shipping_full_name or "").strip() or "Customer"
-    phone = (order.shipping_phone or "").strip()
+    snap = order_shipping_snapshot(order)
+    full_name = snap["full_name"]
+    phone = snap["phone"]
 
     if shipping_method == "dpd_locker":
         pudo_id = _pudo
@@ -153,10 +156,10 @@ def _receiver_address_for_order(order: Order, shipment=None) -> dict[str, Any]:
         }
 
     # Courier
-    street = (order.shipping_line1 or "").strip()
-    city = (order.shipping_city or "").strip()
-    postal_code = (order.shipping_postal_code or "").strip()
-    country = (order.shipping_country_code or order.country_code or "").strip()
+    street = snap["line1"]
+    city = snap["city"]
+    postal_code = snap["postal_code"]
+    country = snap["country_code"]
 
     missing = []
     if not street:

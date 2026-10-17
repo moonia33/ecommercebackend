@@ -66,42 +66,48 @@ def _sender(cfg: UnisendApiConfig) -> dict[str, Any]:
 
 
 def _receiver_terminal(order: Order, *, terminal: UnisendTerminal) -> dict[str, Any]:
-    full_name = (order.shipping_full_name or "").strip() or "Customer"
-    phone = (order.shipping_phone or "").strip()
+    from checkout.services import order_shipping_snapshot
+
+    snap = order_shipping_snapshot(order)
+    full_name = snap["full_name"]
+    phone = snap["phone"]
     if not phone:
         raise UnisendLabelConfigError("lpexpress: trūksta telefono (shipping_phone)")
 
     return {
         "name": full_name,
-        "companyName": (order.shipping_company or "").strip() or None,
+        "companyName": snap["company"] or None,
         "address": {
             "countryCode": (terminal.country_code or "").strip().upper() or "LT",
             "terminalId": (terminal.terminal_id or "").strip(),
         },
         "contacts": {
             "phone": phone,
-            "email": (getattr(order.user, "email", "") or "").strip() or None,
+            "email": snap["email"] or None,
         },
     }
 
 
 def _receiver_courier(order: Order) -> dict[str, Any]:
-    full_name = (order.shipping_full_name or "").strip() or "Customer"
-    phone = (order.shipping_phone or "").strip()
+    from checkout.services import order_shipping_snapshot
+
+    snap = order_shipping_snapshot(order)
+    full_name = snap["full_name"]
+    phone = snap["phone"]
     if not phone:
         raise UnisendLabelConfigError("lpexpress: trūksta telefono (shipping_phone)")
 
-    country_code = (order.shipping_country_code or order.country_code or "LT").strip().upper() or "LT"
-    locality = (order.shipping_city or "").strip()
-    postal_code = (order.shipping_postal_code or "").strip()
-    street = (order.shipping_line1 or "").strip()
+    country_code = (snap["country_code"] or "LT").upper()
+    locality = snap["city"]
+    postal_code = snap["postal_code"]
+    street = snap["line1"]
 
     if not locality or not postal_code or not street:
         raise UnisendLabelConfigError("lpexpress_courier: trūksta gavėjo adreso (city/postal_code/line1)")
 
     return {
         "name": full_name,
-        "companyName": (order.shipping_company or "").strip() or None,
+        "companyName": snap["company"] or None,
         "address": {
             "countryCode": country_code,
             "locality": locality,
@@ -110,7 +116,7 @@ def _receiver_courier(order: Order) -> dict[str, Any]:
         },
         "contacts": {
             "phone": phone,
-            "email": (getattr(order.user, "email", "") or "").strip() or None,
+            "email": snap["email"] or None,
         },
     }
 
