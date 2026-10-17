@@ -34,6 +34,8 @@ class Product(models.Model):
     slug = models.SlugField(max_length=255, unique=True)
     # Markdown (rekomenduojama). Importuojant iš XML su HTML galima normalizuoti.
     description = models.TextField(blank=True)
+    # Papildoma teisinė/saugos info (GPSR, ingredientai): {"gpsr": "...", "ingredients": "..."}
+    additional_info = models.JSONField(blank=True, default=dict)
 
     # SEO
     seo_title = models.CharField(max_length=255, blank=True)

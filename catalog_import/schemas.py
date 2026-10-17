@@ -74,6 +74,10 @@ class ImportProductIn(Schema):
     # "lt" required (base language); others become ProductTranslation rows
     translations: dict[str, ImportTranslationIn]
     features: list[ImportFeatureIn] = []
+    # papildoma teisinė/saugos info: {"gpsr": "...", "ingredients": "..."}
+    additional_info: dict[str, str] = {}
+    # option value label'ai filtrams/UI: {"size": {"2xl": "2XL"}}
+    option_labels: dict[str, dict[str, str]] = {}
     images: list[ImportImageIn] = []
     videos: list[ImportVideoIn] = []
     # warehouse_code -> qty (product-level stock goes to the default variant)

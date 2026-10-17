@@ -4,14 +4,32 @@ from datetime import date
 from decimal import Decimal
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Count, Prefetch, Q, Sum
+from django.db.models import Count, F, Max, Prefetch, Q, Sum
 from django.utils import timezone
 from ninja import Query, Router, Schema
 from ninja.errors import HttpError
 
 from accounts.auth import JWTAuth
-from catalog.models import InventoryItem, Product, Variant
+from api.i18n import get_default_language_code, get_supported_languages
+from catalog.models import (
+    Brand,
+    Category,
+    Feature,
+    FeatureValue,
+    InventoryItem,
+    OptionType,
+    OptionValue,
+    Product,
+    ProductFeatureValue,
+    ProductGroup,
+    ProductOptionType,
+    ProductTranslation,
+    TaxClass,
+    Variant,
+    VariantOptionValue,
+)
 from checkout.models import OpsJob, Order, OrderEvent, OrderLine, PaymentIntent
 from checkout.services import capture_inventory_for_order, release_inventory_for_order
 from promotions.services import redeem_coupon_for_paid_order, release_coupon_for_order
@@ -263,6 +281,319 @@ class OpsJobsListOut(Schema):
     page_size: int
     total_count: int
     results: list[OpsJobOut]
+
+
+class OpsOrderAddressOut(Schema):
+    full_name: str = ""
+    company: str = ""
+    line1: str = ""
+    city: str = ""
+    postal_code: str = ""
+    country_code: str = ""
+    phone: str = ""
+
+
+class OpsPickupPointOut(Schema):
+    pickup_point_id: str = ""
+    pickup_point_name: str = ""
+    country_code: str = ""
+    raw: dict = {}
+
+
+class OpsOrderTotalsOut(Schema):
+    items_net: str = "0"
+    items_vat: str = "0"
+    items_gross: str = "0"
+    shipping_net: str = "0"
+    shipping_vat: str = "0"
+    shipping_gross: str = "0"
+    total_net: str = "0"
+    total_vat: str = "0"
+    total_gross: str = "0"
+    currency: str = "EUR"
+
+
+class OpsCustomerStatsOut(Schema):
+    orders_count: int = 0
+    paid_orders_count: int = 0
+    total_spent: str = "0"
+    last_order_at: str = ""
+
+
+class OpsOrderDetailOut(OpsOrderListItemOut):
+    totals: OpsOrderTotalsOut
+    shipping_address: OpsOrderAddressOut
+    pickup_point: OpsPickupPointOut | None = None
+    tracking_number: str = ""
+    carrier_code: str = ""
+    carrier_shipment_id: str = ""
+    label_pdf_url: str = ""
+    label_generated_at: str = ""
+    delivered_at: str = ""
+    updated_at: str = ""
+    supplier_notes: str = ""
+    events: list[OpsAuditEventOut] = []
+    payments: list[OpsPaymentOut] = []
+    customer_stats: OpsCustomerStatsOut | None = None
+
+
+class OpsCustomerPhoneOut(Schema):
+    phone: str
+    label: str = ""
+    is_primary: bool = False
+    is_verified: bool = False
+
+
+class OpsCustomerAddressOut(Schema):
+    id: int
+    label: str = ""
+    full_name: str = ""
+    company: str = ""
+    company_reg_no: str = ""
+    company_vat_no: str = ""
+    line1: str = ""
+    city: str = ""
+    postal_code: str = ""
+    country_code: str = ""
+    phone: str = ""
+    is_default_shipping: bool = False
+    is_default_billing: bool = False
+
+
+class OpsCustomerOrderOut(Schema):
+    id: int
+    status: str
+    payment_status: str = ""
+    delivery_status: str = ""
+    created_at: str
+    amount_gross: str = "0"
+    currency: str = "EUR"
+    items_count: int = 0
+
+
+class OpsCustomerListItemOut(Schema):
+    id: int
+    email: str
+    first_name: str = ""
+    last_name: str = ""
+    full_name: str = ""
+    phone: str = ""
+    is_active: bool = True
+    is_staff: bool = False
+    date_joined: str = ""
+    last_login: str = ""
+    orders_count: int = 0
+    paid_orders_count: int = 0
+    total_spent: str = "0"
+    last_order_at: str = ""
+    groups: list[str] = []
+
+
+class OpsCustomerListOut(Schema):
+    page: int
+    page_size: int
+    total_count: int
+    results: list[OpsCustomerListItemOut]
+
+
+class OpsCustomerDetailOut(OpsCustomerListItemOut):
+    phones: list[OpsCustomerPhoneOut] = []
+    addresses: list[OpsCustomerAddressOut] = []
+    pickup_point: OpsPickupPointOut | None = None
+    orders: list[OpsCustomerOrderOut] = []
+
+
+class OpsCatalogVariantOptionOut(Schema):
+    option_type_id: int
+    option_type_code: str
+    option_type_name: str
+    option_value_id: int | None = None
+    label: str = ""
+
+
+class OpsCatalogVariantOut(Schema):
+    id: int
+    sku: str
+    barcode: str = ""
+    name: str = ""
+    price_eur: str = "0"
+    cost_eur: str = ""
+    is_active: bool = True
+    weight_g: int = 0
+    length_cm: int = 0
+    width_cm: int = 0
+    height_cm: int = 0
+    options: list[OpsCatalogVariantOptionOut] = []
+
+
+class OpsCatalogOfferOut(Schema):
+    inventory_item_id: int
+    variant_id: int | None = None
+    variant_sku: str = ""
+    warehouse_code: str
+    warehouse_name: str = ""
+    qty_on_hand: int = 0
+    qty_reserved: int = 0
+    qty_available: int = 0
+    offer_visibility: str = ""
+    offer_price_override_eur: str = ""
+
+
+class OpsProductTranslationOut(Schema):
+    language_code: str
+    name: str = ""
+    slug: str = ""
+    description: str = ""
+    seo_title: str = ""
+    seo_description: str = ""
+    seo_keywords: str = ""
+
+
+class OpsProductFeatureOut(Schema):
+    id: int
+    feature_id: int
+    feature_code: str
+    feature_name: str
+    feature_value_id: int
+    value: str
+
+
+class OpsProductImageOut(Schema):
+    id: int
+    url: str = ""
+    alt_text: str = ""
+    sort_order: int = 0
+    variant_skus: list[str] = []
+
+
+class OpsProductVideoOut(Schema):
+    id: int
+    url: str
+    video_type: str = "product"
+    language_code: str = ""
+    sort_order: int = 0
+
+
+class OpsCatalogProductDetailOut(OpsCatalogProductOut):
+    description: str = ""
+    thumbnail_url: str = ""
+    seo_title: str = ""
+    seo_description: str = ""
+    seo_keywords: str = ""
+    additional_info: dict = {}
+    brand_id: int | None = None
+    category_id: int | None = None
+    group_id: int | None = None
+    tax_class_id: int | None = None
+    option_type_ids: list[int] = []
+    translations: list[OpsProductTranslationOut] = []
+    features: list[OpsProductFeatureOut] = []
+    images: list[OpsProductImageOut] = []
+    videos: list[OpsProductVideoOut] = []
+    variants: list[OpsCatalogVariantOut] = []
+    offers: list[OpsCatalogOfferOut] = []
+
+
+class OpsLanguageOut(Schema):
+    code: str
+    name: str
+
+
+class OpsLookupOptionOut(Schema):
+    id: int
+    name: str
+    code: str = ""
+    depth: int = 0
+
+
+class OpsFeatureValueOptionOut(Schema):
+    id: int
+    value: str
+
+
+class OpsFeatureOptionOut(Schema):
+    id: int
+    code: str
+    name: str
+    allows_multiple: bool = False
+    is_filterable: bool = True
+    translations: dict[str, str] = {}
+    values: list[OpsFeatureValueOptionOut] = []
+
+
+class OpsOptionValueOptionOut(Schema):
+    id: int
+    code: str
+    label: str
+    translations: dict[str, str] = {}
+
+
+class OpsOptionTypeOptionOut(Schema):
+    id: int
+    code: str
+    name: str
+    translations: dict[str, str] = {}
+    values: list[OpsOptionValueOptionOut] = []
+
+
+class OpsCatalogLookupsOut(Schema):
+    default_language: str = "lt"
+    languages: list[OpsLanguageOut] = []
+    brands: list[OpsLookupOptionOut] = []
+    categories: list[OpsLookupOptionOut] = []
+    groups: list[OpsLookupOptionOut] = []
+    tax_classes: list[OpsLookupOptionOut] = []
+    features: list[OpsFeatureOptionOut] = []
+    option_types: list[OpsOptionTypeOptionOut] = []
+
+
+class OpsProductTranslationIn(Schema):
+    language_code: str
+    name: str = ""
+    slug: str = ""
+    description: str = ""
+    seo_title: str = ""
+    seo_description: str = ""
+    seo_keywords: str = ""
+
+
+class OpsProductUpdateIn(Schema):
+    name: str | None = None
+    slug: str | None = None
+    description: str | None = None
+    seo_title: str | None = None
+    seo_description: str | None = None
+    seo_keywords: str | None = None
+    is_active: bool | None = None
+    brand_id: int | None = None
+    category_id: int | None = None
+    group_id: int | None = None
+    tax_class_id: int | None = None
+    additional_info: dict | None = None
+    translations: list[OpsProductTranslationIn] | None = None
+    feature_value_ids: list[int] | None = None
+
+
+class OpsVariantOptionIn(Schema):
+    option_type_id: int
+    option_value_id: int | None = None
+
+
+class OpsVariantUpdateIn(Schema):
+    name: str | None = None
+    barcode: str | None = None
+    price_eur: Decimal | None = None
+    cost_eur: Decimal | None = None
+    is_active: bool | None = None
+    weight_g: int | None = None
+    length_cm: int | None = None
+    width_cm: int | None = None
+    height_cm: int | None = None
+    options: list[OpsVariantOptionIn] | None = None
+
+
+class OpsFeatureValueCreateIn(Schema):
+    value: str
 
 
 def _ensure_shop_context_if_strict(request) -> None:
@@ -544,6 +875,120 @@ def _serialize_ops_order(order: Order) -> OpsOrderListItemOut:
         matched_items_count=int(getattr(order, "matched_items_count", len(lines))),
         matched_suppliers=suppliers,
         matched_lines=matched_lines,
+    )
+
+
+def _customer_order_stats(user_id: int | None, *, shop_id: int | None) -> OpsCustomerStatsOut:
+    if not user_id:
+        return OpsCustomerStatsOut()
+    qs = Order.objects.filter(user_id=user_id)
+    if shop_id is not None:
+        qs = qs.filter(shop_id=shop_id)
+    agg = qs.aggregate(
+        orders_count=Count("id"),
+        paid_orders_count=Count("id", filter=Q(status=Order.Status.PAID)),
+        total_spent=Sum("total_gross", filter=Q(status=Order.Status.PAID)),
+        last_order_at=Max("created_at"),
+    )
+    return OpsCustomerStatsOut(
+        orders_count=int(agg.get("orders_count") or 0),
+        paid_orders_count=int(agg.get("paid_orders_count") or 0),
+        total_spent=_to_money_str(agg.get("total_spent")),
+        last_order_at=_to_iso(agg.get("last_order_at")),
+    )
+
+
+def _serialize_ops_order_detail(order: Order) -> OpsOrderDetailOut:
+    base = _serialize_ops_order(order)
+
+    shipping_address = OpsOrderAddressOut(
+        full_name=(order.shipping_full_name or ""),
+        company=(order.shipping_company or ""),
+        line1=(order.shipping_line1 or ""),
+        city=(order.shipping_city or ""),
+        postal_code=(order.shipping_postal_code or ""),
+        country_code=(order.shipping_country_code or ""),
+        phone=(order.shipping_phone or ""),
+    )
+
+    pickup_point = None
+    if (order.pickup_point_id or "").strip() or (order.pickup_point_name or "").strip():
+        pickup_point = OpsPickupPointOut(
+            pickup_point_id=(order.pickup_point_id or ""),
+            pickup_point_name=(order.pickup_point_name or ""),
+            country_code=(
+                (order.pickup_point_raw or {}).get("country_code")
+                or (order.pickup_locker.country_code if order.pickup_locker_id else "")
+                or ""
+            ),
+            raw=dict(order.pickup_point_raw or {}),
+        )
+
+    label_pdf_url = ""
+    try:
+        if order.shipping_label_pdf:
+            label_pdf_url = order.shipping_label_pdf.url or ""
+    except Exception:
+        label_pdf_url = ""
+
+    totals = OpsOrderTotalsOut(
+        items_net=_to_money_str(order.items_net),
+        items_vat=_to_money_str(order.items_vat),
+        items_gross=_to_money_str(order.items_gross),
+        shipping_net=_to_money_str(order.shipping_net),
+        shipping_vat=_to_money_str(order.shipping_vat),
+        shipping_gross=_to_money_str(order.shipping_gross),
+        total_net=_to_money_str(order.total_net),
+        total_vat=_to_money_str(order.total_vat),
+        total_gross=_to_money_str(_effective_order_total_gross(order)),
+        currency=(order.currency or "EUR"),
+    )
+
+    events = [
+        OpsAuditEventOut(
+            id=int(ev.id),
+            order_id=int(ev.order_id),
+            kind=(ev.kind or ""),
+            name=(ev.name or ""),
+            actor_label=(ev.actor_label or ""),
+            payload=dict(ev.payload or {}),
+            created_at=_to_iso(ev.created_at),
+        )
+        for ev in order.events.all()
+    ]
+
+    payments = [
+        OpsPaymentOut(
+            id=int(pi.id),
+            order_id=int(pi.order_id),
+            provider=(pi.provider or ""),
+            status=(pi.status or ""),
+            amount_gross=_to_money_str(pi.amount_gross),
+            currency=(pi.currency or ""),
+            external_id=(pi.external_id or ""),
+            created_at=_to_iso(pi.created_at),
+            updated_at=_to_iso(pi.updated_at),
+        )
+        for pi in PaymentIntent.objects.filter(order_id=order.id).order_by("-created_at", "-id")
+    ]
+
+    shop_id = int(order.shop_id) if order.shop_id else None
+    return OpsOrderDetailOut(
+        **base.model_dump(),
+        totals=totals,
+        shipping_address=shipping_address,
+        pickup_point=pickup_point,
+        tracking_number=(order.tracking_number or ""),
+        carrier_code=(order.carrier_code or ""),
+        carrier_shipment_id=(order.carrier_shipment_id or ""),
+        label_pdf_url=label_pdf_url,
+        label_generated_at=_to_iso(order.shipping_label_generated_at),
+        delivered_at=_to_iso(order.delivered_at),
+        updated_at=_to_iso(order.updated_at),
+        supplier_notes=(order.supplier_notes or ""),
+        events=events,
+        payments=payments,
+        customer_stats=_customer_order_stats(order.user_id, shop_id=shop_id),
     )
 
 

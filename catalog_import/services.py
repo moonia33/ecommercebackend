@@ -257,6 +257,7 @@ def _apply_product(run: ImportRun, item: ImportProductIn, seen_ids: set[int], ro
     product.seo_title = lt.seo_title or ""
     product.seo_description = lt.seo_description or ""
     product.seo_keywords = lt.seo_keywords or ""
+    product.additional_info = item.additional_info or {}
     if created or not product.slug:
         product.slug = _unique_slug(Product, lt.slug or lt.name)
     product.save()
@@ -503,7 +504,7 @@ def _sync_variants(product: Product, item: ImportProductIn, source: str) -> list
         variant.width_cm = spec.width_cm or item.width_cm
         variant.height_cm = spec.height_cm or item.height_cm
         variant.save()
-        _sync_variant_options(product, variant, spec.options)
+        _sync_variant_options(product, variant, spec.options, item.option_labels)
         _sync_variant_images(product, variant, spec)
         out.append(variant)
     return out
@@ -546,21 +547,33 @@ def _match_variant(product: Product, spec: ImportVariantIn, source: str) -> Vari
     return variant
 
 
-def _sync_variant_options(product: Product, variant: Variant, options: dict[str, str]) -> None:
+def _sync_variant_options(
+    product: Product,
+    variant: Variant,
+    options: dict[str, str],
+    option_labels: dict[str, dict[str, str]] | None = None,
+) -> None:
     if not options:
         return
+    labels = option_labels or {}
     value_ids = []
     for type_code, value_code in options.items():
         opt_type, _ = OptionType.objects.get_or_create(
             code=type_code,
-            defaults={"name": type_code.replace("-", " ").title()},
+            defaults={"name": type_code.replace("-", " ").replace("_", " ").title()},
         )
         ProductOptionType.objects.get_or_create(product=product, option_type=opt_type)
-        opt_value, _ = OptionValue.objects.get_or_create(
+        label = (labels.get(type_code) or {}).get(value_code) or value_code.replace(
+            "-", " "
+        ).replace("_", " ").title()
+        opt_value, created = OptionValue.objects.get_or_create(
             option_type=opt_type,
             code=value_code,
-            defaults={"label": value_code.replace("-", " ").title()},
+            defaults={"label": label},
         )
+        if not created and opt_value.label != label:
+            opt_value.label = label
+            opt_value.save(update_fields=["label"])
         VariantOptionValue.objects.update_or_create(
             variant=variant,
             option_type=opt_type,

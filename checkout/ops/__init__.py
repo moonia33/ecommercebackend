@@ -3,7 +3,9 @@ from .shared import router  # noqa: F401
 
 # Import endpoint modules for router registration side-effects.
 from . import catalog  # noqa: F401
+from . import customers  # noqa: F401
 from . import inventory  # noqa: F401
+from . import invoices  # noqa: F401
 from . import jobs  # noqa: F401
 from . import orders  # noqa: F401
 from . import payments  # noqa: F401

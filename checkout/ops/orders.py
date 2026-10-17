@@ -65,7 +65,7 @@ def ops_list_orders(request, filters: OpsOrderSearchIn = Query(...)):
     )
 
 
-@router.get("/orders/{order_id}", response=OpsOrderListItemOut, auth=_auth)
+@router.get("/orders/{order_id}", response=OpsOrderDetailOut, auth=_auth)
 def ops_order_detail(request, order_id: int):
     _ensure_shop_context_if_strict(request)
     _require_ops_user(request)
@@ -74,7 +74,7 @@ def ops_order_detail(request, order_id: int):
     order = _get_order_for_ops(order_id, shop_id=shop_id)
     order = (
         Order.objects.filter(id=order.id)
-        .select_related("payment_intent", "shop", "user")
+        .select_related("payment_intent", "shop", "user", "pickup_locker")
         .annotate(matched_items_count=Count("lines", distinct=True))
         .prefetch_related(
             Prefetch(
@@ -83,11 +83,12 @@ def ops_order_detail(request, order_id: int):
                 .prefetch_related("variant__product__images")
                 .order_by("id"),
                 to_attr="ops_matched_lines",
-            )
+            ),
+            "events",
         )
         .first()
     )
-    return _serialize_ops_order(order)
+    return _serialize_ops_order_detail(order)
 
 
 @router.post("/orders/{order_id}/actions/confirm", response=OpsActionResultOut, auth=_auth)
