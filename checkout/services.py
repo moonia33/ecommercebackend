@@ -459,6 +459,36 @@ def order_shipping_snapshot(order) -> dict:
     }
 
 
+def preferred_pickup_point(order, *, shipping_method: str = "") -> dict | None:
+    """Customer's saved pickup-point preference (UserPickupPoint), when it
+    matches the shipping method. Used as a fallback when the order has no
+    pickup point selected."""
+    user = getattr(order, "user", None)
+    if user is None:
+        return None
+    pref = getattr(user, "primary_pickup_point", None)
+    if pref is None or not (pref.pickup_point_id or "").strip():
+        return None
+    method = (shipping_method or order.shipping_method or "").strip()
+    if (pref.shipping_method_code or "").strip() and \
+            pref.shipping_method_code != method:
+        return None
+    locker = None
+    try:
+        from dpd.models import DpdLocker
+        locker = DpdLocker.objects.filter(
+            parcel_shop_id=pref.pickup_point_id).first()
+    except Exception:
+        locker = None
+    return {
+        "pickup_point_id": (pref.pickup_point_id or "").strip(),
+        "name": (pref.pickup_point_name or "").strip(),
+        "country_code": (pref.country_code or "").strip(),
+        "raw": dict(pref.pickup_point_raw or {}),
+        "locker": locker,
+    }
+
+
 def recompute_order_fulfillment_mode(*, order) -> None:
     """Derive fulfillment_mode from the warehouses of the order's offers.
 

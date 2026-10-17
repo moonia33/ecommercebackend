@@ -143,6 +143,12 @@ def _receiver_address_for_order(order: Order, shipment=None) -> dict[str, Any]:
     if shipping_method == "dpd_locker":
         pudo_id = _pudo
         if not pudo_id:
+            from checkout.services import preferred_pickup_point
+            pref = preferred_pickup_point(
+                order, shipping_method=shipping_method)
+            if pref:
+                pudo_id = pref["pickup_point_id"]
+        if not pudo_id:
             raise DpdLabelConfigError(
                 "dpd_locker: trūksta pickup point (pickup_point_id)")
         if not phone:
@@ -332,9 +338,9 @@ def ensure_dpd_shipment(order: Order, *, client: DpdClient | None = None,
     if not created:
         raise RuntimeError("DPD create_shipments grąžino tuščią atsakymą")
 
-    shipment = created[0]
-    shipment_id = str(shipment.get("id") or "").strip()
-    parcel_numbers = shipment.get("parcelNumbers") or []
+    created_shipment = created[0]
+    shipment_id = str(created_shipment.get("id") or "").strip()
+    parcel_numbers = created_shipment.get("parcelNumbers") or []
     parcel = str(parcel_numbers[0]).strip() if parcel_numbers else ""
 
     # DPD docs: parcelNumbers may be empty by default; parcel identifiers can be returned

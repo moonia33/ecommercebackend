@@ -597,6 +597,23 @@ outbound shipment and stay backward-compatible.
   cancelled); on paid orders the balance delta automatically becomes a
   pending surcharge/refund row.
 
+### Order shipping address
+
+- `GET /ops/orders/{id}/addresses` — saved addresses of the order's
+  customer (`UserAddress` rows, default shipping first).
+- `PATCH /ops/orders/{id}/address` — set the order shipping address:
+  `{user_address_id}` copies a saved address, or pass raw fields
+  `{full_name, company, line1, city, postal_code, country_code, phone}`
+  (line1/city/postal_code/country_code required). `save_to_customer`
+  persists a one-off address back to the customer profile;
+  `set_default_shipping` promotes it (unique default per user).
+
+Carrier label generation resolves the receiver via
+`order_shipping_snapshot()`: order fields first, then the customer's
+default shipping address, then the primary `UserPhone`. Locker methods
+fall back to the customer's `UserPickupPoint` when it matches the
+shipping method — labels no longer fail on admin-created orders.
+
 ### Order line editing (automatic balance)
 
 - `GET /ops/catalog/variants/search?q=&is_active=&limit=` — flat variant

@@ -145,6 +145,12 @@ def ensure_unisend_parcel(order: Order, *, client: UnisendClient | None = None) 
         # Terminal: from terminal to terminal.
         terminal_id = (order.pickup_point_id or "").strip()
         if not terminal_id:
+            from checkout.services import preferred_pickup_point
+            pref = preferred_pickup_point(
+                order, shipping_method=shipping_method)
+            if pref:
+                terminal_id = pref["pickup_point_id"]
+        if not terminal_id:
             raise UnisendLabelConfigError("lpexpress: trūksta pickup_point_id")
 
         terminal = UnisendTerminal.objects.filter(terminal_id=terminal_id, is_active=True).first()

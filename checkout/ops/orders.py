@@ -239,6 +239,125 @@ def ops_update_order_shipping(request, order_id: int, payload: OpsOrderShippingU
     )
 
 
+@router.get("/orders/{order_id}/addresses", response=list[OpsCustomerAddressOut], auth=_auth)
+def ops_order_customer_addresses(request, order_id: int):
+    """Saved addresses of the order's customer (for the address picker)."""
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+    order = _get_order_for_ops(order_id, shop_id=_request_shop_id(request))
+    if not order.user_id:
+        return []
+    return [
+        OpsCustomerAddressOut(
+            id=int(a.id),
+            label=(a.label or ""),
+            full_name=(a.full_name or ""),
+            company=(a.company or ""),
+            company_reg_no=(a.company_reg_no or ""),
+            company_vat_no=(a.company_vat_no or ""),
+            line1=(a.line1 or ""),
+            city=(a.city or ""),
+            postal_code=(a.postal_code or ""),
+            country_code=(a.country_code or ""),
+            phone=(a.phone or ""),
+            is_default_shipping=bool(a.is_default_shipping),
+            is_default_billing=bool(a.is_default_billing),
+        )
+        for a in order.user.addresses.all()
+    ]
+
+
+@router.patch("/orders/{order_id}/address", response=OpsOrderDetailOut, auth=_auth)
+def ops_update_order_address(request, order_id: int,
+                             payload: OpsOrderAddressUpdateIn):
+    """Set the order's shipping address — copy a saved customer address or
+    enter a one-off address (optionally saved to the customer profile)."""
+    _ensure_shop_context_if_strict(request)
+    user = _require_ops_user(request)
+    order = _get_order_for_ops(order_id, shop_id=_request_shop_id(request))
+
+    if payload.user_address_id:
+        addr = None
+        if order.user_id:
+            addr = order.user.addresses.filter(
+                id=payload.user_address_id).first()
+        if addr is None:
+            raise HttpError(404, "Address not found for this customer")
+        order.shipping_full_name = addr.full_name or order.shipping_full_name
+        order.shipping_company = addr.company or ""
+        order.shipping_line1 = addr.line1
+        order.shipping_city = addr.city
+        order.shipping_postal_code = addr.postal_code
+        order.shipping_country_code = addr.country_code or order.shipping_country_code
+        if addr.phone:
+            order.shipping_phone = addr.phone
+        if not order.country_code:
+            order.country_code = addr.country_code
+    else:
+        required = {
+            "line1": payload.line1.strip(),
+            "city": payload.city.strip(),
+            "postal_code": payload.postal_code.strip(),
+            "country_code": payload.country_code.strip(),
+        }
+        missing = [k for k, v in required.items() if not v]
+        if missing:
+            raise HttpError(400, f"Missing address fields: {', '.join(missing)}")
+        order.shipping_full_name = payload.full_name.strip() or order.shipping_full_name
+        order.shipping_company = payload.company.strip()
+        order.shipping_line1 = required["line1"]
+        order.shipping_city = required["city"]
+        order.shipping_postal_code = required["postal_code"]
+        order.shipping_country_code = required["country_code"].upper()
+        if payload.phone.strip():
+            order.shipping_phone = payload.phone.strip()
+        if not order.country_code:
+            order.country_code = required["country_code"].upper()
+
+        if payload.save_to_customer and order.user_id:
+            from accounts.models import UserAddress
+            has_default = order.user.addresses.filter(
+                is_default_shipping=True).exists()
+            if payload.set_default_shipping and has_default:
+                order.user.addresses.filter(
+                    is_default_shipping=True).update(
+                        is_default_shipping=False)
+                has_default = False
+            UserAddress.objects.create(
+                user=order.user,
+                label="Iš užsakymo",
+                full_name=order.shipping_full_name,
+                company=order.shipping_company,
+                line1=order.shipping_line1,
+                city=order.shipping_city,
+                postal_code=order.shipping_postal_code,
+                country_code=order.shipping_country_code or "LT",
+                phone=order.shipping_phone,
+                is_default_shipping=payload.set_default_shipping
+                or not has_default,
+            )
+
+    order.save(update_fields=[
+        "shipping_full_name", "shipping_company", "shipping_line1",
+        "shipping_city", "shipping_postal_code", "shipping_country_code",
+        "shipping_phone", "country_code", "updated_at",
+    ])
+
+    _track_order_event(
+        order=order,
+        user=user,
+        kind=OrderEvent.Kind.NOTE,
+        name="ops_address_updated",
+        payload={
+            "user_address_id": payload.user_address_id,
+            "line1": order.shipping_line1,
+            "city": order.shipping_city,
+            "country_code": order.shipping_country_code,
+        },
+    )
+    return _serialize_ops_order_detail(_order_detail_qs(order.id))
+
+
 def _surcharge_to_out(s: Surcharge) -> OpsSurchargeOut:
     return OpsSurchargeOut(
         id=int(s.id),

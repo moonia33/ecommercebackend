@@ -245,6 +245,19 @@ class OpsOrderShippingUpdateOut(Schema):
     balance_due: str = ""
 
 
+class OpsOrderAddressUpdateIn(Schema):
+    user_address_id: int | None = None
+    full_name: str = ""
+    company: str = ""
+    line1: str = ""
+    city: str = ""
+    postal_code: str = ""
+    country_code: str = ""
+    phone: str = ""
+    save_to_customer: bool = False
+    set_default_shipping: bool = False
+
+
 class OpsOrderLineIn(Schema):
     variant_id: int
     qty: int = 1

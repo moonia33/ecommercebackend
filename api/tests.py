@@ -941,6 +941,110 @@ class OpsOrderEditingBalanceTests(TestCase):
             {"q": "drill"}, HTTP_HOST="ops.local")
         self.assertEqual(len(res.json()), 2)
 
+    def test_order_address_picker_and_snapshot_fallback(self):
+        from accounts.models import UserAddress
+        from checkout.services import order_shipping_snapshot
+
+        order = Order.objects.create(
+            user=self.customer, shop=self.shop,
+            status=Order.Status.PAID,
+            shipping_method="dpd_courier", country_code="LT")
+        addr = UserAddress.objects.create(
+            user=self.customer, full_name="Jonas Jonaitis",
+            line1="Strazdu 1", city="Kaunas", postal_code="53454",
+            country_code="LT", phone="+37060000001",
+            is_default_shipping=True)
+
+        # Label-layer snapshot falls back to the saved address.
+        snap = order_shipping_snapshot(order)
+        self.assertEqual(snap["line1"], "Strazdu 1")
+        self.assertEqual(snap["phone"], "+37060000001")
+
+        self._auth()
+        # List customer addresses for the picker.
+        res = self.client.get(
+            f"/api/v1/ops/orders/{order.id}/addresses",
+            HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.json()), 1)
+
+        # Apply the saved address.
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{order.id}/address",
+            data={"user_address_id": addr.id},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        order.refresh_from_db()
+        self.assertEqual(order.shipping_line1, "Strazdu 1")
+        self.assertEqual(order.shipping_city, "Kaunas")
+
+        # Manual address entry saved to the customer profile.
+        res = self.client.patch(
+            f"/api/v1/ops/orders/{order.id}/address",
+            data={"line1": "Gedimino 5", "city": "Vilnius",
+                  "postal_code": "01103", "country_code": "lt",
+                  "phone": "+37060000002", "save_to_customer": True,
+                  "set_default_shipping": True},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        order.refresh_from_db()
+        self.assertEqual(order.shipping_line1, "Gedimino 5")
+        new_addr = order.user.addresses.get(is_default_shipping=True)
+        self.assertEqual(new_addr.line1, "Gedimino 5")
+        addr.refresh_from_db()
+        self.assertFalse(addr.is_default_shipping)
+
+    def test_dpd_ensure_shipment_writes_model_fields(self):
+        from unittest.mock import MagicMock, patch
+        from checkout.models import Shipment
+        from dpd.labels import ensure_dpd_shipment
+
+        order = Order.objects.create(
+            user=self.customer, shop=self.shop,
+            status=Order.Status.PAID,
+            shipping_method="dpd_courier", country_code="LT")
+        shipment = Shipment.objects.create(
+            order=order, kind="outbound", status="pending",
+            shipping_method="dpd_courier")
+
+        client = MagicMock()
+        client.create_shipments.return_value = [
+            {"id": "SH-X", "parcelNumbers": ["0581999"]}]
+        with patch("dpd.labels.build_shipment_dto", return_value={}), \
+                patch("dpd.labels._get_shipment_cfg", return_value=MagicMock()):
+            sid, parcel = ensure_dpd_shipment(
+                order, client=client, shipment=shipment)
+
+        self.assertEqual(sid, "SH-X")
+        self.assertEqual(parcel, "0581999")
+        shipment.refresh_from_db()
+        self.assertEqual(shipment.carrier_code, "dpd")
+        self.assertEqual(shipment.carrier_shipment_id, "SH-X")
+        self.assertEqual(shipment.tracking_number, "0581999")
+        order.refresh_from_db()
+        self.assertEqual(order.tracking_number, "0581999")
+
+    def test_preferred_pickup_point_fallback(self):
+        from accounts.models import UserPickupPoint
+        from checkout.services import preferred_pickup_point
+
+        order = Order.objects.create(
+            user=self.customer, shop=self.shop,
+            status=Order.Status.PAID,
+            shipping_method="dpd_locker", country_code="LT")
+        self.assertIsNone(preferred_pickup_point(order))
+
+        UserPickupPoint.objects.create(
+            user=self.customer, shipping_method_code="dpd_locker",
+            pickup_point_id="LT99999", pickup_point_name="Test locker",
+            country_code="LT")
+        pref = preferred_pickup_point(order)
+        self.assertEqual(pref["pickup_point_id"], "LT99999")
+
+        # Different method -> not applied.
+        order.shipping_method = "unisend_pickup"
+        self.assertIsNone(preferred_pickup_point(order))
+
     def test_label_regen_forks_shipment(self):
         from unittest.mock import patch
         from django.utils import timezone
