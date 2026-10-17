@@ -1619,3 +1619,68 @@ class OpsLineEditDiscountTests(TestCase):
             CouponRedemption.objects.filter(order_id=oid).exists())
         coupon.refresh_from_db()
         self.assertEqual(int(coupon.times_redeemed), 0) 
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class OpsInvoiceEndpointsTests(OpsLineEditDiscountTests):
+    """Invoice issue / credit / cancel ops endpoints."""
+
+    def test_issue_credit_cancel_flow(self):
+        from billing.models import Invoice
+        self._auth()
+        oid = self._create_order(qty=2)
+
+        # no invoice yet -> issue manually
+        res = self.client.post(
+            f"/api/v1/ops/orders/{oid}/invoice",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        inv = res.json()
+        self.assertEqual(inv["kind"], "sales")
+        self.assertEqual(inv["status"], "issued")
+        self.assertTrue(inv["number"].startswith("SF-"))
+
+        # full credit
+        res = self.client.post(
+            f"/api/v1/ops/invoices/{inv['id']}/credit",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        credit = res.json()
+        self.assertEqual(credit["kind"], "credit")
+        self.assertTrue(credit["number"].startswith("KRF-"))
+        self.assertEqual(credit["credit_of_number"], inv["number"])
+        self.assertTrue(credit["total_gross"].startswith("-"))
+
+        # second full credit rejected (lines already fully credited)
+        res = self.client.post(
+            f"/api/v1/ops/invoices/{inv['id']}/credit",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+        # cancel the credit
+        res = self.client.post(
+            f"/api/v1/ops/invoices/{credit['id']}/cancel",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "cancelled")
+
+        # after cancelling, crediting works again
+        res = self.client.post(
+            f"/api/v1/ops/invoices/{inv['id']}/credit",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+
+        self.assertEqual(
+            Invoice.objects.filter(order_id=oid, kind="credit").count(), 2)
+
+    def test_invoice_list_scoped_to_order(self):
+        self._auth()
+        oid = self._create_order(qty=1)
+        self.client.post(
+            f"/api/v1/ops/orders/{oid}/invoice",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        res = self.client.get(
+            "/api/v1/ops/invoices", {"order_id": oid}, HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.json()), 1)
+        self.assertEqual(res.json()[0]["order_id"], oid)

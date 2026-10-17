@@ -146,3 +146,73 @@ class InvoiceEmailTests(InvoiceBase):
                     key="invoice_issued", language_code=lang).exists(),
                 lang,
             )
+
+
+class CreditInvoiceTests(InvoiceBase):
+    def _issued(self):
+        return issue_invoice_for_order(self.order)
+
+    def test_full_credit_mirrors_invoice(self):
+        from billing.services import issue_credit_invoice
+
+        inv = self._issued()
+        credit = issue_credit_invoice(inv)
+        year = timezone.localdate().year
+        self.assertTrue(credit.number.startswith(f"KRF-{year}-"))
+        self.assertEqual(credit.credit_of_id, inv.id)
+        self.assertEqual(credit.kind, "credit")
+        self.assertEqual(credit.totals["gross"], "-15.73")
+        self.assertEqual(credit.buyer["full_name"], "Test Buyer")
+        self.assertEqual(credit.seller["legal_name"], "MB Test")
+        # product + shipping lines, all negative
+        lines = list(credit.lines.all())
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(all(ln.total_gross < 0 for ln in lines))
+        self.assertTrue(all(ln.credited_line_id for ln in lines))
+
+    def test_partial_credit_qty(self):
+        from billing.services import issue_credit_invoice
+
+        inv = self._issued()
+        product_line = inv.lines.get(line_type="product")
+        credit = issue_credit_invoice(
+            inv, lines=[{"invoice_line_id": product_line.id, "qty": 1}])
+        self.assertEqual(len(credit.lines.all()), 1)
+        self.assertEqual(credit.totals["gross"], "-12.10")
+
+    def test_cumulative_credit_cannot_exceed_invoiced(self):
+        from billing.models import InvoiceLine
+        from billing.services import issue_credit_invoice
+
+        self.order.lines.update(qty=2, total_net=Decimal("20.00"),
+                                total_vat=Decimal("4.20"),
+                                total_gross=Decimal("24.20"))
+        inv = self._issued()
+        line = inv.lines.get(line_type="product")
+        issue_credit_invoice(
+            inv, lines=[{"invoice_line_id": line.id, "qty": 2}])
+        with self.assertRaises(ValueError):
+            issue_credit_invoice(
+                inv, lines=[{"invoice_line_id": line.id, "qty": 1}])
+        self.assertEqual(
+            InvoiceLine.objects.filter(invoice__credit_of=inv).count(), 1)
+
+    def test_credit_requires_issued_sales_invoice(self):
+        from billing.services import cancel_invoice, issue_credit_invoice
+
+        inv = self._issued()
+        cancel_invoice(inv)
+        with self.assertRaises(ValueError):
+            issue_credit_invoice(inv)
+        with self.assertRaises(ValueError):
+            issue_credit_invoice(
+                Invoice(kind=Invoice.Kind.CREDIT, order=self.order))
+
+    def test_cancelled_sales_invoice_frees_reissue(self):
+        from billing.services import cancel_invoice
+
+        inv = self._issued()
+        cancel_invoice(inv)
+        inv2 = issue_invoice_for_order(self.order)
+        self.assertNotEqual(inv.id, inv2.id)
+        self.assertEqual(inv2.kind, "sales")

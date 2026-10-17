@@ -650,6 +650,26 @@ shipping method — labels no longer fail on admin-created orders.
 `GET /ops/orders/{id}` returns `discounts[]` and
 `totals.discounts_net|vat|gross`.
 
+### Invoices / order documents
+
+Sales invoices auto-issue when an order reaches `delivered`
+(Celery task: snapshot -> private-storage PDF -> templated email).
+
+- `GET /ops/invoices?order_id=` — list; `GET /ops/invoices/{id}` —
+  detail with `lines[]` (incl. `credited_qty` per line).
+- `POST /ops/orders/{id}/invoice` — issue the sales invoice now
+  (idempotent; one active sales invoice per order).
+- `POST /ops/invoices/{id}/credit` — `{lines?: [{invoice_line_id, qty}],
+  send_email?}`. No lines = full credit. Partial credits are cumulative —
+  the sum across issued credit notes can never exceed the invoiced qty
+  of a line. Credit lines mirror the source invoice line amounts
+  proportionally (exact VAT/rounding). Numbers come from the KRF series.
+- `POST /ops/invoices/{id}/cancel` — marks cancelled (kept for audit);
+  cancelling a sales invoice frees re-issue; cancelling a credit note
+  frees the credited qty.
+- `POST /ops/invoices/{id}/resend` — re-email; `GET
+  /ops/invoices/{id}/pdf` — private-storage PDF (lazy-generated).
+
 Whenever `total_gross` changes on an order with a confirmed payment,
 `reconcile_order_balance()` maintains a single pending auto `Surcharge`:
 

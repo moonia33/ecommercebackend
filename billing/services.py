@@ -201,6 +201,104 @@ def ensure_invoice_pdf(invoice: Invoice) -> bool:
     return True
 
 
+@transaction.atomic
+def issue_credit_invoice(
+    invoice: Invoice,
+    *,
+    lines: list[dict] | None = None,
+) -> Invoice:
+    """Issue a credit invoice against an issued sales invoice.
+
+    lines=None -> full credit of every invoice line.
+    lines=[{"invoice_line_id": int, "qty": int}] -> partial credit; the
+    cumulative credited qty across all issued credit notes can never
+    exceed the invoiced qty of each line.
+    """
+    if invoice.kind != Invoice.Kind.SALES:
+        raise ValueError("Only sales invoices can be credited")
+    if invoice.status != Invoice.Status.ISSUED:
+        raise ValueError("Only issued invoices can be credited")
+
+    src_lines = list(invoice.lines.all())
+    if not src_lines:
+        raise ValueError("Invoice has no lines")
+
+    already: dict[int, int] = {}
+    for cl in InvoiceLine.objects.filter(
+            invoice__credit_of=invoice,
+            invoice__status=Invoice.Status.ISSUED,
+            credited_line__isnull=False):
+        already[cl.credited_line_id] = already.get(cl.credited_line_id, 0) + int(cl.qty)
+
+    if lines is None:
+        sel = {ln.id: int(ln.qty) for ln in src_lines}
+    else:
+        sel: dict[int, int] = {}
+        for it in lines:
+            lid = int(it.get("invoice_line_id") or 0)
+            qty = int(it.get("qty") or 0)
+            if qty > 0:
+                sel[lid] = sel.get(lid, 0) + qty
+        if not sel:
+            raise ValueError("Nothing to credit")
+
+    order = invoice.order
+    today = timezone.localdate()
+    credit = Invoice(
+        kind=Invoice.Kind.CREDIT,
+        order=order,
+        shop=invoice.shop,
+        credit_of=invoice,
+        issue_date=today,
+        currency=invoice.currency or "EUR",
+        language_code=invoice.language_code or _order_language(order),
+        seller=dict(invoice.seller or {}),
+        buyer=dict(invoice.buyer or {}),
+    )
+    credit.number = _next_invoice_number(
+        order.shop, Invoice.Kind.CREDIT, today.year)
+    credit.save()
+
+    new_lines: list[InvoiceLine] = []
+    for i, ln in enumerate(src_lines):
+        qty = sel.get(ln.id)
+        if not qty:
+            continue
+        if already.get(ln.id, 0) + qty > int(ln.qty):
+            raise ValueError(
+                f"'{ln.name}': credited qty would exceed invoiced "
+                f"({already.get(ln.id, 0) + qty} > {ln.qty})")
+        # Proportional slice of the stored line totals — preserves the
+        # issued document's VAT/rounding exactly (no recomputation).
+        ratio = Decimal(qty) / Decimal(ln.qty)
+        new_lines.append(InvoiceLine(
+            invoice=credit,
+            credited_line=ln,
+            line_type=ln.line_type,
+            name=ln.name,
+            sku=ln.sku,
+            qty=qty,
+            unit_net=-ln.unit_net,
+            vat_rate=ln.vat_rate,
+            total_net=-(Decimal(ln.total_net) * ratio).quantize(Decimal("0.01")),
+            total_vat=-(Decimal(ln.total_vat) * ratio).quantize(Decimal("0.01")),
+            total_gross=-(Decimal(ln.total_gross) * ratio).quantize(Decimal("0.01")),
+            sort_order=i,
+        ))
+    InvoiceLine.objects.bulk_create(new_lines)
+    credit.totals = _invoice_totals(new_lines)
+    credit.save(update_fields=["totals"])
+    return credit
+
+
+@transaction.atomic
+def cancel_invoice(invoice: Invoice) -> Invoice:
+    if invoice.status != Invoice.Status.CANCELLED:
+        invoice.status = Invoice.Status.CANCELLED
+        invoice.save(update_fields=["status"])
+    return invoice
+
+
 def send_invoice_email(invoice: Invoice) -> bool:
     from notifications.services import send_templated_email
 

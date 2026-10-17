@@ -153,6 +153,11 @@ class InvoiceLine(models.Model):
 
     invoice = models.ForeignKey(
         Invoice, on_delete=models.CASCADE, related_name="lines")
+    credited_line = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="credit_rows",
+        help_text="On credit invoices: the sales-invoice line being credited.",
+    )
     line_type = models.CharField(
         max_length=16, choices=LineType.choices, default=LineType.PRODUCT)
     name = models.CharField(max_length=255)
