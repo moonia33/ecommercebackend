@@ -572,9 +572,12 @@ picked locker, split delivery, customer return). Order-level
 `tracking_number` / `carrier_*` / `delivery_status` mirror the primary
 outbound shipment and stay backward-compatible.
 
-- `GET /ops/shipments/registry?tracking=&order_id=&kind=&status=&carrier_code=`
-  — search the shipment registry (tracking number substring search,
-  `kind=outbound|return`).
+- `GET /ops/shipments/registry?tracking=&order_id=&kind=&status=&carrier_code=&shipping_method=&page=&page_size=`
+  — **shipment registry (paginated)**: `{page, page_size, total_count,
+  results: ShipmentRow[]}`. This is the source of truth for the `/siuntos`
+  list — one row per `Shipment` (outbound and return), not per order.
+  `tracking` is a substring match. `GET /ops/shipments` stays as the legacy
+  order-level projection for backwards compatibility.
 - `POST /ops/orders/{id}/shipments` — register a shipment:
   `{kind, shipping_method?, carrier_code?, tracking_number?, pickup_locker_id?, notes?}`.
   Use `kind=return` to register a customer return parcel (DPD return service

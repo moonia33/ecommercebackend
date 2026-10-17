@@ -208,6 +208,13 @@ class OpsShipmentRowOut(Schema):
     updated_at: str = ""
 
 
+class OpsShipmentRegistryOut(Schema):
+    page: int
+    page_size: int
+    total_count: int
+    results: list[OpsShipmentRowOut]
+
+
 class OpsShipmentCreateIn(Schema):
     kind: str = "outbound"
     shipping_method: str = ""

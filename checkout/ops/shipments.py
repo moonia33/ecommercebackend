@@ -47,7 +47,7 @@ def ops_list_shipments(
     return OpsShipmentListOut(page=page, page_size=page_size, total_count=total_count, results=out)
 
 
-@router.get("/shipments/registry", response=list[OpsShipmentRowOut], auth=_auth)
+@router.get("/shipments/registry", response=OpsShipmentRegistryOut, auth=_auth)
 def ops_shipment_registry(
     request,
     tracking: str = "",
@@ -55,11 +55,18 @@ def ops_shipment_registry(
     kind: str = "",
     status: str = "",
     carrier_code: str = "",
+    shipping_method: str = "",
+    page: int = 1,
+    page_size: int = 50,
 ):
-    """Search the shipment registry by tracking number / order / status."""
+    """Shipment registry: the source of truth for parcels — one row per
+    Shipment (outbound and return), not per order."""
     _ensure_shop_context_if_strict(request)
     _require_ops_user(request)
     shop_id = _request_shop_id(request)
+    page = max(1, int(page or 1))
+    page_size = max(1, min(int(page_size or 50), 200))
+    offset = (page - 1) * page_size
 
     qs = Shipment.objects.select_related("order", "pickup_locker")
     if shop_id is not None:
@@ -76,8 +83,17 @@ def ops_shipment_registry(
         qs = qs.filter(status=status.strip())
     if carrier_code.strip():
         qs = qs.filter(carrier_code=carrier_code.strip())
+    if shipping_method.strip():
+        qs = qs.filter(shipping_method=shipping_method.strip())
 
-    return [_serialize_shipment(s) for s in qs.order_by("-created_at", "-id")[:200]]
+    total_count = qs.count()
+    rows = qs.order_by("-created_at", "-id")[offset : offset + page_size]
+    return OpsShipmentRegistryOut(
+        page=page,
+        page_size=page_size,
+        total_count=total_count,
+        results=[_serialize_shipment(s) for s in rows],
+    )
 
 
 @router.post("/orders/{order_id}/shipments", response=OpsShipmentRowOut, auth=_auth)

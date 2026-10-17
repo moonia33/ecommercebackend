@@ -610,8 +610,8 @@ class OpsShipmentsAndOrderManagementTests(TestCase):
         res = self.client.get(
             "/api/v1/ops/shipments/registry",
             {"tracking": "abc12"}, HTTP_HOST="ops.local")
-        self.assertEqual(len(res.json()), 1)
-        self.assertEqual(res.json()[0]["id"], sid)
+        self.assertEqual(len(res.json()["results"]), 1)
+        self.assertEqual(res.json()["results"][0]["id"], sid)
 
         res = self.client.post(
             f"/api/v1/ops/orders/{self.order.id}/shipments",
@@ -628,6 +628,40 @@ class OpsShipmentsAndOrderManagementTests(TestCase):
         self.order.refresh_from_db()
         self.assertEqual(self.order.tracking_number, "ABC123")
         self.assertEqual(self.order.delivery_status, "in_transit")
+
+    def test_registry_lists_all_shipments_per_order(self):
+        """The /siuntos list is Shipment-based: every parcel of an order must
+        appear as its own row (outbound + return + cancelled forks)."""
+        self._auth()
+        from checkout.models import Shipment
+        out1 = Shipment.objects.create(order=self.order, kind="outbound",
+                                       status="delivered", tracking_number="T1")
+        out2 = Shipment.objects.create(order=self.order, kind="outbound",
+                                       status="pending", tracking_number="T2")
+        ret = Shipment.objects.create(order=self.order, kind="return",
+                                      status="in_transit", tracking_number="R1")
+
+        res = self.client.get(
+            "/api/v1/ops/shipments/registry",
+            {"order_id": self.order.id}, HTTP_HOST="ops.local")
+        body = res.json()
+        self.assertEqual(body["total_count"], 3)
+        self.assertEqual({r["id"] for r in body["results"]},
+                         {out1.id, out2.id, ret.id})
+
+        res = self.client.get(
+            "/api/v1/ops/shipments/registry",
+            {"order_id": self.order.id, "kind": "return"}, HTTP_HOST="ops.local")
+        self.assertEqual([r["id"] for r in res.json()["results"]], [ret.id])
+
+        res = self.client.get(
+            "/api/v1/ops/shipments/registry",
+            {"order_id": self.order.id, "page_size": 2}, HTTP_HOST="ops.local")
+        body = res.json()
+        self.assertEqual(body["total_count"], 3)
+        self.assertEqual(len(body["results"]), 2)
+        self.assertEqual(body["page"], 1)
+        self.assertEqual(body["page_size"], 2)
 
     def test_aggregate_delivery_status(self):
         from checkout.models import Shipment, aggregate_delivery_status
