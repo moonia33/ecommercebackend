@@ -77,21 +77,36 @@ class _OverridesStore(_NamedResourceStore):
         return {"overrides": list(self.items.values())}
 
 
+class _Collections(dict):
+    """Dict with the .create() method the real client exposes."""
+
+    def create(self, schema):
+        self[schema["name"]] = FakeCollection(FakeDocuments(), schema)
+
+
 class FakeCollection:
-    def __init__(self, documents):
+    def __init__(self, documents, schema=None):
         self.documents = documents
         self.synonyms = _SynonymsStore()
         self.overrides = _OverridesStore()
+        self.schema = schema
+        self.deleted = False
 
     def retrieve(self):
-        return {"name": "products"}
+        from search.services import SCHEMA
+
+        return {"name": "products", "fields": (self.schema or SCHEMA)["fields"]}
+
+    def delete(self):
+        self.deleted = True
 
 
 class FakeClient:
     def __init__(self, hits=None, error=None):
         self.documents = FakeDocuments(
             result={"hits": hits or []}, error=error)
-        self.collections = {"products": FakeCollection(self.documents)}
+        self.collections = _Collections()
+        self.collections["products"] = FakeCollection(self.documents)
 
 
 def _hits(*ids):
@@ -282,7 +297,7 @@ class CurationSyncTests(TestCase):
         self.assertNotIn("syn-999", coll.synonyms.items)
         self.assertIn("ext-1", coll.synonyms.items)
 
-    def test_synonym_root_one_way(self):
+    def test_synonym_root_becomes_multiway_member(self):
         from search.models import SearchSynonym
         from search.services import sync_synonyms
 
@@ -291,8 +306,10 @@ class CurationSyncTests(TestCase):
         sync_synonyms()
         body = self.client.collections["products"].synonyms.items[
             f"syn-{syn.id}"]
-        self.assertEqual(body["root"], "meškerė")
-        self.assertEqual(body["synonyms"], ["feederis", "pickeris"])
+        # Root is pushed as a multi-way member — Typesense `root` synonyms
+        # only remap at index time and would not expand queries.
+        self.assertNotIn("root", body)
+        self.assertEqual(body["synonyms"], ["feederis", "pickeris", "meškerė"])
 
     def test_override_pins_and_excludes(self):
         from search.models import (

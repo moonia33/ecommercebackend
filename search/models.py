@@ -10,10 +10,12 @@ def _terms_list(raw: str) -> list[str]:
 
 
 class SearchSynonym(models.Model):
-    """Synonym group pushed to Typesense (`syn-{id}`).
+    """Synonym group pushed to Typesense (`syn-{id}`) as a multi-way
+    synonym — every listed term expands to all the others at query time.
 
-    Without `root`: multi-way synonym (any term expands to all terms).
-    With `root`: one-way — queries for `root` also match the terms.
+    `root` is only a UX convenience marking the canonical term; it is
+    appended to the synonym set, not sent as a Typesense root (which would
+    only remap terms at index time and not expand queries).
     """
 
     name = models.SlugField(max_length=100, unique=True)
@@ -21,7 +23,12 @@ class SearchSynonym(models.Model):
         help_text="Comma-separated terms, e.g. 'meškerė, meškere, spiningas'")
     root = models.CharField(
         max_length=255, blank=True, default="",
-        help_text="Optional one-way synonym root term")
+        help_text=(
+            "Optional canonical term — it is simply added to the synonym "
+            "group, so every term (including this one) matches all the "
+            "others. Use it for the correct spelling, list misspellings "
+            "under terms."
+        ))
     is_active = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 

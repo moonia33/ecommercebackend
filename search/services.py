@@ -31,9 +31,13 @@ SCHEMA = {
     "fields": [
         {"name": "id", "type": "string"},
         {"name": "shop_ids", "type": "int32[]"},
-        {"name": "name", "type": "string", "locale": "lt"},
-        {"name": "sku", "type": "string"},
-        {"name": "search_text", "type": "string", "locale": "lt", "optional": True},
+        # NOTE: no `locale` on searchable fields — Typesense locale
+        # processing runs before synonym lookup and breaks synonym matching
+        # (verified on v28/v29). Diacritic folding is covered by the
+        # pre-normalized `search_text` field instead.
+        {"name": "name", "type": "string", "infix": True},
+        {"name": "sku", "type": "string", "infix": True},
+        {"name": "search_text", "type": "string", "optional": True, "infix": True},
         {"name": "slug", "type": "string", "index": False},
         {"name": "category_ids", "type": "int32[]", "facet": True},
         {"name": "brand_id", "type": "int32", "facet": True, "optional": True},
@@ -75,10 +79,38 @@ def get_client():
     return _client
 
 
-def ensure_collection() -> bool:
+def ensure_collection(*, force_recreate: bool = False) -> bool:
     client = get_client()
     if client is None:
         return False
+    recreate = force_recreate
+    if not recreate:
+        try:
+            existing = client.collections[COLLECTION_NAME].retrieve()
+
+            def _sig(f: dict) -> tuple:
+                return (
+                    f["name"],
+                    f["type"],
+                    bool(f.get("facet")),
+                    bool(f.get("optional")),
+                    bool(f.get("infix")),
+                    bool(f.get("index", True)),
+                )
+
+            # 'id' is implicit/managed by Typesense — excluded from the diff.
+            wanted = {_sig(f) for f in SCHEMA["fields"] if f["name"] != "id"}
+            actual = {_sig(f) for f in existing.get("fields", []) if f["name"] != "id"}
+            recreate = wanted != actual
+        except Exception:
+            recreate = False
+    if recreate:
+        try:
+            client.collections[COLLECTION_NAME].delete()
+        except Exception:
+            pass
+        client.collections.create(SCHEMA)
+        return True
     try:
         client.collections[COLLECTION_NAME].retrieve()
     except Exception:
@@ -210,7 +242,17 @@ def index_products(product_ids: Iterable[int]) -> int:
         return 0
     result = client.collections[COLLECTION_NAME].documents.import_(
         docs, {"action": "upsert"})
-    return len(docs) if isinstance(result, list) else 0
+    if not isinstance(result, list):
+        return 0
+    failed = [r for r in result if not r.get("success")]
+    if failed:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Typesense import: %d/%d docs rejected, first error: %s",
+            len(failed), len(result), failed[0].get("error", ""),
+        )
+    return len(result) - len(failed)
 
 
 def delete_product_document(product_id: int) -> None:
@@ -301,10 +343,14 @@ def sync_synonyms() -> dict:
 
     wanted: dict[str, dict] = {}
     for s in SearchSynonym.objects.filter(is_active=True):
-        body = {"synonyms": s.terms_list}
-        if s.root:
-            body["root"] = s.root
-        wanted[s.typesense_id] = body
+        # Typesense `root` synonyms map terms at *index time* only — they do
+        # not expand queries. The admin `root` field means "canonical term":
+        # we therefore push a multi-way synonym containing root + terms, so
+        # a misspelled query (e.g. "vojdzer") finds "Voyager" products.
+        terms = list(s.terms_list)
+        if s.root and s.root.lower() not in {t.lower() for t in terms}:
+            terms.append(s.root)
+        wanted[s.typesense_id] = {"synonyms": terms}
 
     collection = client.collections[COLLECTION_NAME]
     try:
