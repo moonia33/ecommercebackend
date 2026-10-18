@@ -99,6 +99,7 @@ def _build_lines(invoice: Invoice, order: Order) -> list[InvoiceLine]:
     for i, ln in enumerate(order.lines.all().order_by("id")):
         lines.append(InvoiceLine(
             invoice=invoice,
+            order_line=ln,
             line_type=InvoiceLine.LineType.PRODUCT,
             name=ln.name, sku=ln.sku, qty=ln.qty,
             unit_net=ln.unit_net, vat_rate=ln.vat_rate,

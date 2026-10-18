@@ -763,3 +763,48 @@ The delivery ETA snapshot (`delivery_min_date`/`delivery_max_date` +
 `shipping.estimate_delivery_window` aggregated over lines (worst-case wins).
 Configure `DeliveryRule` rows (LEAD_TIME or CYCLE) to feed it — no rules ->
 no ETA.
+
+### Returns (RMA)
+
+Lifecycle: `pending -> approved -> received -> completed` (credit
+issued). `rejected`/`cancelled` are terminal; `approved -> cancelled`
+while nothing was received. `pending -> approved` sends the customer the
+seeded `return_instructions` email (lt/en/pl, best-effort).
+
+- `GET /ops/returns?q=&status=&order_id=&limit=` — registry; `q` matches
+  RMA number, order id, line SKU and return-shipment tracking.
+- `GET /ops/returns/{id}` — detail with `lines[]`
+  (`qty`/`received_qty`/`credited_qty`/`reason` + product
+  `returnable`/`return_days`).
+- `POST /ops/orders/{id}/returns` — `{lines: [{order_line_id, qty,
+  reason?}], note?, approve? (default true), allow_expired?}`.
+  Validation: line belongs to the order; `Product.returnable=false` is a
+  hard block; cumulative qty across non-rejected/cancelled returns can
+  never exceed the ordered qty; when `order.delivered_at` is set, the
+  window `delivered_at + return_days` is enforced (`return_days` =
+  product override or `settings.DEFAULT_RETURN_DAYS`, default 14) unless
+  `allow_expired`.
+- `POST /ops/returns/{id}/status/{status}` — transition; `approved`
+  triggers the instructions email.
+- `POST /ops/returns/{id}/shipment` — `{carrier_code?, tracking_number?,
+  notes?}` creates/links a `Shipment(kind=return)` so it shows up in the
+  shipments registry and is tracked like outbound parcels.
+- `POST /ops/returns/{id}/receive` — `{lines: [{return_line_id, qty}],
+  restock_warehouse_id?}`. Marks goods received (idempotent; cumulative
+  `received_qty` capped at requested `qty`). With `restock_warehouse_id`
+  the received qty is added to that warehouse's `InventoryItem`
+  (`qty_on_hand +=`, created if missing) — damaged goods simply omit the
+  warehouse. Auto-transitions to `received` when all lines are fully in.
+- `POST /ops/returns/{id}/credit` — `{discount_gross?, send_email?}`.
+  Issues a KRF credit note for everything `received_qty > credited_qty`,
+  mapped to the sales invoice's lines via `InvoiceLine.order_line`
+  (requires an issued sales invoice first). The discount clawback
+  follows the same rules as manual crediting: proportional by default,
+  `discount_gross` overrides. Auto-transitions to `completed` when every
+  line is fully credited. Refund of the money itself stays manual
+  (surcharge `direction=refund` records the balance).
+
+`matched_lines[]` on order detail/list additionally exposes
+`returnable`, `return_days`, `returned_qty` (cumulative, active returns
+only) and `return_deadline` (`delivered_at + return_days`). Warehouses
+for restocking come from `GET /ops/warehouses`.

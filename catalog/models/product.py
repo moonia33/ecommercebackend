@@ -73,6 +73,15 @@ class Product(models.Model):
 
     is_active = models.BooleanField(default=True)
 
+    # Returns: non-returnable products (e.g. perishables, custom orders)
+    # are excluded from RMA flows. return_days=None -> shop/default window.
+    returnable = models.BooleanField(default=True)
+    return_days = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text="Days after delivery the item can be returned "
+                  "(empty -> DEFAULT_RETURN_DAYS).",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -906,3 +906,76 @@ class Surcharge(models.Model):
 
     def __str__(self) -> str:
         return f"surcharge:{self.id} order:{self.order_id} {self.amount_gross}{self.currency}"
+
+
+class ReturnRequest(models.Model):
+    """RMA: a customer's (or manager-created) return of order items.
+
+    Lifecycle: pending -> approved -> received -> completed (credit issued).
+    Rejected/cancelled are terminal. approved -> cancelled allowed while
+    nothing was received.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending approval"
+        APPROVED = "approved", "Approved, awaiting goods"
+        REJECTED = "rejected", "Rejected"
+        RECEIVED = "received", "Goods received"
+        COMPLETED = "completed", "Completed (credited)"
+        CANCELLED = "cancelled", "Cancelled"
+
+    order = models.ForeignKey(
+        Order, on_delete=models.CASCADE, related_name="returns")
+    number = models.CharField(max_length=40, unique=True)
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.PENDING)
+
+    note = models.TextField(blank=True, default="")
+
+    shipment = models.ForeignKey(
+        Shipment, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="return_requests",
+        help_text="Return shipment (kind=return) carrying these goods.",
+    )
+    credit_invoice = models.ForeignKey(
+        "billing.Invoice", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="return_requests",
+        help_text="Latest credit invoice issued for this return.",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="created_returns")
+
+    decided_at = models.DateTimeField(null=True, blank=True)
+    received_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["order", "status"]),
+            models.Index(fields=["status", "-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.number} order:{self.order_id} {self.status}"
+
+
+class ReturnLine(models.Model):
+    return_request = models.ForeignKey(
+        ReturnRequest, on_delete=models.CASCADE, related_name="lines")
+    order_line = models.ForeignKey(
+        OrderLine, on_delete=models.PROTECT, related_name="return_lines")
+
+    qty = models.PositiveIntegerField()
+    received_qty = models.PositiveIntegerField(default=0)
+    credited_qty = models.PositiveIntegerField(default=0)
+    reason = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return f"{self.return_request_id} line:{self.order_line_id} x{self.qty}"

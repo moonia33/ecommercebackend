@@ -1684,3 +1684,165 @@ class OpsInvoiceEndpointsTests(OpsLineEditDiscountTests):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(res.json()), 1)
         self.assertEqual(res.json()[0]["order_id"], oid)
+
+
+class OpsReturnTests(OpsLineEditDiscountTests):
+    """RMA lifecycle: create -> approve -> receive -> credit."""
+
+    def _deliver(self, oid, days_ago=1):
+        from django.utils import timezone
+        order = Order.objects.get(id=oid)
+        order.delivered_at = timezone.now() - timezone.timedelta(
+            days=days_ago)
+        order.save(update_fields=["delivered_at"])
+
+    def _create_return(self, oid, line, qty=1, **extra):
+        payload = {
+            "lines": [{"order_line_id": line["order_line_id"], "qty": qty}],
+            **extra,
+        }
+        return self.client.post(
+            f"/api/v1/ops/orders/{oid}/returns",
+            data=payload, content_type="application/json",
+            HTTP_HOST="ops.local")
+
+    def test_return_full_lifecycle(self):
+        self._auth()
+        oid = self._create_order(qty=2)
+        self._deliver(oid)
+        line = self._line(oid)
+
+        res = self._create_return(oid, line, qty=1, approve=False)
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        ret = res.json()
+        self.assertEqual(ret["status"], "pending")
+        self.assertTrue(ret["number"].startswith("RMA-"))
+
+        res = self.client.post(
+            f"/api/v1/ops/returns/{ret['id']}/status/approved",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        self.assertEqual(res.json()["status"], "approved")
+
+        # return shipment with tracking
+        res = self.client.post(
+            f"/api/v1/ops/returns/{ret['id']}/shipment",
+            data={"carrier_code": "dpd", "tracking_number": "R123"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        self.assertEqual(res.json()["tracking_number"], "R123")
+
+        # receive goods
+        rl = res.json()["lines"][0]
+        res = self.client.post(
+            f"/api/v1/ops/returns/{ret['id']}/receive",
+            data={"lines": [{"return_line_id": rl["id"], "qty": 1}]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        self.assertEqual(res.json()["status"], "received")
+        self.assertEqual(res.json()["lines"][0]["received_qty"], 1)
+
+        # credit requires a sales invoice first
+        res = self.client.post(
+            f"/api/v1/ops/returns/{ret['id']}/credit",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+        self.client.post(
+            f"/api/v1/ops/orders/{oid}/invoice",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+
+        res = self.client.post(
+            f"/api/v1/ops/returns/{ret['id']}/credit",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        out = res.json()
+        self.assertEqual(out["status"], "completed")
+        self.assertEqual(out["lines"][0]["credited_qty"], 1)
+        self.assertTrue(out["credit_invoice_number"].startswith("KRF-"))
+
+    def test_return_qty_and_window_validation(self):
+        from django.utils import timezone
+        self._auth()
+        oid = self._create_order(qty=2)
+        self._deliver(oid)
+        line = self._line(oid)
+
+        res = self._create_return(oid, line, qty=5)
+        self.assertEqual(res.status_code, 400)
+
+        res = self._create_return(oid, line, qty=2)
+        self.assertEqual(res.status_code, 200)
+        # cumulative: a second return for the same line is capped
+        res = self._create_return(oid, line, qty=1)
+        self.assertEqual(res.status_code, 400)
+
+        # expired window: delivered 30d ago, default 14d
+        oid2 = self._create_order(qty=1)
+        self._deliver(oid2, days_ago=30)
+        line2 = self._line(oid2)
+        res = self._create_return(oid2, line2, qty=1)
+        self.assertEqual(res.status_code, 400)
+        res = self._create_return(oid2, line2, qty=1, allow_expired=True)
+        self.assertEqual(res.status_code, 200, res.content[:300])
+
+    def test_non_returnable_product_blocked(self):
+        self._auth()
+        p = self.variant.product
+        p.returnable = False
+        p.save(update_fields=["returnable"])
+        oid = self._create_order(qty=1)
+        self._deliver(oid)
+        line = self._line(oid)
+        res = self._create_return(oid, line, qty=1)
+        self.assertEqual(res.status_code, 400)
+
+    def test_receive_restocks_inventory(self):
+        self._auth()
+        oid = self._create_order(qty=2)
+        self._deliver(oid)
+        line = self._line(oid)
+        before = InventoryItem.objects.get(
+            variant=self.variant, warehouse=self.local_wh).qty_on_hand
+
+        res = self._create_return(oid, line, qty=1)
+        ret = res.json()
+        rl = ret["lines"][0]
+        res = self.client.post(
+            f"/api/v1/ops/returns/{ret['id']}/receive",
+            data={
+                "lines": [{"return_line_id": rl["id"], "qty": 1}],
+                "restock_warehouse_id": self.local_wh.id,
+            },
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        after = InventoryItem.objects.get(
+            variant=self.variant, warehouse=self.local_wh).qty_on_hand
+        self.assertEqual(after, before + 1)
+
+        # receiving more than requested is rejected
+        res = self.client.post(
+            f"/api/v1/ops/returns/{ret['id']}/receive",
+            data={"lines": [{"return_line_id": rl["id"], "qty": 1}]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+    def test_return_reject_and_cancel(self):
+        self._auth()
+        oid = self._create_order(qty=1)
+        self._deliver(oid)
+        line = self._line(oid)
+
+        res = self._create_return(oid, line, qty=1, approve=False)
+        rid = res.json()["id"]
+        res = self.client.post(
+            f"/api/v1/ops/returns/{rid}/status/rejected",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        # rejected is terminal
+        res = self.client.post(
+            f"/api/v1/ops/returns/{rid}/status/approved",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+        # rejected returns free up the qty for a new request
+        res = self._create_return(oid, line, qty=1)
+        self.assertEqual(res.status_code, 200)

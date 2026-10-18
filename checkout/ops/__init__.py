@@ -9,6 +9,7 @@ from . import invoices  # noqa: F401
 from . import jobs  # noqa: F401
 from . import orders  # noqa: F401
 from . import payments  # noqa: F401
+from . import returns  # noqa: F401
 from . import shipments  # noqa: F401
 
 # Keep underscore helpers importable via `from checkout.ops import *`

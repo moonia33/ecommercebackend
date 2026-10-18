@@ -3,6 +3,28 @@ from __future__ import annotations
 from .shared import *
 
 
+class OpsWarehouseOut(Schema):
+    id: int
+    code: str
+    name: str = ""
+    kind: str = ""
+    country_code: str = ""
+
+
+@router.get("/warehouses", response=list[OpsWarehouseOut], auth=_auth)
+def ops_list_warehouses(request):
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+    from catalog.models import Warehouse
+    return [
+        OpsWarehouseOut(
+            id=int(w.id), code=w.code or "", name=w.name or "",
+            kind=w.kind or "", country_code=w.country_code or "")
+        for w in Warehouse.objects.filter(is_active=True)
+        .order_by("sort_order", "code", "id")
+    ]
+
+
 @router.get("/inventory/alerts", response=OpsInventoryListOut, auth=_auth)
 def ops_inventory_alerts(
     request,

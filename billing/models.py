@@ -158,6 +158,11 @@ class InvoiceLine(models.Model):
         related_name="credit_rows",
         help_text="On credit invoices: the sales-invoice line being credited.",
     )
+    order_line = models.ForeignKey(
+        "checkout.OrderLine", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="invoice_lines",
+        help_text="Source order line (product lines) — used by returns.",
+    )
     line_type = models.CharField(
         max_length=16, choices=LineType.choices, default=LineType.PRODUCT)
     name = models.CharField(max_length=255)

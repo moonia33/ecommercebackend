@@ -146,6 +146,10 @@ class OpsOrderMatchLineOut(Schema):
     warehouse_kind: str = ""
     allocated_qty: int = 0
     unallocated_qty: int = 0
+    returnable: bool = True
+    return_days: int = 0
+    returned_qty: int = 0
+    return_deadline: str = ""
     brand_name: str = ""
     unit_net: str = "0"
     unit_vat: str = "0"
@@ -1031,7 +1035,14 @@ def _build_order_filter(filters: OpsOrderSearchIn, *, shop_id: int | None) -> tu
 
 
 def _serialize_ops_order(order: Order) -> OpsOrderListItemOut:
+    from checkout.returns import (
+        line_is_returnable,
+        line_return_days,
+        returned_qty_map,
+    )
+
     lines = list(getattr(order, "ops_matched_lines", []))
+    ret_qty = returned_qty_map(order)
     matched_lines: list[OpsOrderMatchLineOut] = []
     suppliers: list[str] = []
     seen_suppliers: set[str] = set()
@@ -1064,6 +1075,14 @@ def _serialize_ops_order(order: Order) -> OpsOrderListItemOut:
             seen_suppliers.add(warehouse_code)
             suppliers.append(warehouse_code)
 
+        deadline = ""
+        if order.delivered_at:
+            from datetime import timedelta
+            d = (order.delivered_at.date()
+                 if hasattr(order.delivered_at, "date")
+                 else order.delivered_at)
+            deadline = (d + timedelta(days=line_return_days(line))).isoformat()
+
         matched_lines.append(
             OpsOrderMatchLineOut(
                 order_line_id=int(line.id),
@@ -1083,6 +1102,10 @@ def _serialize_ops_order(order: Order) -> OpsOrderListItemOut:
                 warehouse_kind=((getattr(warehouse, "kind", "") or "") if warehouse is not None else ""),
                 allocated_qty=allocated_qty,
                 unallocated_qty=max(0, int(line.qty or 0) - allocated_qty),
+                returnable=line_is_returnable(line),
+                return_days=line_return_days(line),
+                returned_qty=ret_qty.get(int(line.id), 0),
+                return_deadline=deadline,
                 brand_name=((getattr(brand, "name", "") or "") if brand is not None else ""),
                 unit_net=_to_money_str(getattr(line, "unit_net", None)),
                 unit_vat=_to_money_str(getattr(line, "unit_vat", None)),
