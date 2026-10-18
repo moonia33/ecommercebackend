@@ -11,6 +11,13 @@ class Feature(models.Model):
     name = models.CharField(max_length=255)
     is_filterable = models.BooleanField(default=True)
     allows_multiple = models.BooleanField(default=False)
+    recommendation_boost = models.BooleanField(
+        default=False,
+        help_text=(
+            "When enabled, products sharing values of this feature get a "
+            "recommendation ranking boost (e.g. same fishing technique)."
+        ),
+    )
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
 

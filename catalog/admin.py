@@ -532,8 +532,9 @@ class FeatureTranslationInline(admin.StackedInline):
 @admin.register(Feature)
 class FeatureAdmin(admin.ModelAdmin):
     list_display = ("code", "name", "is_filterable",
-                    "allows_multiple", "is_active")
-    list_filter = ("is_filterable", "allows_multiple", "is_active")
+                    "allows_multiple", "recommendation_boost", "is_active")
+    list_filter = ("is_filterable", "allows_multiple",
+                   "recommendation_boost", "is_active")
     search_fields = ("code", "name")
     ordering = ("sort_order", "code")
     inlines = (FeatureTranslationInline, FeatureValueInline)

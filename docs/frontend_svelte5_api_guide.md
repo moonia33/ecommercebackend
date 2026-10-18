@@ -114,6 +114,21 @@ Atvaizdavimo taisyklė:
 
 Backend jau filtruoja: `videos[]` grąžina tik `language_code == ""` arba sutampančią su request kalba — FE papildomo filtravimo nereikia. Rodoma PDP galerijos/modal zonoje, paprastai kaip tab'as šalia nuotraukų.
 
+### Rekomendacijos
+
+Visi endpoint'ai grąžina `ProductListOut[]` — tą pačią produkto kortelę kaip katalogas.
+
+- `GET /api/v1/recommendations/products/{slug}?kind=cross_sell` — PDP blokai:
+  - `kind=cross_sell` — „pirkėjai taip pat pirko" (rankinės reliacijos → co-purchase → feature/kategorija fallback)
+  - `kind=similar` — „panašios prekės" (tas pats produkto group + bendri feature'ai)
+  - `kind=accessory` — priedai
+  - `kind=upsell` — brangesnės alternatyvos
+- `GET /api/v1/recommendations/cart?kind=cross_sell` — krepšelio cross-sell; krepšelyje esančios prekės automatiškai išmetamos. Tuščiam krepšeliui grąžina populiariausias.
+- `GET /api/v1/recommendations/for-you` — „Rekomenduojama Jums"; naudoja user/visitor peržiūrėtas ir pirktas prekes (auth cookie arba `vid` visitor cookie; anonimui be istorijos — populiariausios).
+- `GET /api/v1/recommendations/post-purchase/{order_id}?kind=accessory` — order confirmation ir post-purchase email; reikalauja orderio savininko auth (`401`/`404`).
+
+Bendri parametrai: `country_code` (default `LT`), `channel` (`normal`/`outlet`), `limit` (max 24). Visos rekomendacijos rodo tik in-stock prekes dabartiniame shop kontekste.
+
 ## 5. Checkout srautas (privalomas)
 
 ### Cart

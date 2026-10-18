@@ -740,6 +740,11 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         pi.save(update_fields=["external_id", "redirect_url", "status", "raw_request", "updated_at"])
 
     try:
+        purchase_lines = [
+            {"product_id": int(ol.variant.product_id), "qty": int(ol.qty)}
+            for ol in order.lines.select_related("variant")
+            if ol.variant_id and ol.variant
+        ]
         track_event(
             request=request,
             name="purchase",
@@ -750,6 +755,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 "value": str(order.total_gross),
                 "country_code": str(order.country_code or ""),
                 "shipping_method": str(order.shipping_method or ""),
+                "lines": purchase_lines,
             },
             country_code=str(order.country_code or ""),
             channel=str(channel or ""),
