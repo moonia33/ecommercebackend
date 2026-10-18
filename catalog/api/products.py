@@ -4,10 +4,8 @@ from decimal import Decimal
 
 from django.db.models import Case, Count, IntegerField, Min, Value, When
 from ninja.errors import HttpError
-from ninja.pagination import paginate
 
 from .shared import (
-    ProductPagination,
     _money_out,
     _shop_or_404_when_strict,
     _validate_country_and_channel,
@@ -26,7 +24,31 @@ from .shared import (
     track_event,
 )
 from ..models import Product
-from ..api_schemas import CatalogFacetsOut, ProductDetailOut, ProductListOut
+from ..api_schemas import CatalogFacetsOut, ProductDetailOut, ProductPageOut
+
+
+def _serialize_product_page(
+    *,
+    qs,
+    page: int,
+    page_size: int,
+    country_code: str,
+    channel: str,
+    language_code: str | None,
+) -> ProductPageOut:
+    """Count + slice BEFORE serialization — never serialize the whole table."""
+    page = max(1, int(page or 1))
+    page_size = max(1, min(int(page_size or 20), 100))
+    offset = (page - 1) * page_size
+    return ProductPageOut(
+        count=qs.count(),
+        items=serialize_products_listing(
+            qs=qs[offset:offset + page_size],
+            country_code=country_code,
+            channel=channel,
+            language_code=language_code,
+        ),
+    )
 
 
 def _apply_search_engine(qs, *, q, shop_id, channel, sort):
@@ -64,8 +86,7 @@ def _apply_search_engine(qs, *, q, shop_id, channel, sort):
     return qs, None, engine_sorted
 
 
-@router.get("/products", response=list[ProductListOut])
-@paginate(ProductPagination)
+@router.get("/products", response=ProductPageOut)
 def products(
     request,
     country_code: str = "LT",
@@ -79,6 +100,8 @@ def products(
     option: str | None = None,
     sort: str | None = None,
     in_stock_only: bool = False,
+    page: int = 1,
+    page_size: int = 20,
 ):
     country_code, channel = _validate_country_and_channel(
         country_code=country_code, channel=channel
@@ -135,8 +158,10 @@ def products(
     if channel == "outlet":
         qs = qs.filter(_min_offer_price__isnull=False)
 
-    return serialize_products_listing(
+    return _serialize_product_page(
         qs=qs,
+        page=page,
+        page_size=page_size,
         country_code=country_code,
         channel=channel,
         language_code=language_code,
@@ -188,16 +213,14 @@ def product_facets(
         option=option,
     )
 
-    product_ids = list(qs.values_list("id", flat=True))
     return build_facets_payload(
-        product_ids=product_ids,
+        product_ids=qs.values_list("id", flat=True),
         selected_category=selected_category,
         language_code=language_code,
     )
 
 
-@router.get("/categories/{slug}/products", response=list[ProductListOut])
-@paginate(ProductPagination)
+@router.get("/categories/{slug}/products", response=ProductPageOut)
 def category_products(
     request,
     slug: str,
@@ -211,6 +234,8 @@ def category_products(
     option: str | None = None,
     sort: str | None = None,
     in_stock_only: bool = False,
+    page: int = 1,
+    page_size: int = 20,
 ):
     return products(
         request,
@@ -225,11 +250,12 @@ def category_products(
         option=option,
         sort=sort,
         in_stock_only=in_stock_only,
+        page=page,
+        page_size=page_size,
     )
 
 
-@router.get("/brands/{slug}/products", response=list[ProductListOut])
-@paginate(ProductPagination)
+@router.get("/brands/{slug}/products", response=ProductPageOut)
 def brand_products(
     request,
     slug: str,
@@ -243,6 +269,8 @@ def brand_products(
     option: str | None = None,
     sort: str | None = None,
     in_stock_only: bool = False,
+    page: int = 1,
+    page_size: int = 20,
 ):
     return products(
         request,
@@ -257,11 +285,12 @@ def brand_products(
         option=option,
         sort=sort,
         in_stock_only=in_stock_only,
+        page=page,
+        page_size=page_size,
     )
 
 
-@router.get("/product-groups/{code}/products", response=list[ProductListOut])
-@paginate(ProductPagination)
+@router.get("/product-groups/{code}/products", response=ProductPageOut)
 def product_group_products(
     request,
     code: str,
@@ -275,6 +304,8 @@ def product_group_products(
     option: str | None = None,
     sort: str | None = None,
     in_stock_only: bool = False,
+    page: int = 1,
+    page_size: int = 20,
 ):
     return products(
         request,
@@ -289,6 +320,8 @@ def product_group_products(
         option=option,
         sort=sort,
         in_stock_only=in_stock_only,
+        page=page,
+        page_size=page_size,
     )
 
 

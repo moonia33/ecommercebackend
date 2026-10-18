@@ -198,6 +198,11 @@ class OptionTypeOut(Schema):
     values: list[OptionValueOut] = []
 
 
+class ProductPageOut(Schema):
+    items: list[ProductListOut]
+    count: int
+
+
 class CatalogFacetsOut(Schema):
     categories: list[CategoryOut] = []
     brands: list[BrandOut] = []

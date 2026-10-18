@@ -19,7 +19,7 @@ from catalog.models import InventoryItem
 from catalog.shop_pricing import resolve_shop_variant_price
 from catalog.services.money import discount_percent, effective_offer_unit_net, money_out
 from pricing.services import get_vat_rate
-from promotions.services import apply_promo_to_unit_net
+from promotions.services import apply_promo_to_unit_net, load_active_promo_rules
 from shipping.services import estimate_delivery_window
 
 
@@ -60,6 +60,7 @@ def build_product_detail_payload(
     variants = []
     delivery_window_out = None
     best_delivery_min = None
+    promo_rules = load_active_promo_rules(channel=channel)
     for v in variants_qs:
         inv_all = list(v.inventory_items.all())
         visibility = InventoryItem.OfferVisibility.OUTLET if channel == "outlet" else InventoryItem.OfferVisibility.NORMAL
@@ -124,6 +125,7 @@ def build_product_detail_payload(
             customer_group_id=None,
             allow_additional_promotions=bool(getattr(best_offer, "allow_additional_promotions", False)) if best_offer else False,
             is_discounted_offer=is_discounted_offer,
+            rules=promo_rules,
         )
 
         disc_pct = discount_percent(list_unit_net=list_unit_net, sale_unit_net=sale_unit_net)

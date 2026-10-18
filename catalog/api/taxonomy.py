@@ -31,16 +31,17 @@ from ..api_schemas import (
 def categories(request):
     language_code = get_request_language_code(request)
     shop = _shop_or_404_when_strict(request)
-    product_ids = set(
-        apply_shop_product_scope(
-            qs=Product.objects.filter(is_active=True),
-            shop_id=(int(shop.id) if shop else None),
-        ).values_list("id", flat=True)
+    scoped_ids = apply_shop_product_scope(
+        qs=Product.objects.filter(is_active=True),
+        shop_id=(int(shop.id) if shop else None),
+    )
+    used_category_ids = set(
+        scoped_ids.values_list("category_id", flat=True).distinct()
     )
     qs = Category.objects.filter(is_active=True).prefetch_related("translations").order_by("name")
     out = []
     for c in qs:
-        if product_ids and not Product.objects.filter(is_active=True, category_id=c.id, id__in=product_ids).exists():
+        if used_category_ids and c.id not in used_category_ids:
             continue
         loc = localize_category(c, language_code=language_code)
         out.append(

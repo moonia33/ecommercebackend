@@ -19,10 +19,9 @@ from catalog.models import (
     ProductGroup,
     VariantOptionValue,
 )
-from catalog.services.catalog_core import descendant_category_ids
 
 
-def build_facets_payload(*, product_ids: list[int], selected_category: Category | None, language_code: str | None = None):
+def build_facets_payload(*, product_ids, selected_category: Category | None, language_code: str | None = None):
     if not product_ids:
         return {
             "categories": [],
@@ -33,9 +32,9 @@ def build_facets_payload(*, product_ids: list[int], selected_category: Category 
         }
 
     if selected_category:
-        cat_qs = Category.objects.filter(is_active=True, parent_id=selected_category.id).order_by("name")
+        cat_qs = Category.objects.filter(is_active=True, parent_id=selected_category.id).prefetch_related("translations").order_by("name")
     else:
-        cat_qs = Category.objects.filter(is_active=True, parent_id__isnull=True).order_by("name")
+        cat_qs = Category.objects.filter(is_active=True, parent_id__isnull=True).prefetch_related("translations").order_by("name")
 
     categories_out = []
     cat_ids = list(cat_qs.values_list("id", flat=True))
@@ -45,11 +44,32 @@ def build_facets_payload(*, product_ids: list[int], selected_category: Category 
             .exclude(category_id__isnull=True)
             .values_list("category_id", flat=True)
         )
+        # One query for the whole tree; walk parents in memory instead of
+        # recursive descendant lookups per root category.
+        parent_of = dict(
+            Category.objects.filter(is_active=True).values_list("id", "parent_id")
+        )
+
+        cat_id_set = {int(cid) for cid in cat_ids}
+
+        def _child_ancestor(cat_id: int) -> int | None:
+            cur = cat_id
+            seen: set[int] = set()
+            while cur in parent_of and cur not in seen:
+                seen.add(cur)
+                if cur in cat_id_set:
+                    return cur
+                parent = parent_of.get(cur)
+                if not parent:
+                    return None
+                cur = parent
+            return None
+
         allowed: set[int] = set()
-        for child_id in cat_ids:
-            desc_ids = set(descendant_category_ids(root_id=int(child_id)))
-            if product_category_ids.intersection(desc_ids):
-                allowed.add(int(child_id))
+        for cid in product_category_ids:
+            top = _child_ancestor(int(cid))
+            if top is not None:
+                allowed.add(top)
 
         for c in cat_qs:
             if int(c.id) not in allowed:
@@ -70,7 +90,7 @@ def build_facets_payload(*, product_ids: list[int], selected_category: Category 
                 }
             )
 
-    brands_qs = Brand.objects.filter(is_active=True, products__id__in=product_ids).distinct().order_by("name")
+    brands_qs = Brand.objects.filter(is_active=True, products__id__in=product_ids).prefetch_related("translations").distinct().order_by("name")
     groups_qs = ProductGroup.objects.filter(is_active=True, products__id__in=product_ids).distinct().order_by("name")
 
     feature_ids = list(
@@ -79,11 +99,17 @@ def build_facets_payload(*, product_ids: list[int], selected_category: Category 
         .distinct()
     )
     features_qs = Feature.objects.filter(is_active=True, is_filterable=True, id__in=feature_ids).prefetch_related("translations", "values", "values__translations").order_by("sort_order", "code")
+    # Single grouped query for all feature values used by the filtered products.
+    used_vals_by_feature: dict[int, set[str]] = {}
+    for fid, val in (
+        ProductFeatureValue.objects.filter(product_id__in=product_ids)
+        .values_list("feature_id", "feature_value__value")
+        .distinct()
+    ):
+        used_vals_by_feature.setdefault(int(fid), set()).add(val)
     features_out: list[FeatureOut] = []
     for f in features_qs:
-        used_vals = set(
-            ProductFeatureValue.objects.filter(product_id__in=product_ids, feature_id=f.id).values_list("feature_value__value", flat=True)
-        )
+        used_vals = used_vals_by_feature.get(int(f.id), set())
         vals = [v for v in f.values.all() if v.is_active and v.value in used_vals]
         vals.sort(key=lambda v: (v.sort_order, v.value, v.id))
         features_out.append(
@@ -108,13 +134,16 @@ def build_facets_payload(*, product_ids: list[int], selected_category: Category 
         .distinct()
     )
     option_types_qs = OptionType.objects.filter(is_active=True, id__in=option_type_ids).prefetch_related("translations", "values", "values__translations").order_by("sort_order", "code")
+    used_codes_by_type: dict[int, set[str]] = {}
+    for tid, code in (
+        VariantOptionValue.objects.filter(variant__product_id__in=product_ids)
+        .values_list("option_type_id", "option_value__code")
+        .distinct()
+    ):
+        used_codes_by_type.setdefault(int(tid), set()).add(code)
     option_types_out: list[OptionTypeOut] = []
     for t in option_types_qs:
-        used_codes = set(
-            VariantOptionValue.objects.filter(variant__product_id__in=product_ids, option_type_id=t.id)
-            .values_list("option_value__code", flat=True)
-            .distinct()
-        )
+        used_codes = used_codes_by_type.get(int(t.id), set())
         vals = [v for v in t.values.all() if v.is_active and v.code in used_codes]
         vals.sort(key=lambda v: (v.sort_order, v.label, v.id))
         option_types_out.append(

@@ -11,7 +11,7 @@ from catalog.api_schemas import ProductListOut
 from catalog.models import Product
 from catalog.services.money import discount_percent, money_out
 from pricing.services import get_vat_rate
-from promotions.services import apply_promo_to_unit_net
+from promotions.services import apply_promo_to_unit_net, load_active_promo_rules
 
 
 def apply_products_sorting(*, qs, sort: str | None):
@@ -87,8 +87,12 @@ def serialize_products_listing(
         vat_cache[key] = Decimal(rate)
         return vat_cache[key]
 
+    promo_rules: list | None = None
+
     out: list[ProductListOut] = []
     for p in qs:
+        if promo_rules is None:
+            promo_rules = load_active_promo_rules(channel=channel)
         product_loc = localize_product(p, language_code=language_code)
         brand_loc = localize_brand(p.brand, language_code=language_code) if p.brand else None
         category_loc = localize_category(p.category, language_code=language_code) if p.category else None
@@ -110,6 +114,7 @@ def serialize_products_listing(
             customer_group_id=None,
             allow_additional_promotions=allow_additional_promotions,
             is_discounted_offer=is_discounted_offer,
+            rules=promo_rules,
         )
 
         compare_at_price = None

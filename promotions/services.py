@@ -144,15 +144,8 @@ def redeem_coupon_for_paid_order(*, order_id: int) -> bool:
         return True
 
 
-def find_best_promo_rule(
-    *,
-    channel: str,
-    category_id: int | None,
-    brand_id: int | None,
-    product_id: int | None,
-    variant_id: int | None,
-    customer_group_id: int | None,
-):
+def load_active_promo_rules(*, channel: str | None = None) -> list:
+    """Load currently-active promo rules once; reuse for bulk evaluation."""
     from django.utils import timezone
 
     from promotions.models import PromoRule
@@ -172,8 +165,20 @@ def find_best_promo_rule(
     )
     qs = qs.filter(dj_models.Q(start_at__isnull=True) | dj_models.Q(start_at__lte=now))
     qs = qs.filter(dj_models.Q(end_at__isnull=True) | dj_models.Q(end_at__gte=now))
+    return [r for r in qs if r.allows_channel(channel=ch)]
 
-    candidates = [r for r in qs if r.allows_channel(channel=ch)]
+
+def find_best_promo_rule(
+    *,
+    channel: str,
+    category_id: int | None,
+    brand_id: int | None,
+    product_id: int | None,
+    variant_id: int | None,
+    customer_group_id: int | None,
+    rules: list | None = None,
+):
+    candidates = rules if rules is not None else load_active_promo_rules(channel=channel)
 
     if customer_group_id is None:
         candidates = [r for r in candidates if len(list(r.customer_groups.all())) == 0]
@@ -273,6 +278,7 @@ def apply_promo_to_unit_net(
     customer_group_id: int | None,
     allow_additional_promotions: bool,
     is_discounted_offer: bool,
+    rules: list | None = None,
 ):
     base_unit_net = Decimal(base_unit_net)
     if base_unit_net <= 0:
@@ -288,6 +294,7 @@ def apply_promo_to_unit_net(
         product_id=product_id,
         variant_id=variant_id,
         customer_group_id=customer_group_id,
+        rules=rules,
     )
     if not rule:
         return base_unit_net, None
