@@ -24,10 +24,12 @@ from .models import (
     Feature,
     FeatureTranslation,
     FeatureValue,
+    FeatureValueGroup,
     FeatureValueTranslation,
     OptionType,
     OptionTypeTranslation,
     OptionValue,
+    OptionValueGroup,
     OptionValueTranslation,
     Product,
     ProductTranslation,
@@ -627,6 +629,88 @@ class OptionValueAdmin(admin.ModelAdmin):
     search_fields = ("code", "label", "option_type__code", "option_type__name")
     autocomplete_fields = ("option_type",)
     inlines = (OptionValueTranslationInline,)
+
+
+@admin.register(FeatureValueGroup)
+class FeatureValueGroupAdmin(admin.ModelAdmin):
+    list_display = (
+        "feature", "code", "label", "min_value", "max_value",
+        "member_count", "sort_order", "is_active",
+    )
+    list_filter = ("is_active", "feature")
+    search_fields = ("code", "label", "feature__code", "feature__name")
+    autocomplete_fields = ("feature",)
+    filter_horizontal = ("values",)
+    ordering = ("feature", "sort_order", "code")
+
+    actions = ("auto_assign_by_range",)
+
+    @admin.display(description="Values")
+    def member_count(self, obj):
+        return obj.values.count()
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("values")
+
+    def auto_assign_by_range(self, request, queryset):
+        from catalog.services.value_groups import auto_assign_feature_group
+
+        total = 0
+        skipped = 0
+        for group in queryset:
+            added = auto_assign_feature_group(group)
+            total += added
+            if group.min_value is None and group.max_value is None:
+                skipped += 1
+        msg = f"Auto-assigned {total} value(s) into {queryset.count()} group(s)."
+        if skipped:
+            msg += f" {skipped} group(s) skipped (no min/max bounds set)."
+        self.message_user(request, msg)
+
+    auto_assign_by_range.short_description = (
+        "Auto-assign values whose range fits within bounds"
+    )
+
+
+@admin.register(OptionValueGroup)
+class OptionValueGroupAdmin(admin.ModelAdmin):
+    list_display = (
+        "option_type", "code", "label", "min_value", "max_value",
+        "member_count", "sort_order", "is_active",
+    )
+    list_filter = ("is_active", "option_type")
+    search_fields = ("code", "label", "option_type__code", "option_type__name")
+    autocomplete_fields = ("option_type",)
+    filter_horizontal = ("values",)
+    ordering = ("option_type", "sort_order", "code")
+
+    actions = ("auto_assign_by_range",)
+
+    @admin.display(description="Values")
+    def member_count(self, obj):
+        return obj.values.count()
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("values")
+
+    def auto_assign_by_range(self, request, queryset):
+        from catalog.services.value_groups import auto_assign_option_group
+
+        total = 0
+        skipped = 0
+        for group in queryset:
+            added = auto_assign_option_group(group)
+            total += added
+            if group.min_value is None and group.max_value is None:
+                skipped += 1
+        msg = f"Auto-assigned {total} value(s) into {queryset.count()} group(s)."
+        if skipped:
+            msg += f" {skipped} group(s) skipped (no min/max bounds set)."
+        self.message_user(request, msg)
+
+    auto_assign_by_range.short_description = (
+        "Auto-assign values whose range overlaps bounds"
+    )
 
 
 class VariantOptionValueInline(admin.TabularInline):

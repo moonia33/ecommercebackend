@@ -55,14 +55,16 @@ def apply_catalog_filters(
 
     for f_code, f_val in parse_pairs(feature):
         qs = qs.filter(
+            Q(feature_values__feature_value__value=f_val)
+            | Q(feature_values__feature_value__groups__code=f_val),
             feature_values__feature__code=f_code,
-            feature_values__feature_value__value=f_val,
         )
 
     for o_type, o_val in parse_pairs(option):
         qs = qs.filter(
+            Q(variants__option_values__option_value__code=o_val)
+            | Q(variants__option_values__option_value__groups__code=o_val),
             variants__option_values__option_type__code=o_type,
-            variants__option_values__option_value__code=o_val,
         )
 
     if feature or option:

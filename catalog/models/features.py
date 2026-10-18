@@ -53,6 +53,71 @@ class FeatureTranslation(models.Model):
         self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
 
 
+class FeatureValueGroup(models.Model):
+    """Canonical filter value that aggregates many raw FeatureValues.
+
+    Suppliers send near-duplicate feature values ("10-30", "10–35", "30 g").
+    A group collects them so the storefront filter shows one checkbox
+    ("iki 35 g") while the product page still displays the raw value.
+    When min_value/max_value are set, `auto_assign` buckets values whose
+    parsed numeric range fits inside the group's bounds (a rod rated
+    '10-30' belongs to 'iki 35 g'; '20-100' does not).
+    """
+
+    feature = models.ForeignKey(
+        Feature, on_delete=models.CASCADE, related_name="value_groups"
+    )
+    code = models.SlugField(
+        max_length=100,
+        help_text=(
+            "Used in the ?feature=<feature_code>:<code> URL filter, e.g. "
+            "'iki-35'. Unique within the feature."
+        ),
+    )
+    label = models.CharField(
+        max_length=255,
+        help_text="Checkbox label shown in the filter, e.g. 'iki 35 g'.",
+    )
+    values = models.ManyToManyField(
+        "FeatureValue",
+        blank=True,
+        related_name="groups",
+        help_text="Raw feature values aggregated by this group.",
+    )
+    min_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text=(
+            "Optional lower bound for auto-assign. Empty = unbounded. "
+            "'iki 35 g' = max 35, min empty."
+        ),
+    )
+    max_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Optional upper bound for auto-assign. Empty = unbounded.",
+    )
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["sort_order", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["feature", "code"],
+                name="uniq_feature_value_group",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.feature.code}:{self.label}"
+
+
 class FeatureValue(models.Model):
     feature = models.ForeignKey(
         Feature, on_delete=models.CASCADE, related_name="values")
@@ -177,6 +242,64 @@ class OptionTypeTranslation(models.Model):
     def clean(self):
         super().clean()
         self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
+
+
+class OptionValueGroup(models.Model):
+    """Canonical filter value that aggregates raw OptionValues.
+
+    Same idea as FeatureValueGroup, but for variant option values
+    (e.g. supplier size variants merged into one 'XXL' checkbox).
+    """
+
+    option_type = models.ForeignKey(
+        OptionType, on_delete=models.CASCADE, related_name="value_groups"
+    )
+    code = models.SlugField(
+        max_length=100,
+        help_text=(
+            "Used in the ?option=<type_code>:<code> URL filter. "
+            "Unique within the option type."
+        ),
+    )
+    label = models.CharField(
+        max_length=255,
+        help_text="Checkbox label shown in the filter.",
+    )
+    values = models.ManyToManyField(
+        "OptionValue",
+        blank=True,
+        related_name="groups",
+        help_text="Raw option values aggregated by this group.",
+    )
+    min_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Optional lower bound for auto-assign. Empty = unbounded.",
+    )
+    max_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Optional upper bound for auto-assign. Empty = unbounded.",
+    )
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["sort_order", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["option_type", "code"],
+                name="uniq_option_value_group",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.option_type.code}:{self.label}"
 
 
 class OptionValue(models.Model):

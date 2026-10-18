@@ -98,7 +98,7 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
         .values_list("feature_id", flat=True)
         .distinct()
     )
-    features_qs = Feature.objects.filter(is_active=True, is_filterable=True, id__in=feature_ids).prefetch_related("translations", "values", "values__translations").order_by("sort_order", "code")
+    features_qs = Feature.objects.filter(is_active=True, is_filterable=True, id__in=feature_ids).prefetch_related("translations", "values", "values__translations", "values__groups").order_by("sort_order", "code")
     # Single grouped query for all feature values used by the filtered products.
     used_vals_by_feature: dict[int, set[str]] = {}
     for fid, val in (
@@ -110,21 +110,40 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
     features_out: list[FeatureOut] = []
     for f in features_qs:
         used_vals = used_vals_by_feature.get(int(f.id), set())
-        vals = [v for v in f.values.all() if v.is_active and v.value in used_vals]
-        vals.sort(key=lambda v: (v.sort_order, v.value, v.id))
+        # Grouped raw values collapse into their group checkbox; ungrouped
+        # values are shown raw. Group ids are emitted as negatives so they
+        # never collide with FeatureValue ids.
+        groups_seen: dict[int, object] = {}
+        ungrouped: list = []
+        for v in f.values.all():
+            if not v.is_active or v.value not in used_vals:
+                continue
+            matched = [g for g in v.groups.all() if g.is_active]
+            if matched:
+                for g in matched:
+                    groups_seen[int(g.id)] = g
+            else:
+                ungrouped.append(v)
+        ungrouped.sort(key=lambda v: (v.sort_order, v.value, v.id))
+        values_out = [
+            {"id": -int(g.id), "value": g.code, "label": g.label}
+            for g in sorted(groups_seen.values(), key=lambda g: (g.sort_order, g.code))
+        ] + [
+            {
+                "id": v.id,
+                "value": v.value,
+                "label": localize_feature_value(v, language_code=language_code),
+            }
+            for v in ungrouped
+        ]
+        if not values_out:
+            continue
         features_out.append(
             {
                 "id": f.id,
                 "code": f.code,
                 "name": localize_feature(f, language_code=language_code),
-                "values": [
-                    {
-                        "id": v.id,
-                        "value": v.value,
-                        "label": localize_feature_value(v, language_code=language_code),
-                    }
-                    for v in vals
-                ],
+                "values": values_out,
             }
         )
 
@@ -133,7 +152,7 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
         .values_list("option_type_id", flat=True)
         .distinct()
     )
-    option_types_qs = OptionType.objects.filter(is_active=True, id__in=option_type_ids).prefetch_related("translations", "values", "values__translations").order_by("sort_order", "code")
+    option_types_qs = OptionType.objects.filter(is_active=True, id__in=option_type_ids).prefetch_related("translations", "values", "values__translations", "values__groups").order_by("sort_order", "code")
     used_codes_by_type: dict[int, set[str]] = {}
     for tid, code in (
         VariantOptionValue.objects.filter(variant__product_id__in=product_ids)
@@ -144,8 +163,31 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
     option_types_out: list[OptionTypeOut] = []
     for t in option_types_qs:
         used_codes = used_codes_by_type.get(int(t.id), set())
-        vals = [v for v in t.values.all() if v.is_active and v.code in used_codes]
-        vals.sort(key=lambda v: (v.sort_order, v.label, v.id))
+        ogroups_seen: dict[int, object] = {}
+        oungrouped: list = []
+        for v in t.values.all():
+            if not v.is_active or v.code not in used_codes:
+                continue
+            matched = [g for g in v.groups.all() if g.is_active]
+            if matched:
+                for g in matched:
+                    ogroups_seen[int(g.id)] = g
+            else:
+                oungrouped.append(v)
+        oungrouped.sort(key=lambda v: (v.sort_order, v.label, v.id))
+        ovals_out = [
+            {"id": -int(g.id), "code": g.code, "label": g.label}
+            for g in sorted(ogroups_seen.values(), key=lambda g: (g.sort_order, g.code))
+        ] + [
+            {
+                "id": v.id,
+                "code": v.code,
+                "label": localize_option_value(v, language_code=language_code),
+            }
+            for v in oungrouped
+        ]
+        if not ovals_out:
+            continue
         option_types_out.append(
             {
                 "id": t.id,
@@ -153,14 +195,7 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
                 "name": localize_option_type(t, language_code=language_code),
                 "display_type": t.display_type,
                 "swatch_type": t.swatch_type,
-                "values": [
-                    {
-                        "id": v.id,
-                        "code": v.code,
-                        "label": localize_option_value(v, language_code=language_code),
-                    }
-                    for v in vals
-                ],
+                "values": ovals_out,
             }
         )
 

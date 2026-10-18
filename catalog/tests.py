@@ -22,12 +22,14 @@ from catalog.models import (
     Feature,
     FeatureTranslation,
     FeatureValue,
+    FeatureValueGroup,
     FeatureValueTranslation,
     OptionType,
     OptionTypeTranslation,
     OptionValue,
     OptionValueTranslation,
     Product,
+    ProductFeatureValue,
     ProductTranslation,
     ProductVideo,
     TaxClass,
@@ -35,7 +37,12 @@ from catalog.models import (
     Variant,
 )
 from catalog.services.product_detail import build_product_detail_payload
+from catalog.services.product_facets import build_facets_payload
 from catalog.services.query_filters import apply_catalog_filters
+from catalog.services.value_groups import (
+    auto_assign_feature_group,
+    parse_numeric_range,
+)
 
 
 class CatalogLocalizationTests(TestCase):
@@ -169,3 +176,69 @@ class ProductDetailVideoTests(TestCase):
         )
         urls = [v["url"] for v in payload["videos"]]
         self.assertEqual(urls, ["https://youtu.be/generic", "https://youtu.be/lt"])
+
+
+class FeatureValueGroupTests(TestCase):
+    def setUp(self):
+        self.feature = Feature.objects.create(
+            code="casting_weight", name="Casting Weight",
+            is_active=True, is_filterable=True,
+        )
+        self.v_light = FeatureValue.objects.create(feature=self.feature, value="10-30")
+        self.v_light2 = FeatureValue.objects.create(feature=self.feature, value="5-15")
+        self.v_heavy = FeatureValue.objects.create(feature=self.feature, value="20-100")
+        self.v_weird = FeatureValue.objects.create(feature=self.feature, value="green")
+
+        self.p1 = Product.objects.create(sku="P1", name="Light rod", slug="p1", is_active=True)
+        self.p2 = Product.objects.create(sku="P2", name="Heavy rod", slug="p2", is_active=True)
+        ProductFeatureValue.objects.create(product=self.p1, feature=self.feature, feature_value=self.v_light)
+        ProductFeatureValue.objects.create(product=self.p2, feature=self.feature, feature_value=self.v_heavy)
+        ProductFeatureValue.objects.create(product=self.p2, feature=self.feature, feature_value=self.v_weird)
+
+        self.group = FeatureValueGroup.objects.create(
+            feature=self.feature, code="iki-35", label="iki 35 g", max_value=35,
+        )
+
+    def test_parse_numeric_range(self):
+        from decimal import Decimal
+
+        self.assertEqual(parse_numeric_range("10-30"), (Decimal("10"), Decimal("30")))
+        self.assertEqual(parse_numeric_range("30 g"), (Decimal("30"), Decimal("30")))
+        self.assertEqual(parse_numeric_range("10,5-30"), (Decimal("10.5"), Decimal("30")))
+        self.assertIsNone(parse_numeric_range("12cm/4.75in"))
+        self.assertIsNone(parse_numeric_range("green"))
+
+    def test_auto_assign_fits_within_bounds(self):
+        added = auto_assign_feature_group(self.group)
+        self.assertEqual(added, 2)
+        members = set(self.group.values.values_list("value", flat=True))
+        self.assertEqual(members, {"10-30", "5-15"})
+
+    def test_group_code_filters_products(self):
+        auto_assign_feature_group(self.group)
+        qs, _ = apply_catalog_filters(
+            qs=Product.objects.filter(is_active=True),
+            feature="casting_weight:iki-35",
+        )
+        self.assertEqual(list(qs.values_list("id", flat=True)), [self.p1.id])
+
+    def test_raw_value_filter_still_works(self):
+        qs, _ = apply_catalog_filters(
+            qs=Product.objects.filter(is_active=True),
+            feature="casting_weight:20-100",
+        )
+        self.assertEqual(list(qs.values_list("id", flat=True)), [self.p2.id])
+
+    def test_facets_emit_group_instead_of_member_values(self):
+        auto_assign_feature_group(self.group)
+        payload = build_facets_payload(
+            product_ids=Product.objects.filter(is_active=True).values_list("id", flat=True),
+            selected_category=None,
+            language_code="lt",
+        )
+        feat = next(f for f in payload["features"] if f["code"] == "casting_weight")
+        values = [(v["value"], v["label"]) for v in feat["values"]]
+        self.assertIn(("iki-35", "iki 35 g"), values)
+        self.assertIn(("20-100", "20-100"), values)  # ungrouped stays raw
+        self.assertIn(("green", "green"), values)
+        self.assertNotIn(("10-30", "10-30"), values)  # grouped value hidden
