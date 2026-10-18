@@ -39,7 +39,9 @@ def ops_inventory_alerts(
     page_size = max(1, min(int(page_size or 50), 100))
     offset = (page - 1) * page_size
 
-    qs = InventoryItem.objects.select_related("variant__product", "warehouse").filter(
+    qs = InventoryItem.objects.select_related(
+        "variant__product", "warehouse",
+    ).prefetch_related("variant__product__images").filter(
         qty_on_hand__lte=threshold
     )
     total_count = qs.count()
@@ -49,7 +51,9 @@ def ops_inventory_alerts(
         OpsInventoryItemOut(
             id=int(i.id),
             sku=str(getattr(i.variant, "sku", "") or ""),
+            product_id=(getattr(i.variant, "product_id", None)),
             product_name=str(getattr(getattr(i.variant, "product", None), "name", "") or ""),
+            thumbnail_url=_product_thumbnail_url(getattr(i.variant, "product", None)),
             warehouse_code=str(getattr(i.warehouse, "code", "") or ""),
             qty_on_hand=int(i.qty_on_hand),
             qty_reserved=int(i.qty_reserved),
@@ -76,7 +80,9 @@ def ops_inventory_items(
     page_size = max(1, min(int(page_size or 50), 100))
     offset = (page - 1) * page_size
 
-    qs = InventoryItem.objects.select_related("variant__product", "warehouse")
+    qs = InventoryItem.objects.select_related(
+        "variant__product", "warehouse",
+    ).prefetch_related("variant__product__images")
     if sku:
         qs = qs.filter(variant__sku__icontains=sku)
     if product_q:
@@ -93,7 +99,9 @@ def ops_inventory_items(
         OpsInventoryItemOut(
             id=int(i.id),
             sku=str(getattr(i.variant, "sku", "") or ""),
+            product_id=(getattr(i.variant, "product_id", None)),
             product_name=str(getattr(getattr(i.variant, "product", None), "name", "") or ""),
+            thumbnail_url=_product_thumbnail_url(getattr(i.variant, "product", None)),
             warehouse_code=str(getattr(i.warehouse, "code", "") or ""),
             qty_on_hand=int(i.qty_on_hand),
             qty_reserved=int(i.qty_reserved),

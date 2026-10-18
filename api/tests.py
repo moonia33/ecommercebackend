@@ -1846,3 +1846,65 @@ class OpsReturnTests(OpsLineEditDiscountTests):
         # rejected returns free up the qty for a new request
         res = self._create_return(oid, line, qty=1)
         self.assertEqual(res.status_code, 200)
+
+
+class OpsCustomersAndDocumentsTests(OpsLineEditDiscountTests):
+    """Customer detail regression + invoices registry endpoint."""
+
+    def test_customer_detail_returns_stats(self):
+        self._auth()
+        self._create_order(qty=1)
+        res = self.client.get(
+            f"/api/v1/ops/customers/{self.customer.id}",
+            HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        j = res.json()
+        self.assertEqual(j["email"], self.customer.email)
+        self.assertEqual(j["orders_count"], 1)
+        self.assertEqual(len(j["orders"]), 1)
+
+    def test_invoices_registry_filters(self):
+        self._auth()
+        oid = self._create_order(qty=1)
+        self.client.post(
+            f"/api/v1/ops/orders/{oid}/invoice",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+
+        res = self.client.get(
+            "/api/v1/ops/invoices/registry", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        j = res.json()
+        self.assertEqual(j["total_count"], 1)
+        inv = j["results"][0]
+        self.assertEqual(inv["kind"], "sales")
+        self.assertEqual(inv["order_id"], oid)
+        self.assertEqual(inv["buyer_email"], self.customer.email)
+
+        # kind filter excludes sales
+        res = self.client.get(
+            "/api/v1/ops/invoices/registry", {"kind": "credit"},
+            HTTP_HOST="ops.local")
+        self.assertEqual(res.json()["total_count"], 0)
+
+        # q matches invoice number / buyer email
+        res = self.client.get(
+            "/api/v1/ops/invoices/registry", {"q": inv["number"]},
+            HTTP_HOST="ops.local")
+        self.assertEqual(res.json()["total_count"], 1)
+        res = self.client.get(
+            "/api/v1/ops/invoices/registry", {"q": "nomatch"},
+            HTTP_HOST="ops.local")
+        self.assertEqual(res.json()["total_count"], 0)
+
+    def test_products_and_inventory_have_thumbnails(self):
+        self._auth()
+        res = self.client.get(
+            "/api/v1/ops/catalog/products", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("thumbnail_url", res.json()["results"][0])
+        res = self.client.get(
+            "/api/v1/ops/inventory/items", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        item = res.json()["results"][0]
+        self.assertIn("thumbnail_url", item)
+        self.assertIn("product_id", item)

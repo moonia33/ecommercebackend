@@ -153,7 +153,9 @@ def ops_customer_detail(request, user_id: int):
     base = _serialize_customer_list_item(user, shop_id=shop_id)
 
     return OpsCustomerDetailOut(
-        **base.model_dump(),
+        **base.model_dump(exclude={
+            "orders_count", "paid_orders_count",
+            "total_spent", "last_order_at"}),
         orders_count=stats.orders_count,
         paid_orders_count=stats.paid_orders_count,
         total_spent=stats.total_spent,

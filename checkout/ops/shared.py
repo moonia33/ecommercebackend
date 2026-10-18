@@ -413,7 +413,9 @@ class OpsPaymentListOut(Schema):
 class OpsInventoryItemOut(Schema):
     id: int
     sku: str
+    product_id: int | None = None
     product_name: str
+    thumbnail_url: str = ""
     warehouse_code: str
     qty_on_hand: int
     qty_reserved: int
@@ -437,6 +439,7 @@ class OpsCatalogProductOut(Schema):
     brand_name: str = ""
     category_name: str = ""
     variants_count: int
+    thumbnail_url: str = ""
 
 
 class OpsCatalogProductsOut(Schema):

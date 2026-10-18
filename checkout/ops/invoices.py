@@ -50,6 +50,15 @@ class OpsInvoiceOut(Schema):
     emailed_at: str = ""
     has_pdf: bool = False
     credit_of_number: str = ""
+    buyer_name: str = ""
+    buyer_email: str = ""
+
+
+class OpsInvoiceListOut(Schema):
+    page: int
+    page_size: int
+    total_count: int
+    results: list[OpsInvoiceOut]
 
 
 class OpsInvoiceDetailOut(OpsInvoiceOut):
@@ -83,6 +92,10 @@ def _serialize_invoice(inv: Invoice) -> OpsInvoiceOut:
         emailed_at=_to_iso(inv.emailed_at),
         has_pdf=bool(inv.pdf),
         credit_of_number=inv.credit_of.number if inv.credit_of_id else "",
+        buyer_name=(
+            (inv.buyer or {}).get("company")
+            or (inv.buyer or {}).get("full_name") or ""),
+        buyer_email=(inv.buyer or {}).get("email") or "",
     )
 
 
@@ -109,6 +122,57 @@ def ops_list_invoices(request, order_id: int | None = None, limit: int = 50):
         qs = qs.filter(order_id=order_id)
     limit = max(1, min(int(limit or 50), 200))
     return [_serialize_invoice(i) for i in qs[:limit]]
+
+
+@router.get("/invoices/registry", response=OpsInvoiceListOut, auth=_auth)
+def ops_invoices_registry(
+    request,
+    q: str = "",
+    kind: str = "",
+    status: str = "",
+    order_id: int | None = None,
+    date_from: str = "",
+    date_to: str = "",
+    page: int = 1,
+    page_size: int = 50,
+):
+    """Paginated document registry for the /dokumentai admin page."""
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+    from django.db.models import Q
+
+    qs = Invoice.objects.select_related("order", "credit_of")
+    shop_id = _request_shop_id(request)
+    if shop_id is not None:
+        qs = qs.filter(shop_id=shop_id)
+    if order_id:
+        qs = qs.filter(order_id=order_id)
+    if kind.strip():
+        qs = qs.filter(kind=kind.strip())
+    if status.strip():
+        qs = qs.filter(status=status.strip())
+    q = (q or "").strip()
+    if q:
+        qs = qs.filter(
+            Q(number__icontains=q)
+            | Q(buyer__email__icontains=q)
+            | Q(buyer__full_name__icontains=q)
+            | Q(buyer__company__icontains=q)
+            | Q(order__id__iexact=q.lstrip("#"))
+        ).distinct()
+    if (date_from or "").strip():
+        qs = qs.filter(issue_date__gte=date_from.strip())
+    if (date_to or "").strip():
+        qs = qs.filter(issue_date__lte=date_to.strip())
+
+    page = max(1, int(page or 1))
+    page_size = max(1, min(int(page_size or 50), 100))
+    offset = (page - 1) * page_size
+    total_count = qs.count()
+    rows = list(qs.order_by("-issue_date", "-id")[offset : offset + page_size])
+    return OpsInvoiceListOut(
+        page=page, page_size=page_size, total_count=total_count,
+        results=[_serialize_invoice(i) for i in rows])
 
 
 @router.get("/invoices/{invoice_id}", response=OpsInvoiceDetailOut, auth=_auth)

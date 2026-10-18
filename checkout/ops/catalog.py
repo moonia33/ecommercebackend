@@ -291,7 +291,7 @@ def ops_catalog_products(
     page_size = max(1, min(int(page_size or 50), 100))
     offset = (page - 1) * page_size
 
-    qs = Product.objects.select_related("brand", "category").annotate(variants_count=Count("variants", distinct=True))
+    qs = Product.objects.select_related("brand", "category").prefetch_related("images").annotate(variants_count=Count("variants", distinct=True))
     if q:
         qs = qs.filter(Q(name__icontains=q) | Q(sku__icontains=q) | Q(slug__icontains=q))
     if is_active.strip().lower() in {"true", "false"}:
@@ -309,6 +309,7 @@ def ops_catalog_products(
             brand_name=(getattr(p.brand, "name", "") or "") if p.brand_id else "",
             category_name=(getattr(p.category, "name", "") or "") if p.category_id else "",
             variants_count=int(getattr(p, "variants_count", 0)),
+            thumbnail_url=_product_thumbnail_url(p),
         )
         for p in rows
     ]

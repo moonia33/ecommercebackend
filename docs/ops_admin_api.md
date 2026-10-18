@@ -808,3 +808,19 @@ seeded `return_instructions` email (lt/en/pl, best-effort).
 `returnable`, `return_days`, `returned_qty` (cumulative, active returns
 only) and `return_deadline` (`delivered_at + return_days`). Warehouses
 for restocking come from `GET /ops/warehouses`.
+
+### Documents registry (/dokumentai)
+
+- `GET /ops/invoices/registry?q=&kind=&status=&order_id=&date_from=&date_to=&page=&page_size=`
+  — paginated `{page, page_size, total_count, results}`. `q` matches
+  invoice number, order id, buyer email/name/company. `kind`:
+  `sales|credit`; `status`: `issued|cancelled`. Every invoice row
+  carries `buyer_name`/`buyer_email` (from the immutable buyer
+  snapshot). `GET /ops/invoices?order_id=` (flat list) is unchanged.
+
+### Thumbnails in lists
+
+`GET /ops/catalog/products` rows now carry `thumbnail_url`
+(listing rendition preferred). `GET /ops/inventory/items` and
+`/ops/inventory/alerts` rows carry `product_id` + `thumbnail_url`
+(product image via the variant's product).
