@@ -304,6 +304,21 @@ def credit_return(
             continue
         il = inv_lines.get(rl.order_line_id)
         if il is None:
+            # Legacy invoices predate the order_line FK — fall back to an
+            # unambiguous name match and persist it for future credits.
+            matches = [
+                cand for cand in invoice.lines.all()
+                if cand.order_line_id is None
+                and cand.name == rl.order_line.name
+            ]
+            if len(matches) > 1:
+                matches = [
+                    cand for cand in matches if int(cand.qty) == int(rl.qty)]
+            if len(matches) == 1:
+                il = matches[0]
+                il.order_line = rl.order_line
+                il.save(update_fields=["order_line"])
+        if il is None:
             raise ValueError(
                 f"'{rl.order_line.name}': no invoice line to credit")
         credit_lines.append({"invoice_line_id": il.id, "qty": qty})
