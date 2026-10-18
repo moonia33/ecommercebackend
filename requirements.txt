@@ -25,3 +25,4 @@ whitenoise>=6.7
 
 # Invoice PDF rendering (HTML -> PDF)
 weasyprint>=62.0
+typesense>=1.0,<2.0

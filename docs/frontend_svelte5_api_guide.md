@@ -84,6 +84,17 @@ Pastaba:
 
 - `category_slug` ir `brand_slug` priima tiek bazinius, tiek lokalizuotus slug.
 
+### `q` paieška (Typesense)
+
+Kai `TYPESENSE_API_KEY` sukonfigūruota, `q` eina per Typesense:
+
+- typo tolerance (`num_typos=2`), `infix` fallback (SKU/modelio kodo fragmentai, pvz. `5500` → `SLA-5500`)
+- LT diakritikų tolerancija (`locale=lt` + normalizuotas `search_text` — `meskere` randa `meškerė`)
+- svoriniai laukai: `name` > `sku` > `search_text` (brand/kategorija/feature'ai/aprašymas)
+- `sort` mapping: `price`/`-price`/`created`/`-created` sortinami engine'e; kiti sort'ai — ORM'e ant hit'ų
+- jei Typesense nepasiekiamas — automatinis fallback į `icontains` (tas pats kontraktas)
+- index'as atnaujinamas realiu laiku per Celery signals'us; `manage.py reindex_products` — pilnas rebuild'as
+
 ### Kainų interpretacija
 
 - kainos gaunamos kaip `Money` breakdown (`net`, `vat`, `gross`);

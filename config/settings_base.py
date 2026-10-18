@@ -23,6 +23,10 @@ env = environ.Env(
     RECENTLY_VIEWED_MAX=(int, 12),
     RECOMMENDATION_LOOKBACK_DAYS=(int, 180),
     RECOMMENDATION_AUTO_TOP_N=(int, 20),
+    TYPESENSE_HOST=(str, ""),
+    TYPESENSE_PORT=(str, "8108"),
+    TYPESENSE_PROTOCOL=(str, "http"),
+    TYPESENSE_API_KEY=(str, ""),
     EMAIL_OTP_CODE_LENGTH=(int, 6),
     EMAIL_OTP_TTL_MINUTES=(int, 10),
     EMAIL_OTP_RESEND_COOLDOWN_SECONDS=(int, 30),
@@ -126,6 +130,11 @@ RECENTLY_VIEWED_MAX = env.int("RECENTLY_VIEWED_MAX", default=12)
 RECOMMENDATION_LOOKBACK_DAYS = env.int("RECOMMENDATION_LOOKBACK_DAYS", default=180)
 RECOMMENDATION_AUTO_TOP_N = env.int("RECOMMENDATION_AUTO_TOP_N", default=20)
 
+TYPESENSE_HOST = env("TYPESENSE_HOST")
+TYPESENSE_PORT = env("TYPESENSE_PORT")
+TYPESENSE_PROTOCOL = env("TYPESENSE_PROTOCOL")
+TYPESENSE_API_KEY = env("TYPESENSE_API_KEY")
+
 EMAIL_OTP_CODE_LENGTH = env.int("EMAIL_OTP_CODE_LENGTH")
 EMAIL_OTP_TTL_MINUTES = env.int("EMAIL_OTP_TTL_MINUTES")
 EMAIL_OTP_RESEND_COOLDOWN_SECONDS = env.int(
@@ -176,6 +185,7 @@ INSTALLED_APPS = [
     "checkout",
     "billing.apps.BillingConfig",
     "recommendations.apps.RecommendationsConfig",
+    "search.apps.SearchConfig",
     "promotions",
     "dpd",
     "unisend",

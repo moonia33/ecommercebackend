@@ -29,6 +29,41 @@ from ..models import Product
 from ..api_schemas import CatalogFacetsOut, ProductDetailOut, ProductListOut
 
 
+def _apply_search_engine(qs, *, q, shop_id, channel, sort):
+    """Resolve q via Typesense when configured.
+
+    Returns (qs, remaining_q, engine_ordered). When Typesense answers, qs is
+    restricted to the hit ids in engine order and q is consumed (None) so the
+    ORM icontains filter is skipped. When Typesense is unavailable, returns
+    (qs, q, False) unchanged — the ORM path handles q.
+    """
+    qv = (q or "").strip()
+    if not qv:
+        return qs, q, False
+
+    from search.services import SORT_MAP, search_product_ids
+
+    ids = search_product_ids(
+        q=qv, shop_id=shop_id, channel=channel, sort=sort)
+    if ids is None:
+        return qs, q, False
+    if not ids:
+        return qs.none(), None, True
+
+    ordering = Case(
+        *[When(id=pid, then=Value(pos)) for pos, pid in enumerate(ids)],
+        output_field=IntegerField(),
+    )
+    qs = (
+        qs.filter(id__in=ids)
+        .annotate(_q_pos=ordering)
+        .order_by("_q_pos")
+    )
+    engine_sorted = not (sort or "").strip() or (
+        sort.strip().lower() in SORT_MAP)
+    return qs, None, engine_sorted
+
+
 @router.get("/products", response=list[ProductListOut])
 @paginate(ProductPagination)
 def products(
@@ -66,8 +101,8 @@ def products(
         .annotate(_max_variant_price=max_price_expr)
         .annotate(_min_offer_price=min_offer_price_expr)
     )
-    qs = apply_shop_product_scope(
-        qs=qs, shop_id=(int(shop.id) if shop else None))
+    shop_id = int(shop.id) if shop else None
+    qs = apply_shop_product_scope(qs=qs, shop_id=shop_id)
 
     qs = qs.annotate(
         _has_stock=Case(
@@ -80,7 +115,11 @@ def products(
     if in_stock_only:
         qs = qs.filter(_has_stock=1)
 
-    qs = apply_products_sorting(qs=qs, sort=sort)
+    qs, q, engine_ordered = _apply_search_engine(
+        qs, q=q, shop_id=shop_id, channel=channel, sort=sort)
+
+    if not engine_ordered:
+        qs = apply_products_sorting(qs=qs, sort=sort)
 
     qs, _selected_category = apply_catalog_filters(
         qs=qs,
@@ -130,10 +169,13 @@ def product_facets(
     qs = Product.objects.filter(is_active=True).annotate(
         _has_offer=Count("id", filter=offer_filter)
     )
-    qs = apply_shop_product_scope(
-        qs=qs, shop_id=(int(shop.id) if shop else None))
+    shop_id = int(shop.id) if shop else None
+    qs = apply_shop_product_scope(qs=qs, shop_id=shop_id)
     if channel == "outlet":
         qs = qs.filter(_has_offer__gt=0)
+
+    qs, q, _engine_ordered = _apply_search_engine(
+        qs, q=q, shop_id=shop_id, channel=channel, sort=None)
 
     qs, selected_category = apply_catalog_filters(
         qs=qs,
