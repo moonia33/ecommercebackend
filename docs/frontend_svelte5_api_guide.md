@@ -132,8 +132,13 @@ Backend jau filtruoja: `videos[]` grąžina tik `language_code == ""` arba sutam
 
 - `GET /api/v1/shipping/countries`
 - `GET /api/v1/checkout/shipping-methods?country_code=LT`
-- `GET /api/v1/checkout/payment-methods?country_code=LT`
-- `GET /api/v1/checkout/payment-options?country_code=LT`
+- `GET /api/v1/checkout/payment-methods?country_code=LT&shipping_method=<code>`
+- `GET /api/v1/checkout/payment-options?country_code=LT&shipping_method=<code>`
+
+`shipping_method` param filtruoja mokėjimo būdus, kurie priklauso nuo
+pristatymo būdo (pvz. `cod` — mokėjimas atsiimant — rodomas tik LT
+kurjeriui ir `store_pickup`, paštomatams paslėptas). FE turėtų kviesti
+payment-options **dar kartą** pasikeitus shipping metodui.
 
 ### Checkout preview/confirm
 
@@ -153,7 +158,22 @@ Idempotency:
 `payment_method` reikšmės `checkout/confirm` payload'e:
 
 - `bank_transfer` — pavedimas ranka; `payment_instructions` laukai grąžinami;
-- `montonio` — Montonio Stargate redirect flow (kai sukonfigūruota backend'e).
+- `montonio` — Montonio Stargate redirect flow (kai sukonfigūruota backend'e);
+- `cod` — mokėjimas atsiimant (LT kurjeris / `store_pickup`). Intent lieka
+  `pending` — klientas moka pristatymo metu; `payment_instructions`
+  grąžinami. COD užsakymas **niekada nebaigia** rezervacijos galiojimo;
+- `inbank` — Inbank lizingas (e-POS redirect, LT). Reikalauja
+  `INBANK_*` env konfigūracijos; atsakyme `redirect_url` → e-POS.
+  Būsenas gauna `payment_status` webhook'e (server-to-server callback).
+
+### Inbank lizingo skaičiuoklė
+
+`GET /api/v1/payments/inbank/calculation?amount=<gross>&period=<mėn>`
+
+(autentišku klientui). Grąžina `monthly_payment`, `interest_rate_annual`,
+`credit_cost_rate_annual`, `total_cost`, `down_payment_minimum_amount` —
+"nuo X €/mėn" widget'ui. Backend proxy: Inbank API key lieka serveryje.
+`payment-options` inbank opcijoje turi `payload.calculator_url`.
 
 Montonio flow'as:
 
@@ -162,6 +182,14 @@ Montonio flow'as:
 3. Klientas grįžta į `MONTONIO_RETURN_URL` (FE route) su `?order-token=...` — **netikėti** šio statuso kaip galutinio (patikimą rezultatą rodo `GET /checkout/orders/{id}` — `payment_status`).
 4. Backend'as gauna webhook'ą → `order.status="paid"`, `payment_status="succeeded"`.
 5. FE success puslapyje pollinti `GET /checkout/orders/{order_id}` kol `status === "paid"` (webhook'as gali užtrukti sekundes).
+
+Inbank flow'as (identiškas struktūrai):
+
+1. `checkout/confirm` su `payment_method="inbank"` → `redirect_url` yra Inbank e-POS nuoroda (`payment_provider="inbank"`, `payment_status="redirected"`).
+2. FE redirect'ina klientą — jis užpildo lizingo paraišką Inbank aplinkoje.
+3. Klientas grįžta į `INBANK_RETURN_URL` (FE route) arba `INBANK_CANCEL_URL` atšaukimo atveju — **netikėti** naršyklės rezultato.
+4. Backend'as gauna server-to-server callback'ą (`INBANK_CALLBACK_URL` → `/api/v1/payments/inbank/callback`, HMAC-SHA512 patvirtintas). `completed` → `status="paid"`; `declined`/`failed`/`expired` → `failed`; `cancelled` → `cancelled`.
+5. FE poll'ina `GET /checkout/orders/{order_id}` kol `status === "paid"` — kreditavimas gali užtrukti ilgiau nei Montonio.
 
 ## 6. Užsakymai
 

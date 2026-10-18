@@ -198,3 +198,142 @@ class MontonioRefundWebhookTests(TestCase):
         self.assertEqual(res.status_code, 400)
         self.surcharge.refresh_from_db()
         self.assertEqual(self.surcharge.status, self.Surcharge.Status.PENDING)
+
+
+INBANK_KEY = "inbank-test-key"
+
+
+def _inbank_cb_body(**message_overrides) -> str:
+    import hashlib
+    import hmac
+    import urllib.parse
+
+    message = {"uuid": "sess-uuid-1", "status": "completed",
+               "purchase_reference": "1"}
+    message.update(message_overrides)
+    raw = json.dumps(message)
+    ts = "1700000000"
+    sig = hmac.new(INBANK_KEY.encode(), f"{ts}.{raw}".encode(),
+                   hashlib.sha512).hexdigest()
+    return urllib.parse.urlencode(
+        {"message": raw, "timestamp": ts, "hmac": sig})
+
+
+@override_settings(
+    INBANK_API_KEY=INBANK_KEY, INBANK_SHOP_UUID="shop-uuid",
+    INBANK_PRODUCT_CODE="hp-test")
+class InbankCallbackTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="m@example.com", password="x")
+        self.order = Order.objects.create(
+            user=self.user,
+            status=Order.Status.PENDING_PAYMENT,
+            total_gross="300.00",
+            currency="EUR",
+            country_code="LT",
+        )
+        self.pi = PaymentIntent.objects.create(
+            order=self.order,
+            provider=PaymentIntent.Provider.INBANK,
+            status=PaymentIntent.Status.REDIRECTED,
+            currency="EUR",
+            amount_gross="300.00",
+            external_id="sess-uuid-1",
+        )
+
+    def _post(self, body: str):
+        return self.client.post(
+            "/api/v1/payments/inbank/callback",
+            data=body,
+            content_type="application/x-www-form-urlencoded",
+        )
+
+    def test_completed_marks_paid(self):
+        res = self._post(_inbank_cb_body())
+        self.assertEqual(res.status_code, 200)
+        self.pi.refresh_from_db()
+        self.order.refresh_from_db()
+        self.assertEqual(self.pi.status, PaymentIntent.Status.SUCCEEDED)
+        self.assertEqual(self.order.status, Order.Status.PAID)
+        self.assertIn("last_callback", self.pi.raw_response)
+
+    def test_cancelled_and_declined(self):
+        res = self._post(_inbank_cb_body(status="cancelled"))
+        self.assertEqual(res.status_code, 200)
+        self.pi.refresh_from_db()
+        self.assertEqual(self.pi.status, PaymentIntent.Status.CANCELLED)
+
+        self.pi.status = PaymentIntent.Status.REDIRECTED
+        self.pi.save(update_fields=["status"])
+        res = self._post(_inbank_cb_body(status="declined"))
+        self.pi.refresh_from_db()
+        self.assertEqual(self.pi.status, PaymentIntent.Status.FAILED)
+
+    def test_interim_status_keeps_pending(self):
+        res = self._post(_inbank_cb_body(status="positive"))
+        self.assertEqual(res.status_code, 200)
+        self.pi.refresh_from_db()
+        self.assertEqual(self.pi.status, PaymentIntent.Status.REDIRECTED)
+
+    def test_bad_hmac_rejected(self):
+        res = self._post(
+            "message=%7B%22uuid%22%3A%22x%22%7D&timestamp=1&hmac=deadbeef")
+        self.assertEqual(res.status_code, 400)
+        self.pi.refresh_from_db()
+        self.assertEqual(self.pi.status, PaymentIntent.Status.REDIRECTED)
+
+    def test_unknown_session_acked(self):
+        res = self._post(_inbank_cb_body(
+            uuid="nope", purchase_reference="99999"))
+        self.assertEqual(res.status_code, 200)
+
+    def test_idempotent(self):
+        body = _inbank_cb_body()
+        self._post(body)
+        res = self._post(body)
+        self.assertEqual(res.status_code, 200)
+        self.pi.refresh_from_db()
+        self.assertEqual(self.pi.status, PaymentIntent.Status.SUCCEEDED)
+
+
+@override_settings(
+    INBANK_API_KEY=INBANK_KEY, INBANK_SHOP_UUID="shop-uuid",
+    INBANK_PRODUCT_CODE="hp-test")
+class InbankCalculationTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="c@example.com", password="x")
+        from accounts.jwt_utils import issue_access_token
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=self.user.id)
+
+    def test_calculation_proxied(self):
+        from unittest.mock import patch
+        with patch(
+            "payments.inbank.calculate",
+            return_value={
+                "amount": 300.0, "period": 12, "currency": "EUR",
+                "paymentAmountMonthly": 26.40,
+                "interestRateAnnual": 9.9,
+                "creditCostRateAnnual": 12.1,
+                "totalCost": 316.80, "totalCostOfCredit": 16.80,
+                "downPaymentMinimumAmount": 0.0,
+            },
+        ):
+            res = self.client.get(
+                "/api/v1/payments/inbank/calculation?amount=300&period=12")
+        self.assertEqual(res.status_code, 200)
+        out = res.json()
+        self.assertEqual(out["monthly_payment"], 26.40)
+        self.assertEqual(out["period"], 12)
+
+    def test_calculation_unconfigured(self):
+        with self.settings(INBANK_API_KEY=""):
+            res = self.client.get(
+                "/api/v1/payments/inbank/calculation?amount=300")
+        self.assertEqual(res.status_code, 503)
+
+    def test_calculation_validates_amount(self):
+        res = self.client.get(
+            "/api/v1/payments/inbank/calculation?amount=-5")
+        self.assertEqual(res.status_code, 400)

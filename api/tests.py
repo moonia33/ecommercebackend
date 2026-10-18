@@ -2108,3 +2108,209 @@ class OpsRefundFlowTests(OpsLineEditDiscountTests):
             status=Surcharge.Status.PENDING,
             external_id="")
         self.assertEqual(extra.amount_gross, Decimal("16.62"))
+
+
+class PaymentMethodsEligibilityTests(OpsLineEditDiscountTests):
+    """COD/Inbank provider eligibility + shipping-method scoping."""
+
+    def test_cod_hidden_for_locker_visible_for_courier(self):
+        self._auth()
+        # dpd_locker requires a parcel terminal -> no COD
+        res = self.client.get(
+            "/api/v1/checkout/payment-options?country_code=LT"
+            "&shipping_method=dpd_locker", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        ids = [o["id"] for o in res.json()]
+        self.assertNotIn("cod", ids)
+        self.assertIn("inbank", ids)
+        self.assertIn("bank_transfer", ids)
+
+        # courier and store pickup -> COD allowed
+        for sm in ("dpd_courier", "store_pickup"):
+            res = self.client.get(
+                f"/api/v1/checkout/payment-options?country_code=LT"
+                f"&shipping_method={sm}", HTTP_HOST="ops.local")
+            ids = [o["id"] for o in res.json()]
+            self.assertIn("cod", ids, sm)
+
+    def test_cod_country_scoped_lt_only(self):
+        self._auth()
+        res = self.client.get(
+            "/api/v1/checkout/payment-options?country_code=LV"
+            "&shipping_method=dpd_courier", HTTP_HOST="ops.local")
+        ids = [o["id"] for o in res.json()]
+        self.assertNotIn("cod", ids)
+        self.assertNotIn("inbank", ids)
+
+    def test_inbank_option_exposes_calculator_url(self):
+        self._auth()
+        res = self.client.get(
+            "/api/v1/checkout/payment-options?country_code=LT",
+            HTTP_HOST="ops.local")
+        for o in res.json():
+            if o["id"] == "inbank":
+                self.assertIn(
+                    "calculation", o["payload"].get("calculator_url", ""))
+                return
+        self.fail("inbank option missing")
+
+    def test_resolver_rejects_cod_for_locker(self):
+        from checkout.api.shared import _resolve_checkout_payment_method
+        from ninja.errors import HttpError
+        from checkout.models import PaymentIntent
+        provider, pm = _resolve_checkout_payment_method(
+            code="cod", country_code="LT", shipping_method="dpd_courier")
+        self.assertEqual(provider, PaymentIntent.Provider.COD)
+        with self.assertRaises(HttpError):
+            _resolve_checkout_payment_method(
+                code="cod", country_code="LT", shipping_method="dpd_locker")
+        with self.assertRaises(HttpError):
+            _resolve_checkout_payment_method(
+                code="cod", country_code="LV",
+                shipping_method="dpd_courier")
+
+    def test_cod_order_never_expires(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from checkout.models import Order, PaymentIntent
+        from checkout.services import expire_pending_payment_reservations
+        from django.contrib.auth import get_user_model
+        u = get_user_model().objects.create_user(
+            email="cod-test@example.com", password="x")
+        order = Order.objects.create(
+            user=u,
+            status=Order.Status.PENDING_PAYMENT,
+            total_gross="10.00", currency="EUR", country_code="LT",
+        )
+        PaymentIntent.objects.create(
+            order=order, provider=PaymentIntent.Provider.COD,
+            status=PaymentIntent.Status.PENDING,
+            amount_gross="10.00", currency="EUR")
+        order.created_at = timezone.now() - timedelta(days=400)
+        order.save(update_fields=["created_at"])
+        expired = expire_pending_payment_reservations()
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PENDING_PAYMENT)
+
+
+@override_settings(
+    ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True,
+    SHOP_CONTEXT_STRICT=True)
+class CheckoutProviderConfirmTests(TestCase):
+    """End-to-end checkout confirm for cod / inbank providers."""
+
+    def setUp(self):
+        from accounts.jwt_utils import issue_access_token
+        from accounts.models import UserAddress
+        from catalog.models import (
+            Brand, Category, InventoryItem, Product, TaxClass, Variant,
+            Warehouse)
+        from checkout.models import Cart, CartItem
+
+        self.shop = Shop.objects.create(
+            code="s", name="S", primary_domain="ops.local",
+            default_language_code="lt", default_country_code="LT",
+            currency="EUR", is_active=True)
+        ShopLanguage.objects.create(
+            shop=self.shop, language_code="lt", is_active=True,
+            is_default=True, sort_order=0)
+
+        self.user = User.objects.create_user(
+            email="buyer@example.com", password="x")
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=self.user.id)
+        self.addr = UserAddress.objects.create(
+            user=self.user, full_name="Pirkėjas Vardenis",
+            line1="Gatvė 1", city="Vilnius", postal_code="01100",
+            country_code="LT")
+
+        tax, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"})
+        import datetime
+        from catalog.models import TaxRate
+        TaxRate.objects.create(
+            tax_class=tax, country_code="LT", rate="0.21",
+            valid_from=datetime.date(2020, 1, 1), is_active=True)
+        cat = Category.objects.create(
+            name="C", slug="c-confirm", is_active=True)
+        brand = Brand.objects.create(
+            name="B", slug="b-confirm", is_active=True)
+        product = Product.objects.create(
+            sku="P-C", name="Prekė", slug="preke-confirm",
+            tax_class=tax, brand=brand, category=cat, is_active=True)
+        self.variant = Variant.objects.create(
+            product=product, sku="SKU-C", name="Vnt",
+            price_eur="10.00", is_active=True)
+        wh = Warehouse.objects.create(
+            code="lt_wh", name="LT", kind="local", country_code="LT",
+            is_active=True)
+        InventoryItem.objects.create(
+            variant=self.variant, warehouse=wh,
+            qty_on_hand=10, qty_reserved=0)
+        cart = Cart.objects.create(user=self.user, shop=self.shop)
+        CartItem.objects.create(cart=cart, variant=self.variant, qty=1)
+
+    def _confirm(self, payment_method: str, shipping_method="store_pickup"):
+        import json
+        return self.client.post(
+            "/api/v1/checkout/checkout/confirm",
+            data=json.dumps({
+                "shipping_address_id": self.addr.id,
+                "shipping_method": shipping_method,
+                "payment_method": payment_method,
+                "consents": [
+                    {"kind": "terms", "document_version": "v1"},
+                    {"kind": "privacy", "document_version": "v1"},
+                ],
+            }),
+            content_type="application/json",
+            HTTP_HOST="ops.local",
+        )
+
+    def test_cod_confirm_creates_pending_intent_with_instructions(self):
+        res = self._confirm("cod")
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        out = res.json()
+        self.assertEqual(out["payment_provider"], "cod")
+        self.assertEqual(out["payment_status"], "pending")
+        self.assertEqual(out["redirect_url"], "")
+        self.assertIn("Sumokėsite", out["payment_instructions"])
+
+        from checkout.models import Order
+        order = Order.objects.get(id=out["order_id"])
+        self.assertEqual(order.status, Order.Status.PENDING_PAYMENT)
+
+    def test_cod_rejected_for_locker_shipping(self):
+        res = self._confirm("cod", shipping_method="dpd_locker")
+        self.assertEqual(res.status_code, 400)
+
+    @override_settings(
+        INBANK_API_KEY="k", INBANK_SHOP_UUID="shop-uuid",
+        INBANK_PRODUCT_CODE="hp-test")
+    def test_inbank_confirm_redirects_to_epos(self):
+        from unittest.mock import patch
+        from payments.inbank import PosSession
+
+        session = PosSession(
+            uuid="sess-1", redirect_url="https://epos.test/s/sess-1",
+            status="pending", raw={})
+        with patch(
+            "payments.inbank.create_pos_session", return_value=session,
+        ) as mock_create:
+            res = self._confirm("inbank")
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        out = res.json()
+        self.assertEqual(out["payment_provider"], "inbank")
+        self.assertEqual(out["payment_status"], "redirected")
+        self.assertEqual(out["redirect_url"], "https://epos.test/s/sess-1")
+        mock_create.assert_called_once()
+
+        from checkout.models import PaymentIntent
+        pi = PaymentIntent.objects.get(order_id=out["order_id"])
+        self.assertEqual(pi.external_id, "sess-1")
+
+    @override_settings(INBANK_API_KEY="", INBANK_SHOP_UUID="",
+                       INBANK_PRODUCT_CODE="")
+    def test_inbank_rejected_when_unconfigured(self):
+        res = self._confirm("inbank")
+        self.assertEqual(res.status_code, 400)

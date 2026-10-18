@@ -595,6 +595,8 @@ class PaymentIntent(models.Model):
     class Provider(models.TextChoices):
         BANK_TRANSFER = "bank_transfer", "Bank transfer"
         MONTONIO = "montonio", "Montonio"
+        COD = "cod", "Pay on delivery / pickup"
+        INBANK = "inbank", "Inbank hire purchase"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

@@ -484,9 +484,11 @@ def expire_pending_payment_reservations(*, now=None) -> int:
 
     ttl_gateway_min = int(getattr(settings, "INVENTORY_RESERVATION_TTL_MINUTES_GATEWAY", 30) or 30)
     ttl_bank_hours = int(getattr(settings, "INVENTORY_RESERVATION_TTL_HOURS_BANK_TRANSFER", 72) or 72)
+    ttl_inbank_hours = int(getattr(settings, "INVENTORY_RESERVATION_TTL_HOURS_INBANK", 24) or 24)
 
     cutoff_gateway = now - timedelta(minutes=ttl_gateway_min)
     cutoff_bank = now - timedelta(hours=ttl_bank_hours)
+    cutoff_inbank = now - timedelta(hours=ttl_inbank_hours)
 
     qs = (
         Order.objects.filter(status=Order.Status.PENDING_PAYMENT)
@@ -498,8 +500,13 @@ def expire_pending_payment_reservations(*, now=None) -> int:
     for o in qs:
         pi = getattr(o, "payment_intent", None)
         provider = (getattr(pi, "provider", "") or "").strip()
+        if provider == PaymentIntent.Provider.COD:
+            continue  # pays at pickup/delivery — never expires
         if provider == PaymentIntent.Provider.BANK_TRANSFER:
             if o.created_at < cutoff_bank:
+                expired_ids.append(o.id)
+        elif provider == PaymentIntent.Provider.INBANK:
+            if o.created_at < cutoff_inbank:
                 expired_ids.append(o.id)
         else:
             if o.created_at < cutoff_gateway:

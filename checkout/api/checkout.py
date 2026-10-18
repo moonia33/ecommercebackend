@@ -383,11 +383,21 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
     )
 
     payment_method = (payload.payment_method or "").strip() or "bank_transfer"
-    if payment_method not in ["bank_transfer", "montonio"]:
-        raise HttpError(400, "Unsupported payment_method")
-    if payment_method == "montonio":
+    payment_country = (
+        getattr(addr, "country_code", "") or getattr(addr, "country", "") or ""
+    ).strip().upper()
+    provider, pay_method = _resolve_checkout_payment_method(
+        code=payment_method,
+        country_code=payment_country,
+        shipping_method=shipping_method,
+    )
+    if provider == PaymentIntent.Provider.MONTONIO:
         from payments import montonio as montonio_svc
         if not montonio_svc.is_configured():
+            raise HttpError(400, "Payment method not available")
+    elif provider == PaymentIntent.Provider.INBANK:
+        from payments import inbank as inbank_svc
+        if not inbank_svc.is_configured():
             raise HttpError(400, "Payment method not available")
 
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
@@ -412,11 +422,8 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 payment_provider=(pi.provider if pi else "bank_transfer"),
                 payment_status=(pi.status if pi else "pending"),
                 redirect_url=(pi.redirect_url if pi else ""),
-                payment_instructions=(
-                    _bank_transfer_instructions_for(order_id=existing.id, country_code=existing.country_code)
-                    if (pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER)
-                    else ""
-                ),
+                payment_instructions=_payment_instructions_for_order(
+                    order=existing),
             )
 
     # Order-level consents are required at purchase time.
@@ -670,11 +677,6 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             "total_gross",
         ])
 
-        provider = (
-            PaymentIntent.Provider.MONTONIO
-            if payment_method == "montonio"
-            else PaymentIntent.Provider.BANK_TRANSFER
-        )
         pi = PaymentIntent.objects.create(
             order=order,
             provider=provider,
@@ -690,11 +692,16 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         # Clear cart after creating the order.
         CartItem.objects.filter(cart=cart).delete()
 
-        bank_transfer_instructions = ""
-        if provider == PaymentIntent.Provider.MONTONIO:
+        payment_instructions = ""
+        if provider in {
+            PaymentIntent.Provider.MONTONIO, PaymentIntent.Provider.INBANK,
+        }:
             pass  # redirect url created below, outside the transaction
-        else:
-            bank_transfer_instructions = _bank_transfer_instructions_for(
+        elif pay_method is not None:
+            payment_instructions = pay_method.instructions_for_order(
+                order_id=order.id)
+        elif provider == PaymentIntent.Provider.BANK_TRANSFER:
+            payment_instructions = _bank_transfer_instructions_for(
                 order_id=order.id, country_code=order.country_code
             )
 
@@ -713,6 +720,23 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         pi.redirect_url = res.payment_url
         pi.status = PaymentIntent.Status.REDIRECTED
         pi.raw_request = {**(pi.raw_request or {}), "montonio_order": res.raw_response}
+        pi.save(update_fields=["external_id", "redirect_url", "status", "raw_request", "updated_at"])
+    elif pi.provider == PaymentIntent.Provider.INBANK:
+        from payments import inbank as inbank_svc
+        try:
+            from api.i18n import get_request_language_code
+            session = inbank_svc.create_pos_session(
+                order=order,
+                locale=f"{get_request_language_code(request) or 'lt'}-LT",
+            )
+        except inbank_svc.InbankError as exc:
+            pi.status = PaymentIntent.Status.FAILED
+            pi.save(update_fields=["status", "updated_at"])
+            raise HttpError(502, "Payment provider error") from exc
+        pi.external_id = session.uuid
+        pi.redirect_url = session.redirect_url
+        pi.status = PaymentIntent.Status.REDIRECTED
+        pi.raw_request = {**(pi.raw_request or {}), "inbank_session": session.raw}
         pi.save(update_fields=["external_id", "redirect_url", "status", "raw_request", "updated_at"])
 
     try:
@@ -740,9 +764,5 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         payment_provider=pi.provider,
         payment_status=pi.status,
         redirect_url=pi.redirect_url or "",
-        payment_instructions=(
-            bank_transfer_instructions
-            if pi.provider == PaymentIntent.Provider.BANK_TRANSFER
-            else ""
-        ),
+        payment_instructions=payment_instructions,
     )

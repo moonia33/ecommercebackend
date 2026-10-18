@@ -19,6 +19,12 @@ class PaymentMethod(models.Model):
 
     country_code = models.CharField(max_length=2, blank=True, default="")
 
+    # When set, the method is offered only for these shipping methods
+    # (blank = no restriction). E.g. COD only for LT courier/store pickup.
+    allowed_shipping_methods = models.ManyToManyField(
+        "shipping.ShippingMethod", blank=True,
+        related_name="allowed_payment_methods")
+
     instructions = models.TextField(blank=True, default="")
 
     image = models.ImageField(upload_to="payment_methods/%Y/%m/", null=True, blank=True)

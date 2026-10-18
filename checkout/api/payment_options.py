@@ -26,10 +26,12 @@ def checkout_consents(request):
 
 
 @router.get("/payment-methods", response=list[PaymentMethodOut], auth=_auth)
-def payment_methods(request, country_code: str = "LT"):
+def payment_methods(request, country_code: str = "LT",
+                    shipping_method: str = ""):
     _ensure_shop_context_if_strict(request)
     _require_user(request)
     country_code = (country_code or "").strip().upper() or "LT"
+    shipping_method = (shipping_method or "").strip()
     try:
         from payments.models import PaymentMethod
         from payments.models import ShopPaymentMethodPolicy
@@ -40,8 +42,18 @@ def payment_methods(request, country_code: str = "LT"):
             .filter(
                 models.Q(country_code="") | models.Q(country_code=country_code)
             )
+            .prefetch_related("allowed_shipping_methods")
             .order_by("sort_order", "code")
         )
+        if shipping_method:
+            # Methods restricted to specific shipping methods only apply
+            # when the chosen one is allowed (e.g. COD for store pickup).
+            methods = [
+                m for m in methods
+                if not m.allowed_shipping_methods.exists()
+                or m.allowed_shipping_methods.filter(
+                    code=shipping_method).exists()
+            ]
         if shop_id:
             policy_rows = list(
                 ShopPaymentMethodPolicy.objects.filter(shop_id=shop_id, is_active=True).filter(
@@ -102,19 +114,28 @@ def payment_methods(request, country_code: str = "LT"):
 
 
 @router.get("/payment-options", response=list[PaymentOptionOut], auth=_auth)
-def payment_options(request, country_code: str = "LT"):
+def payment_options(request, country_code: str = "LT",
+                    shipping_method: str = ""):
     _ensure_shop_context_if_strict(request)
     _require_user(request)
     country_code = (country_code or "").strip().upper() or "LT"
 
     # 1) Base payment methods from DB (or fallback)
-    base = payment_methods(request, country_code=country_code)
+    base = payment_methods(request, country_code=country_code,
+                           shipping_method=shipping_method)
 
     options: list[PaymentOptionOut] = []
     _base_rank: dict[str, int] = {}
 
     for idx, m in enumerate(base):
         _base_rank[str(m.code)] = idx
+        opt_payload: dict = {"payment_method": str(m.code)}
+        prov = str(m.provider or m.code or "").strip().lower()
+        if prov == "inbank":
+            # Frontend renders the installment calculator via
+            # GET /api/v1/payments/inbank/calculation?amount=&period=
+            opt_payload["calculator_url"] = (
+                "/api/v1/payments/inbank/calculation")
         options.append(
             PaymentOptionOut(
                 id=str(m.code),
@@ -123,7 +144,7 @@ def payment_options(request, country_code: str = "LT"):
                 provider=str(m.provider or m.code or ""),
                 instructions=str(getattr(m, "instructions", "") or ""),
                 logo_url=str(getattr(m, "logo_url", "") or ""),
-                payload={"payment_method": str(m.code)},
+                payload=opt_payload,
             )
         )
 

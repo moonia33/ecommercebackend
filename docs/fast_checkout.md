@@ -163,8 +163,10 @@ Rekomenduojamas UX:
 
 ## Mokėjimų pasirinkimai be hardcode
 
-- `GET /api/v1/checkout/payment-options?country_code=LT`
+- `GET /api/v1/checkout/payment-options?country_code=LT&shipping_method=<code>`
   - Pasirinkimai paduodami iš DB (modeliai `PaymentMethod` + `ShopPaymentMethodPolicy`), filtruojami pagal `country_code` ir shop politiką.
+  - `shipping_method` param papildomai filtruoja: `cod` rodomas tik ne-terminaliniam pristatymui (kurjeris, `store_pickup`) ir LT; `inbank` opcija turi `payload.calculator_url` lizingo skaičiuoklei (`GET /api/v1/payments/inbank/calculation?amount=&period=`).
+  - Kvieti iš naujo pasikeitus shipping metodui.
   - FE turi naudoti `option.id` kaip unikalų key renderinant sąrašą (pvz. `{#each options as opt (opt.id)}`), nes `code` gali dubliuotis tarp skirtingų option'ų.
 
 ### 8) Checkout confirm

@@ -175,6 +175,16 @@ STATUS_LABELS: dict[str, dict[str, dict[str, str]]] = {
             "en": "Montonio",
             "pl": "Montonio",
         },
+        "cod": {
+            "lt": "Mokėjimas atsiimant",
+            "en": "Pay on delivery / pickup",
+            "pl": "Płatność przy odbiorze",
+        },
+        "inbank": {
+            "lt": "Inbank — mokėjimas dalimis",
+            "en": "Inbank hire purchase",
+            "pl": "Inbank — ratalnie",
+        },
     },
 }
 

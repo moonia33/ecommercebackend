@@ -12,6 +12,8 @@ from checkout.models import Order, OrderEvent, PaymentIntent
 from checkout.services import capture_inventory_for_order
 from promotions.services import redeem_coupon_for_paid_order
 
+from accounts.auth import JWTAuth
+
 from . import montonio
 
 logger = logging.getLogger(__name__)
@@ -245,3 +247,151 @@ def _handle_surcharge_webhook(*, surcharge_id: int, payment_status: str,
                 "status", "raw_response", "external_id", "updated_at"])
         else:
             s.save(update_fields=["raw_response", "external_id", "updated_at"])
+
+
+@router.post("/inbank/callback")
+def inbank_callback(request):
+    """Inbank e-POS server-to-server callback (form-urlencoded).
+
+    Fields: message (urlencoded JSON {uuid, status, purchase_reference}),
+    timestamp, hmac (SHA512 over "{timestamp}.{message}" with the API key).
+    """
+    import json
+
+    from payments import inbank as inbank_svc
+
+    message = (request.POST.get("message") or "").strip()
+    timestamp = (request.POST.get("timestamp") or "").strip()
+    hmac_value = (request.POST.get("hmac") or "").strip()
+
+    if not inbank_svc.verify_callback(
+            timestamp=timestamp, message=message, hmac_value=hmac_value):
+        raise HttpError(400, "Invalid callback signature")
+
+    try:
+        decoded = json.loads(message)
+    except Exception:
+        raise HttpError(400, "Invalid callback message")
+
+    session_uuid = str(decoded.get("uuid") or "").strip()
+    session_status = str(decoded.get("status") or "").strip().lower()
+    purchase_ref = str(decoded.get("purchase_reference") or "").strip()
+
+    pi = None
+    if session_uuid:
+        pi = (
+            PaymentIntent.objects.select_related("order")
+            .filter(
+                external_id=session_uuid,
+                provider=PaymentIntent.Provider.INBANK,
+            )
+            .first()
+        )
+    if pi is None and purchase_ref.isdigit():
+        pi = (
+            PaymentIntent.objects.select_related("order")
+            .filter(
+                order_id=int(purchase_ref),
+                provider=PaymentIntent.Provider.INBANK,
+            )
+            .first()
+        )
+    if pi is None:
+        logger.warning("inbank callback: no intent for %s/%s",
+                       session_uuid, purchase_ref)
+        return {"status": "ok", "ignored": "no_intent"}
+
+    result = {"status": "ok"}
+    with transaction.atomic():
+        pi = PaymentIntent.objects.select_for_update().get(id=pi.id)
+        pi.raw_response = {
+            **(pi.raw_response or {}), "last_callback": decoded}
+        update = ["raw_response", "updated_at"]
+
+        if pi.status == PaymentIntent.Status.SUCCEEDED:
+            pi.save(update_fields=update)
+            return {"status": "ok", "already": "succeeded"}
+
+        if session_status == "completed":
+            # Contract activated — merchant is paid; fulfil the order.
+            pi.status = PaymentIntent.Status.SUCCEEDED
+            pi.save(update_fields=["status"] + update)
+            if pi.order.status != Order.Status.PAID:
+                pi.order.status = Order.Status.PAID
+                pi.order.save(update_fields=["status", "updated_at"])
+            capture_inventory_for_order(order_id=pi.order_id)
+            redeem_coupon_for_paid_order(order_id=pi.order_id)
+            result = {"status": "ok", "order_id": pi.order_id,
+                      "marked": "paid"}
+        elif session_status == "cancelled":
+            pi.status = PaymentIntent.Status.CANCELLED
+            pi.save(update_fields=["status"] + update)
+            result = {"status": "ok", "order_id": pi.order_id,
+                      "marked": "cancelled"}
+        elif session_status in {"declined", "failed", "expired"}:
+            pi.status = PaymentIntent.Status.FAILED
+            pi.save(update_fields=["status"] + update)
+            result = {"status": "ok", "order_id": pi.order_id,
+                      "marked": "failed"}
+        else:
+            # granted/positive/unsigned/signed/income_proof_required/…
+            pi.save(update_fields=update)
+            result = {"status": "ok", "order_id": pi.order_id,
+                      "session_status": session_status}
+
+    try:
+        OrderEvent.objects.create(
+            order_id=pi.order_id,
+            kind=OrderEvent.Kind.PAYMENT,
+            name="inbank_callback",
+            payload={
+                "session_uuid": session_uuid,
+                "session_status": session_status,
+                "at": timezone.now().isoformat(),
+            },
+        )
+    except Exception:
+        pass
+
+    return result
+
+
+@router.get("/inbank/calculation", auth=JWTAuth())
+def inbank_calculation(request, amount: str, period: int = 12):
+    """Server-side proxy for the Inbank installment calculator.
+
+    The API key stays on the backend — the storefront calls this to show
+    'nuo X €/mėn'. Returns the simple response level.
+    """
+    if not getattr(request, "auth", None):
+        raise HttpError(401, "Unauthorized")
+
+    from payments import inbank as inbank_svc
+
+    if not inbank_svc.is_configured():
+        raise HttpError(503, "Inbank is not configured")
+    try:
+        amt = Decimal(str(amount))
+    except Exception:
+        raise HttpError(400, "Invalid amount")
+    if amt <= 0:
+        raise HttpError(400, "Invalid amount")
+    period = max(1, min(int(period or 12), 84))
+
+    try:
+        body = inbank_svc.calculate(amount=amt, period=period)
+    except inbank_svc.InbankError as exc:
+        raise HttpError(502, str(exc))
+
+    return {
+        "amount": body.get("amount"),
+        "period": body.get("period"),
+        "currency": body.get("currency", "EUR"),
+        "monthly_payment": body.get("paymentAmountMonthly"),
+        "interest_rate_annual": body.get("interestRateAnnual"),
+        "credit_cost_rate_annual": body.get("creditCostRateAnnual"),
+        "total_cost": body.get("totalCost"),
+        "total_cost_of_credit": body.get("totalCostOfCredit"),
+        "down_payment_minimum_amount": body.get(
+            "downPaymentMinimumAmount"),
+    }

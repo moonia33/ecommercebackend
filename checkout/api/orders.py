@@ -70,9 +70,7 @@ def list_orders(request, limit: int = 20):
     result: list[OrderOut] = []
     for o in orders:
         pi = getattr(o, "payment_intent", None)
-        payment_instructions = ""
-        if pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER:
-            payment_instructions = _bank_transfer_instructions_for(order_id=o.id, country_code=o.country_code)
+        payment_instructions = _payment_instructions_for_order(order=o)
 
         labels = _localized_status_labels(o, pi, language_code)
 
@@ -421,9 +419,7 @@ def _build_order_detail(o, language_code: str):
         "0"), vat=o.total_vat, gross=o.total_gross)
 
     pi = getattr(o, "payment_intent", None)
-    payment_instructions = ""
-    if pi and pi.provider == PaymentIntent.Provider.BANK_TRANSFER:
-        payment_instructions = _bank_transfer_instructions_for(order_id=o.id, country_code=o.country_code)
+    payment_instructions = _payment_instructions_for_order(order=o)
 
     labels = _localized_status_labels(o, pi, language_code)
 

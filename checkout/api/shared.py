@@ -153,6 +153,89 @@ def _pickup_point_address_fields(*, carrier_code: str, pickup_locker, pickup_sna
     }
 
 
+_PROVIDER_MAP = {
+    "bank_transfer": PaymentIntent.Provider.BANK_TRANSFER,
+    "montonio": PaymentIntent.Provider.MONTONIO,
+    "cod": PaymentIntent.Provider.COD,
+    "inbank": PaymentIntent.Provider.INBANK,
+}
+
+
+def _resolve_checkout_payment_method(
+    *, code: str, country_code: str, shipping_method: str = "",
+):
+    """Map a checkout `payment_method` code to a PaymentIntent provider.
+
+    Returns (provider, PaymentMethod|None). Raises HttpError(400) when the
+    code is unknown, not configured, or restricted by shipping method.
+    """
+    code = (code or "").strip().lower()
+    if code not in _PROVIDER_MAP:
+        raise HttpError(400, "Unsupported payment_method")
+    provider = _PROVIDER_MAP[code]
+
+    from payments.models import PaymentMethod
+
+    pm = (
+        PaymentMethod.objects.filter(is_active=True, code=code)
+        .filter(
+            models.Q(country_code="")
+            | models.Q(country_code=(country_code or "").strip().upper())
+        )
+        .prefetch_related("allowed_shipping_methods")
+        .order_by("-country_code")
+        .first()
+    )
+    if pm is None:
+        # No configured row — only the built-in methods stay available.
+        if code not in {"bank_transfer", "montonio"}:
+            raise HttpError(400, "Payment method not available")
+        return provider, None
+
+    allowed = {m.code for m in pm.allowed_shipping_methods.all()}
+    if allowed and (shipping_method or "") not in allowed:
+        raise HttpError(
+            400, "Payment method not available for this shipping method")
+
+    override = (pm.provider or "").strip().lower()
+    if override:
+        if override not in _PROVIDER_MAP:
+            raise HttpError(400, "Unsupported payment_method")
+        provider = _PROVIDER_MAP[override]
+    return provider, pm
+
+
+def _payment_instructions_for_order(*, order) -> str:
+    """Instructions shown on the order page for offline providers."""
+    pi = getattr(order, "payment_intent", None)
+    provider = (getattr(pi, "provider", "") or "").strip()
+    country_code = (getattr(order, "country_code", "") or "").strip().upper()
+
+    if provider in {
+        PaymentIntent.Provider.BANK_TRANSFER, PaymentIntent.Provider.COD,
+    }:
+        code = "cod" if provider == PaymentIntent.Provider.COD else "bank_transfer"
+        try:
+            from payments.models import PaymentMethod
+
+            pm = (
+                PaymentMethod.objects.filter(is_active=True, code=code)
+                .filter(
+                    models.Q(country_code="")
+                    | models.Q(country_code=country_code))
+                .order_by("-country_code")
+                .first()
+            )
+            if pm:
+                return pm.instructions_for_order(order_id=order.id)
+        except Exception:
+            pass
+        if provider == PaymentIntent.Provider.BANK_TRANSFER:
+            return _bank_transfer_instructions_for(
+                order_id=order.id, country_code=country_code)
+    return ""
+
+
 def _bank_transfer_instructions_for(*, order_id: int | None, country_code: str) -> str:
     country_code = (country_code or "").strip().upper()
     try:

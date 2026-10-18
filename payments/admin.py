@@ -21,6 +21,7 @@ class PaymentMethodAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "kind", "provider", "country_code")
     search_fields = ("code", "name")
     ordering = ("sort_order", "code")
+    filter_horizontal = ("allowed_shipping_methods",)
 
 
 @admin.register(ShopPaymentMethodPolicy)
