@@ -206,29 +206,45 @@ def issue_credit_invoice(
     invoice: Invoice,
     *,
     lines: list[dict] | None = None,
+    discount_gross=None,
 ) -> Invoice:
     """Issue a credit invoice against an issued sales invoice.
 
-    lines=None -> full credit of every invoice line.
+    lines=None -> full credit of every invoice line (incl. discounts).
     lines=[{"invoice_line_id": int, "qty": int}] -> partial credit; the
     cumulative credited qty across all issued credit notes can never
     exceed the invoiced qty of each line.
+
+    Discount lines are clawed back proportionally to the credited share
+    of the product totals (percent-off semantics). discount_gross
+    overrides that with an explicit clawback amount (gross) for
+    fixed-amount cases where the proportion is not what's intended.
     """
     if invoice.kind != Invoice.Kind.SALES:
         raise ValueError("Only sales invoices can be credited")
     if invoice.status != Invoice.Status.ISSUED:
         raise ValueError("Only issued invoices can be credited")
 
-    src_lines = list(invoice.lines.all())
+    src_lines = [
+        ln for ln in invoice.lines.all()
+        if ln.line_type != InvoiceLine.LineType.DISCOUNT]
+    discount_src = [
+        ln for ln in invoice.lines.all()
+        if ln.line_type == InvoiceLine.LineType.DISCOUNT]
     if not src_lines:
         raise ValueError("Invoice has no lines")
 
     already: dict[int, int] = {}
+    credited_discount_gross = Decimal("0.00")
     for cl in InvoiceLine.objects.filter(
             invoice__credit_of=invoice,
             invoice__status=Invoice.Status.ISSUED,
             credited_line__isnull=False):
-        already[cl.credited_line_id] = already.get(cl.credited_line_id, 0) + int(cl.qty)
+        if cl.line_type == InvoiceLine.LineType.DISCOUNT:
+            credited_discount_gross += Decimal(cl.total_gross)
+        else:
+            already[cl.credited_line_id] = (
+                already.get(cl.credited_line_id, 0) + int(cl.qty))
 
     if lines is None:
         sel = {ln.id: int(ln.qty) for ln in src_lines}
@@ -239,7 +255,7 @@ def issue_credit_invoice(
             qty = int(it.get("qty") or 0)
             if qty > 0:
                 sel[lid] = sel.get(lid, 0) + qty
-        if not sel:
+        if not sel and discount_gross is None:
             raise ValueError("Nothing to credit")
 
     order = invoice.order
@@ -285,6 +301,68 @@ def issue_credit_invoice(
             total_gross=-(Decimal(ln.total_gross) * ratio).quantize(Decimal("0.01")),
             sort_order=i,
         ))
+
+    # Discount clawback. Discounts apply to product totals only, so the
+    # proportional share is computed against credited product gross.
+    if discount_src:
+        src_discount_net = sum(
+            (Decimal(d.total_net) for d in discount_src), Decimal("0.00"))
+        src_discount_vat = sum(
+            (Decimal(d.total_vat) for d in discount_src), Decimal("0.00"))
+        src_discount_gross = sum(
+            (Decimal(d.total_gross) for d in discount_src), Decimal("0.00"))
+        remaining_gross = -src_discount_gross - credited_discount_gross
+
+        products_gross = sum(
+            (Decimal(ln.total_gross) for ln in src_lines
+             if ln.line_type == InvoiceLine.LineType.PRODUCT),
+            Decimal("0.00"))
+        credited_products_gross = sum(
+            (-nl.total_gross for nl in new_lines
+             if nl.line_type == InvoiceLine.LineType.PRODUCT),
+            Decimal("0.00"))
+
+        if discount_gross is not None:
+            claw_gross = Decimal(str(discount_gross)).quantize(Decimal("0.01"))
+            if claw_gross <= 0:
+                raise ValueError("discount_gross must be > 0")
+            if claw_gross > remaining_gross:
+                raise ValueError(
+                    f"discount_gross exceeds remaining discount "
+                    f"({claw_gross} > {remaining_gross})")
+        elif lines is None:
+            claw_gross = -src_discount_gross - credited_discount_gross
+        elif products_gross > 0:
+            ratio = credited_products_gross / products_gross
+            claw_gross = (
+                -src_discount_gross * ratio).quantize(Decimal("0.01"))
+        else:
+            claw_gross = Decimal("0.00")
+
+        if claw_gross > remaining_gross:
+            claw_gross = remaining_gross
+        if claw_gross > 0:
+            # Split gross back into net+vat using the discount's own
+            # effective rate (source lines store vat inside totals).
+            d_eff = (src_discount_vat / src_discount_net
+                     if src_discount_net else Decimal("0"))
+            claw_net = (claw_gross / (Decimal("1") + d_eff)
+                        ).quantize(Decimal("0.01"))
+            new_lines.append(InvoiceLine(
+                invoice=credit,
+                credited_line=discount_src[0],
+                line_type=InvoiceLine.LineType.DISCOUNT,
+                name=discount_src[0].name or "Nuolaida",
+                sku=discount_src[0].sku or "",
+                qty=1,
+                unit_net=claw_net,
+                vat_rate=Decimal("0"),
+                total_net=claw_net,
+                total_vat=claw_gross - claw_net,
+                total_gross=claw_gross,
+                sort_order=len(new_lines),
+            ))
+
     InvoiceLine.objects.bulk_create(new_lines)
     credit.totals = _invoice_totals(new_lines)
     credit.save(update_fields=["totals"])

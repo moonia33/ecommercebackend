@@ -64,6 +64,8 @@ class OpsCreditLineIn(Schema):
 class OpsCreditInvoiceIn(Schema):
     # null/empty -> full credit of every invoice line
     lines: list[OpsCreditLineIn] | None = None
+    # explicit discount clawback (gross); default = proportional share
+    discount_gross: str | None = None
     send_email: bool = False
 
 
@@ -166,8 +168,9 @@ def ops_credit_invoice(request, invoice_id: int, payload: OpsCreditInvoiceIn):
             inv,
             lines=(
                 [ln.model_dump() for ln in payload.lines]
-                if payload.lines else None
+                if payload.lines is not None else None
             ),
+            discount_gross=payload.discount_gross,
         )
     except ValueError as exc:
         raise HttpError(400, str(exc))

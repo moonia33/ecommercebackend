@@ -216,3 +216,91 @@ class CreditInvoiceTests(InvoiceBase):
         inv2 = issue_invoice_for_order(self.order)
         self.assertNotEqual(inv.id, inv2.id)
         self.assertEqual(inv2.kind, "sales")
+
+
+class CreditDiscountClawbackTests(InvoiceBase):
+    """Partial credits must claw back the discount proportionally —
+    otherwise the customer is refunded the discounted-away amount."""
+
+    def _setup_two_lines(self, discount_gross=Decimal("3.63"),
+                         discount_net=Decimal("3.00"),
+                         discount_vat=Decimal("0.63")):
+        from checkout.models import OrderDiscount, OrderLine
+
+        OrderLine.objects.create(
+            order=self.order, sku="SKU2", name="Product 2",
+            unit_net=Decimal("20.00"), vat_rate=Decimal("0.21"),
+            qty=1, total_net=Decimal("20.00"),
+            total_vat=Decimal("4.20"), total_gross=Decimal("24.20"),
+            unit_vat=Decimal("4.20"), unit_gross=Decimal("24.20"),
+        )
+        OrderDiscount.objects.create(
+            order=self.order, kind="manual", name="Nuolaida",
+            net=discount_net, vat=discount_vat, gross=discount_gross)
+
+    def test_partial_credit_claws_discount_proportionally(self):
+        from billing.services import issue_credit_invoice
+
+        self._setup_two_lines()
+        inv = issue_invoice_for_order(self.order)
+        # invoice: P1 12.10 + P2 24.20 + shipping 3.63 - discount 3.63
+        self.assertEqual(inv.totals["gross"], "36.30")
+
+        line2 = inv.lines.get(sku="SKU2")
+        credit = issue_credit_invoice(
+            inv, lines=[{"invoice_line_id": line2.id, "qty": 1}])
+
+        # credited products = 24.20 of 36.30 -> 2/3 of the 3.63 discount
+        claw = credit.lines.get(line_type="discount")
+        self.assertEqual(claw.total_gross, Decimal("2.42"))
+        # credit total = -24.20 + 2.42
+        self.assertEqual(credit.totals["gross"], "-21.78")
+
+    def test_manual_discount_gross_override(self):
+        from billing.services import issue_credit_invoice
+
+        self._setup_two_lines()
+        inv = issue_invoice_for_order(self.order)
+        line1 = inv.lines.get(sku="SKU1")
+        credit = issue_credit_invoice(
+            inv,
+            lines=[{"invoice_line_id": line1.id, "qty": 1}],
+            discount_gross="1.00")
+        claw = credit.lines.get(line_type="discount")
+        self.assertEqual(claw.total_gross, Decimal("1.00"))
+        self.assertEqual(credit.totals["gross"], "-11.10")
+
+    def test_discount_clawback_capped_at_remaining(self):
+        from billing.services import issue_credit_invoice
+
+        self._setup_two_lines()
+        inv = issue_invoice_for_order(self.order)
+        line1 = inv.lines.get(sku="SKU1")
+        line2 = inv.lines.get(sku="SKU2")
+        with self.assertRaises(ValueError):
+            issue_credit_invoice(
+                inv, lines=[{"invoice_line_id": line1.id, "qty": 1}],
+                discount_gross="99.00")
+
+        # first credit claws 1/3 (1.21); remaining discount = 2.42
+        issue_credit_invoice(
+            inv, lines=[{"invoice_line_id": line1.id, "qty": 1}])
+        credit2 = issue_credit_invoice(
+            inv, lines=[{"invoice_line_id": line2.id, "qty": 1}])
+        claw2 = credit2.lines.get(line_type="discount")
+        self.assertEqual(claw2.total_gross, Decimal("2.42"))
+
+        # fully credited now — nothing left to claw
+        with self.assertRaises(ValueError):
+            issue_credit_invoice(
+                inv, lines=None, discount_gross="0.01")
+
+    def test_discount_only_credit(self):
+        from billing.services import issue_credit_invoice
+
+        self._setup_two_lines()
+        inv = issue_invoice_for_order(self.order)
+        credit = issue_credit_invoice(inv, lines=[], discount_gross="0.50")
+        self.assertEqual(credit.totals["gross"], "0.50")
+        self.assertEqual(list(credit.lines.values_list(
+            "line_type", flat=True)), ["discount"])

@@ -660,10 +660,15 @@ Sales invoices auto-issue when an order reaches `delivered`
 - `POST /ops/orders/{id}/invoice` — issue the sales invoice now
   (idempotent; one active sales invoice per order).
 - `POST /ops/invoices/{id}/credit` — `{lines?: [{invoice_line_id, qty}],
-  send_email?}`. No lines = full credit. Partial credits are cumulative —
-  the sum across issued credit notes can never exceed the invoiced qty
-  of a line. Credit lines mirror the source invoice line amounts
-  proportionally (exact VAT/rounding). Numbers come from the KRF series.
+  discount_gross?, send_email?}`. `lines` omitted = full credit;
+  `lines: []` = no item lines (discount-only credit). Partial credits
+  are cumulative — the sum across issued credit notes can never exceed
+  the invoiced qty of a line. Credit lines mirror the source invoice
+  line amounts proportionally (exact VAT/rounding). Discount clawback:
+  proportional to the credited share of product gross by default
+  (percent semantics), or the explicit `discount_gross` override
+  (gross, capped at the remaining discount). Numbers come from the
+  KRF series.
 - `POST /ops/invoices/{id}/cancel` — marks cancelled (kept for audit);
   cancelling a sales invoice frees re-issue; cancelling a credit note
   frees the credited qty.
