@@ -824,3 +824,19 @@ for restocking come from `GET /ops/warehouses`.
 (listing rendition preferred). `GET /ops/inventory/items` and
 `/ops/inventory/alerts` rows carry `product_id` + `thumbnail_url`
 (product image via the variant's product).
+
+### Bulk document export
+
+- `POST /ops/invoices/export` — `{format: "pdf_zip"|"csv",
+  invoice_ids?: [...] , q?, kind?, status?, order_id?, date_from?,
+  date_to?}`. Selection is explicit `invoice_ids` or the same filter set
+  as the registry. Capped at 300 documents per request.
+  - `pdf_zip` → `saskaitos.zip` with one `{number}.pdf` per document
+    (lazy-generates missing PDFs; skipped numbers abort with 409 only
+    when *nothing* produced a file).
+  - `csv` → `saskaitos.csv`, UTF-8 BOM + `;` delimiter (Excel LT
+    locale). One row per document: number, kind, status, issue_date,
+    order_id, credit_of, buyer name/company/VAT/email/country, currency,
+    total_net/vat/gross. Document-level totals — the exact
+    accounting-program import layout is TBD and will replace/extend
+    this format when known.

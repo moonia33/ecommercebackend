@@ -1908,3 +1908,72 @@ class OpsCustomersAndDocumentsTests(OpsLineEditDiscountTests):
         item = res.json()["results"][0]
         self.assertIn("thumbnail_url", item)
         self.assertIn("product_id", item)
+
+
+class OpsInvoiceExportTests(OpsLineEditDiscountTests):
+    """Bulk invoice export: PDF zip + CSV."""
+
+    def _issue_invoice(self, oid):
+        res = self.client.post(
+            f"/api/v1/ops/orders/{oid}/invoice",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        return res.json()
+
+    def test_csv_export(self):
+        self._auth()
+        oid = self._create_order(qty=1)
+        inv = self._issue_invoice(oid)
+
+        res = self.client.post(
+            "/api/v1/ops/invoices/export",
+            data={"format": "csv", "invoice_ids": [inv["id"]]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("text/csv", res["Content-Type"])
+        body = b"".join(res.streaming_content).decode("utf-8-sig")
+        rows = [r for r in body.strip().split("\r\n")]
+        self.assertEqual(len(rows), 2)
+        self.assertIn("number;kind;status", rows[0])
+        self.assertIn(inv["number"], rows[1])
+        self.assertIn(self.customer.email, rows[1])
+
+    def test_zip_export_and_limits(self):
+        self._auth()
+        oid = self._create_order(qty=1)
+        inv = self._issue_invoice(oid)
+
+        res = self.client.post(
+            "/api/v1/ops/invoices/export",
+            data={"format": "pdf_zip", "invoice_ids": [inv["id"]]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res["Content-Type"], "application/zip")
+        import io, zipfile
+        zf = zipfile.ZipFile(io.BytesIO(b"".join(res.streaming_content)))
+        self.assertEqual(zf.namelist(), [f"{inv['number']}.pdf"])
+        self.assertTrue(zf.read(zf.namelist()[0]).startswith(b"%PDF"))
+
+        # no documents -> 404; bad format -> 400
+        res = self.client.post(
+            "/api/v1/ops/invoices/export",
+            data={"format": "csv", "invoice_ids": [99999]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 404)
+        res = self.client.post(
+            "/api/v1/ops/invoices/export",
+            data={"format": "xlsx", "invoice_ids": [inv["id"]]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+        # filter-based export (no ids) uses registry filters
+        res = self.client.post(
+            "/api/v1/ops/invoices/export",
+            data={"format": "csv", "kind": "credit"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 404)
+        res = self.client.post(
+            "/api/v1/ops/invoices/export",
+            data={"format": "csv", "kind": "sales"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)

@@ -124,27 +124,22 @@ def ops_list_invoices(request, order_id: int | None = None, limit: int = 50):
     return [_serialize_invoice(i) for i in qs[:limit]]
 
 
-@router.get("/invoices/registry", response=OpsInvoiceListOut, auth=_auth)
-def ops_invoices_registry(
-    request,
-    q: str = "",
-    kind: str = "",
-    status: str = "",
-    order_id: int | None = None,
-    date_from: str = "",
-    date_to: str = "",
-    page: int = 1,
-    page_size: int = 50,
+def _filtered_invoices(
+    request, *,
+    q: str = "", kind: str = "", status: str = "",
+    order_id: int | None = None, date_from: str = "", date_to: str = "",
+    invoice_ids: list[int] | None = None,
 ):
-    """Paginated document registry for the /dokumentai admin page."""
-    _ensure_shop_context_if_strict(request)
-    _require_ops_user(request)
+    """Shared scoping+filtering for the registry list and bulk export."""
     from django.db.models import Q
 
     qs = Invoice.objects.select_related("order", "credit_of")
     shop_id = _request_shop_id(request)
     if shop_id is not None:
         qs = qs.filter(shop_id=shop_id)
+    if invoice_ids:
+        qs = qs.filter(id__in=[int(i) for i in invoice_ids])
+        return qs
     if order_id:
         qs = qs.filter(order_id=order_id)
     if kind.strip():
@@ -164,6 +159,28 @@ def ops_invoices_registry(
         qs = qs.filter(issue_date__gte=date_from.strip())
     if (date_to or "").strip():
         qs = qs.filter(issue_date__lte=date_to.strip())
+    return qs
+
+
+@router.get("/invoices/registry", response=OpsInvoiceListOut, auth=_auth)
+def ops_invoices_registry(
+    request,
+    q: str = "",
+    kind: str = "",
+    status: str = "",
+    order_id: int | None = None,
+    date_from: str = "",
+    date_to: str = "",
+    page: int = 1,
+    page_size: int = 50,
+):
+    """Paginated document registry for the /dokumentai admin page."""
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+
+    qs = _filtered_invoices(
+        request, q=q, kind=kind, status=status, order_id=order_id,
+        date_from=date_from, date_to=date_to)
 
     page = max(1, int(page or 1))
     page_size = max(1, min(int(page_size or 50), 100))
@@ -173,6 +190,131 @@ def ops_invoices_registry(
     return OpsInvoiceListOut(
         page=page, page_size=page_size, total_count=total_count,
         results=[_serialize_invoice(i) for i in rows])
+
+
+EXPORT_MAX_INVOICES = 300
+
+
+class OpsInvoiceExportIn(Schema):
+    # pdf_zip = archive of invoice PDFs; csv = flat document-level rows
+    # for accounting-software import (column layout until the target
+    # program's format is known).
+    format: str = "pdf_zip"
+    invoice_ids: list[int] = []
+    q: str = ""
+    kind: str = ""
+    status: str = ""
+    order_id: int | None = None
+    date_from: str = ""
+    date_to: str = ""
+
+
+@router.post("/invoices/export", auth=_auth)
+def ops_invoices_export(request, payload: OpsInvoiceExportIn):
+    """Bulk download: ZIP of PDFs or a flat CSV.
+
+    Selection: explicit `invoice_ids`, or the same filter set as the
+    registry. Capped at EXPORT_MAX_INVOICES per request.
+    """
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+
+    fmt = (payload.format or "pdf_zip").strip().lower()
+    if fmt not in {"pdf_zip", "csv"}:
+        raise HttpError(400, f"Unsupported export format '{payload.format}'")
+
+    qs = _filtered_invoices(
+        request, q=payload.q, kind=payload.kind, status=payload.status,
+        order_id=payload.order_id, date_from=payload.date_from,
+        date_to=payload.date_to,
+        invoice_ids=payload.invoice_ids or None,
+    ).order_by("issue_date", "id")
+
+    if qs.count() > EXPORT_MAX_INVOICES:
+        raise HttpError(
+            400,
+            f"Per daug dokumentų (>{EXPORT_MAX_INVOICES}) — "
+            "susiaurinkite filtrus arba eksportuokite dalimis")
+    invoices = list(qs)
+    if not invoices:
+        raise HttpError(404, "Nėra dokumentų pagal nurodytus kriterijus")
+
+    if fmt == "csv":
+        return _invoices_csv_response(invoices)
+    return _invoices_zip_response(invoices)
+
+
+def _invoices_zip_response(invoices: list[Invoice]) -> FileResponse:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    skipped: list[str] = []
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        used: set[str] = set()
+        for inv in invoices:
+            if not inv.pdf:
+                try:
+                    ensure_invoice_pdf(inv)
+                except Exception:
+                    pass
+            if not inv.pdf:
+                skipped.append(inv.number)
+                continue
+            name = f"{inv.number}.pdf"
+            i = 2
+            while name in used:
+                name = f"{inv.number}_{i}.pdf"
+                i += 1
+            used.add(name)
+            with inv.pdf.open("rb") as fp:
+                zf.writestr(name, fp.read())
+    if not used:
+        raise HttpError(
+            409,
+            "Nė vienas dokumentas neturi PDF "
+            f"(praleista: {', '.join(skipped)})")
+    buf.seek(0)
+    return FileResponse(
+        buf, content_type="application/zip",
+        filename="saskaitos.zip")
+
+
+def _invoices_csv_response(invoices: list[Invoice]) -> FileResponse:
+    import csv
+    import io
+
+    buf = io.StringIO()
+    # UTF-8 BOM + ';' delimiter: opens correctly in Excel (LT locale) and
+    # is accepted by most accounting-software CSV importers.
+    buf.write("﻿")
+    writer = csv.writer(buf, delimiter=";", lineterminator="\r\n")
+    writer.writerow([
+        "number", "kind", "status", "issue_date", "order_id",
+        "credit_of", "buyer_name", "buyer_company", "buyer_vat_code",
+        "buyer_email", "buyer_country", "currency",
+        "total_net", "total_vat", "total_gross",
+    ])
+    for inv in invoices:
+        buyer = inv.buyer or {}
+        totals = inv.totals or {}
+        writer.writerow([
+            inv.number, inv.kind, inv.status,
+            inv.issue_date.isoformat(), inv.order_id,
+            inv.credit_of.number if inv.credit_of_id else "",
+            buyer.get("full_name") or "",
+            buyer.get("company") or "",
+            buyer.get("company_vat_code") or "",
+            buyer.get("email") or "",
+            buyer.get("country_code") or "",
+            inv.currency or "EUR",
+            totals.get("net", ""), totals.get("vat", ""),
+            totals.get("gross", ""),
+        ])
+    return FileResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8")),
+        content_type="text/csv; charset=utf-8",
+        filename="saskaitos.csv")
 
 
 @router.get("/invoices/{invoice_id}", response=OpsInvoiceDetailOut, auth=_auth)
