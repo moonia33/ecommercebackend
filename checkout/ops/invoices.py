@@ -366,7 +366,7 @@ def ops_issue_order_invoice(request, order_id: int):
 def ops_credit_invoice(request, invoice_id: int, payload: OpsCreditInvoiceIn):
     """Issue a full or partial credit invoice against a sales invoice."""
     _ensure_shop_context_if_strict(request)
-    _require_ops_user(request)
+    user = _require_ops_user(request)
     inv = _invoice_for_ops(request, invoice_id)
 
     try:
@@ -380,6 +380,12 @@ def ops_credit_invoice(request, invoice_id: int, payload: OpsCreditInvoiceIn):
         )
     except ValueError as exc:
         raise HttpError(400, str(exc))
+
+    # A credit reduces what the customer owes — surface it as a pending
+    # refund row so the balance can be settled (Montonio or manually).
+    from checkout.surcharges import reconcile_order_balance
+    reconcile_order_balance(
+        order=inv.order, reason=f"Kreditinė {credit.number}", user=user)
 
     try:
         ensure_invoice_pdf(credit)
@@ -396,9 +402,15 @@ def ops_credit_invoice(request, invoice_id: int, payload: OpsCreditInvoiceIn):
 def ops_cancel_invoice(request, invoice_id: int):
     """Mark an invoice cancelled (kept for audit; frees re-issue for sales)."""
     _ensure_shop_context_if_strict(request)
-    _require_ops_user(request)
+    user = _require_ops_user(request)
     inv = _invoice_for_ops(request, invoice_id)
     inv = cancel_invoice(inv)
+    if inv.kind == Invoice.Kind.CREDIT:
+        # Cancelling a credit restores the customer's obligation.
+        from checkout.surcharges import reconcile_order_balance
+        reconcile_order_balance(
+            order=inv.order, reason=f"Kreditinė {inv.number} atšaukta",
+            user=user)
     return _serialize_invoice(inv)
 
 

@@ -314,6 +314,13 @@ def credit_return(
     credit = issue_credit_invoice(
         invoice, lines=credit_lines, discount_gross=discount_gross)
 
+    # The credit reduces what the customer owes — reconcile creates the
+    # pending refund row (settled via Montonio or manually).
+    from checkout.surcharges import reconcile_order_balance
+    reconcile_order_balance(
+        order=ret.order, reason=f"Kreditinė {credit.number} (RMA {ret.number})",
+        user=user)
+
     for rl, qty in pending:
         rl.credited_qty += qty
         rl.save(update_fields=["credited_qty"])

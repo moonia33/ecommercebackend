@@ -353,6 +353,7 @@ class OpsSurchargeOut(Schema):
     emailed_at: str = ""
     paid_at: str = ""
     created_at: str = ""
+    refund_in_flight: bool = False
 
 
 class OpsOrderCreateLineIn(Schema):

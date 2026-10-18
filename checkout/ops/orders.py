@@ -431,6 +431,10 @@ def _surcharge_to_out(s: Surcharge) -> OpsSurchargeOut:
         emailed_at=_to_iso(s.emailed_at),
         paid_at=_to_iso(s.paid_at),
         created_at=_to_iso(s.created_at),
+        refund_in_flight=(
+            s.direction == Surcharge.Direction.REFUND
+            and s.status == Surcharge.Status.PENDING
+            and bool(s.external_id)),
     )
 
 
@@ -889,13 +893,33 @@ def ops_resolve_surcharge(request, surcharge_id: int):
         raise HttpError(400, str(exc))
 
 
+@router.post("/surcharges/{surcharge_id}/refund", response=OpsSurchargeOut, auth=_auth)
+def ops_refund_surcharge(request, surcharge_id: int):
+    """Submit a pending refund row to Montonio. The row stays pending
+    (refund_in_flight) until the refundToken webhook marks it resolved."""
+    _ensure_shop_context_if_strict(request)
+    user = _require_ops_user(request)
+    s = _get_surcharge_for_ops(surcharge_id, shop_id=_request_shop_id(request))
+    from checkout.surcharges import request_montonio_refund
+    try:
+        s = request_montonio_refund(surcharge=s, user=user)
+    except ValueError as exc:
+        raise HttpError(400, str(exc))
+    except Exception as exc:
+        raise HttpError(502, f"Refund request failed: {exc}")
+    return _surcharge_to_out(s)
+
+
 @router.post("/surcharges/{surcharge_id}/cancel", response=OpsSurchargeOut, auth=_auth)
 def ops_cancel_surcharge(request, surcharge_id: int):
     _ensure_shop_context_if_strict(request)
     user = _require_ops_user(request)
     s = _get_surcharge_for_ops(surcharge_id, shop_id=_request_shop_id(request))
     from checkout.surcharges import cancel_surcharge
-    return _surcharge_to_out(cancel_surcharge(surcharge=s, user=user))
+    try:
+        return _surcharge_to_out(cancel_surcharge(surcharge=s, user=user))
+    except ValueError as exc:
+        raise HttpError(400, str(exc))
 
 
 @router.post("/orders/{order_id}/surcharges", response=OpsSurchargeOut, auth=_auth)

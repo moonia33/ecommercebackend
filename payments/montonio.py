@@ -179,6 +179,61 @@ def create_order_payment(*, order, language_code: str | None = None,
     )
 
 
+def create_refund(*, order_uuid: str, amount, idempotency_key: str,
+                  timeout: int = 20) -> dict:
+    """Create a refund against a paid Stargate order.
+
+    POST /refunds with a JWT {accessKey, orderUuid, amount, idempotencyKey,
+    iat, exp}. The caller owns persistence of the idempotency key so a
+    retry submits the identical request.
+    """
+    import time
+
+    if not is_configured():
+        raise MontonioError(
+            "Montonio is not configured (missing access/secret key)")
+    order_uuid = (order_uuid or "").strip()
+    if not order_uuid:
+        raise MontonioError("Missing Montonio order UUID")
+    amt = Decimal(str(amount)).quantize(Decimal("0.01"))
+    if amt < Decimal("0.05"):
+        raise MontonioError("Refund amount below the 0.05 minimum")
+
+    now = int(time.time())
+    payload = {
+        "accessKey": access_key(),
+        "orderUuid": order_uuid,
+        "amount": float(amt),
+        "idempotencyKey": idempotency_key,
+        "iat": now,
+        "exp": now + 600,
+    }
+    token = jwt.encode(payload, secret_key(), algorithm="HS256")
+    if isinstance(token, bytes):
+        token = token.decode("utf-8")
+
+    req = urllib.request.Request(
+        f"{api_url()}/refunds",
+        data=json.dumps({"data": token}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8")[:500]  # HTTPError body
+        except Exception:
+            pass
+        raise MontonioError(
+            f"Montonio refund create failed: {exc} {detail}".strip()) from exc
+    if not isinstance(body, dict):
+        raise MontonioError(f"Unexpected refund response: {body!r}")
+    return body
+
+
 def decode_order_token(token: str) -> dict:
     """Verify + decode Montonio orderToken (webhook or returnUrl ?order-token)."""
     return jwt.decode(token, secret_key(), algorithms=["HS256"])

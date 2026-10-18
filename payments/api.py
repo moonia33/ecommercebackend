@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
@@ -38,13 +39,14 @@ def montonio_webhook(request):
     if not order_token and not refund_token:
         raise HttpError(400, "Missing orderToken")
 
-    # Refund webhooks arrive on the same endpoint — ack for now (RMA later).
+    # Refund webhooks arrive on the same endpoint.
     if refund_token and not order_token:
         try:
-            montonio.decode_refund_token(refund_token)
+            decoded_refund = montonio.decode_refund_token(refund_token)
         except Exception:
             raise HttpError(400, "Invalid token signature")
-        return {"status": "ok", "ignored": "refund"}
+        _handle_refund_webhook(decoded_refund)
+        return {"status": "ok"}
 
     try:
         decoded = montonio.decode_order_token(order_token)
@@ -124,6 +126,94 @@ def montonio_webhook(request):
         pass
 
     return result
+
+
+def _handle_refund_webhook(decoded: dict) -> None:
+    """Apply a refundToken webhook to the matching refund surcharge.
+
+    Token fields: refundUuid, refundStatus, refundStatusDescription,
+    refundAmount, orderUuid. A refund with no matching surcharge (issued
+    from the Montonio dashboard) gets a resolved surcharge row so the
+    order balance stays truthful.
+    """
+    from checkout.models import Surcharge
+
+    refund_uuid = str(decoded.get("refundUuid") or "").strip()
+    refund_status = str(decoded.get("refundStatus") or "").strip().upper()
+    description = str(decoded.get("refundStatusDescription") or "")
+    order_uuid = str(decoded.get("orderUuid") or "").strip()
+
+    s = None
+    if refund_uuid:
+        s = Surcharge.objects.filter(
+            external_id=refund_uuid,
+            direction=Surcharge.Direction.REFUND,
+        ).select_related("order").first()
+    if s is None:
+        # Refund created outside ops (Montonio dashboard) — find the order
+        # via the original payment intent and record a resolved row.
+        pi = PaymentIntent.objects.filter(external_id=order_uuid).first()
+        if pi is None:
+            logger.warning("refund webhook: no order for %s", order_uuid)
+            return
+        try:
+            amount = Decimal(str(decoded.get("refundAmount") or 0))
+        except Exception:
+            amount = Decimal("0")
+        status = (
+            Surcharge.Status.RESOLVED if refund_status == "SUCCESSFUL"
+            else Surcharge.Status.FAILED if refund_status == "REJECTED"
+            else Surcharge.Status.PENDING
+        )
+        s = Surcharge.objects.create(
+            order_id=pi.order_id,
+            direction=Surcharge.Direction.REFUND,
+            source=Surcharge.Source.MANUAL,
+            method=Surcharge.Method.MONTONIO,
+            status=status,
+            amount_gross=amount,
+            currency=pi.currency or "EUR",
+            external_id=refund_uuid,
+            reason="Montonio dashboard refund",
+            raw_response={"refund_webhook": decoded},
+            paid_at=timezone.now() if status == Surcharge.Status.RESOLVED else None,
+        )
+        return
+
+    with transaction.atomic():
+        s = Surcharge.objects.select_for_update().get(id=s.id)
+        s.raw_response = {**(s.raw_response or {}), "refund_webhook": decoded}
+        update = ["raw_response", "updated_at"]
+        if refund_status == "SUCCESSFUL" and s.status != Surcharge.Status.RESOLVED:
+            s.status = Surcharge.Status.RESOLVED
+            s.paid_at = timezone.now()
+            update += ["status", "paid_at"]
+        elif refund_status == "REJECTED":
+            s.status = Surcharge.Status.FAILED
+            update += ["status"]
+        elif refund_status == "CANCELED":
+            # Refund cancelled before processing — obligation stays open,
+            # clear the provider link so it can be submitted again.
+            s.status = Surcharge.Status.PENDING
+            s.external_id = ""
+            update += ["status", "external_id"]
+        s.save(update_fields=update)
+
+    try:
+        OrderEvent.objects.create(
+            order_id=s.order_id,
+            kind=OrderEvent.Kind.PAYMENT,
+            name="montonio_refund_webhook",
+            payload={
+                "surcharge_id": s.id,
+                "refund_uuid": refund_uuid,
+                "refund_status": refund_status,
+                "description": description,
+                "at": timezone.now().isoformat(),
+            },
+        )
+    except Exception:
+        pass
 
 
 def _handle_surcharge_webhook(*, surcharge_id: int, payment_status: str,

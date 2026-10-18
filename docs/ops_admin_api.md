@@ -679,8 +679,16 @@ Whenever `total_gross` changes on an order with a confirmed payment,
 `reconcile_order_balance()` maintains a single pending auto `Surcharge`:
 
 - positive delta -> `direction=charge` (customer owes)
-- negative delta -> `direction=refund` (we owe; resolved manually)
+- negative delta -> `direction=refund` (we owe; settled via Montonio or
+  manually)
 - zero -> pending auto rows are cancelled
+
+`balance_due` also subtracts the gross of issued (non-cancelled) credit
+invoices — issuing a credit on a paid order therefore creates the pending
+refund row automatically; cancelling the credit cancels it again.
+Refund rows already submitted to the provider ("in-flight": pending +
+`external_id` set) are frozen — their amount is subtracted from any
+newly calculated obligation, and reconcile never touches them.
 
 Unpaid orders never get surcharge rows — editing just changes the total.
 The amount is never entered manually for auto rows.
@@ -699,6 +707,20 @@ The amount is never entered manually for auto rows.
   `order_surcharge` template (lt/en/pl).
 - `POST /ops/surcharges/{id}/mark-paid` / `cancel` / `resolve`
   (resolve = refund direction, money returned manually).
+- `POST /ops/surcharges/{id}/refund` — submits a pending refund row to the
+  **Montonio Refund API** (`POST /refunds`, JWT with `orderUuid`, `amount`,
+  `idempotencyKey`; the key is persisted in `raw_response` so retries are
+  safe). The original Stargate order UUID comes from the succeeded
+  `PaymentIntent.external_id`. The row stays `pending` with
+  `external_id = refundUuid` (`refund_in_flight` in the API) until the
+  `refundToken` webhook arrives on `/payments/montonio/webhook`:
+  `SUCCESSFUL` -> `resolved` (+`paid_at`), `REJECTED` -> `failed`,
+  `CANCELED` -> back to `pending` with the provider link cleared.
+  Refunds created in the Montonio dashboard get a synthetic resolved
+  surcharge row so `balance_due` stays truthful. In-flight rows cannot be
+  cancelled or re-submitted; `< 0.05` amounts and orders without a
+  succeeded Montonio payment are rejected (use `resolve` for manual
+  refunds / bank-transfer orders).
 
 `GET /ops/orders/{id}` additionally returns `shipments[]`, `surcharges[]`,
 and `totals.paid_gross`/`totals.balance_due`.

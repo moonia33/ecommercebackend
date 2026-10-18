@@ -1977,3 +1977,134 @@ class OpsInvoiceExportTests(OpsLineEditDiscountTests):
             data={"format": "csv", "kind": "sales"},
             content_type="application/json", HTTP_HOST="ops.local")
         self.assertEqual(res.status_code, 200)
+
+
+class OpsRefundFlowTests(OpsLineEditDiscountTests):
+    """Montonio refunds: credit -> pending refund -> submit -> webhook."""
+
+    def _paid_order(self):
+        oid = self._create_order(qty=2)
+        order = Order.objects.get(id=oid)
+        order.status = Order.Status.PAID
+        order.save(update_fields=["status"])
+        PaymentIntent.objects.create(
+            order=order,
+            provider=PaymentIntent.Provider.MONTONIO,
+            status=PaymentIntent.Status.SUCCEEDED,
+            amount_gross=order.total_gross,
+            currency="EUR",
+            external_id="order-uuid-1",
+        )
+        return oid, order
+
+    def _credit_order(self, oid):
+        inv = self.client.post(
+            f"/api/v1/ops/orders/{oid}/invoice",
+            data={}, content_type="application/json", HTTP_HOST="ops.local"
+        ).json()
+        res = self.client.post(
+            f"/api/v1/ops/invoices/{inv['id']}/credit",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        return res.json()
+
+    def test_credit_creates_pending_refund(self):
+        from checkout.models import Surcharge
+        from checkout.surcharges import balance_due
+        self._auth()
+        oid, order = self._paid_order()
+        credit = self._credit_order(oid)
+
+        order.refresh_from_db()
+        self.assertLess(balance_due(order=order), 0)
+        s = order.surcharges.get(
+            direction=Surcharge.Direction.REFUND,
+            status=Surcharge.Status.PENDING)
+        self.assertEqual(
+            str(s.amount_gross), credit["total_gross"].lstrip("-"))
+        self.assertEqual(s.source, Surcharge.Source.AUTO)
+        self.assertFalse(s.external_id)
+
+    def test_refund_submit_and_cancel_guard(self):
+        from unittest.mock import patch
+        from checkout.models import Surcharge
+        self._auth()
+        oid, order = self._paid_order()
+        self._credit_order(oid)
+        s = order.surcharges.get(direction=Surcharge.Direction.REFUND)
+
+        with patch(
+            "payments.montonio.create_refund",
+            return_value={"uuid": "refund-uuid-1", "status": "PENDING"},
+        ):
+            res = self.client.post(
+                f"/api/v1/ops/surcharges/{s.id}/refund",
+                data={}, content_type="application/json",
+                HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        out = res.json()
+        self.assertEqual(out["status"], "pending")
+        self.assertTrue(out["refund_in_flight"])
+        s.refresh_from_db()
+        self.assertEqual(s.external_id, "refund-uuid-1")
+        self.assertTrue(
+            s.raw_response.get("idempotency_key"))
+
+        # in-flight rows cannot be cancelled or resubmitted
+        res = self.client.post(
+            f"/api/v1/ops/surcharges/{s.id}/cancel",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+        res = self.client.post(
+            f"/api/v1/ops/surcharges/{s.id}/refund",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+    def test_refund_requires_montonio_payment(self):
+        from checkout.models import Surcharge
+        self._auth()
+        oid, order = self._paid_order()
+        # a bank-transfer paid order has no Montonio intent
+        pi = order.payment_intent
+        pi.provider = PaymentIntent.Provider.BANK_TRANSFER
+        pi.save(update_fields=["provider"])
+        self._credit_order(oid)
+        s = order.surcharges.get(direction=Surcharge.Direction.REFUND)
+        res = self.client.post(
+            f"/api/v1/ops/surcharges/{s.id}/refund",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+    def test_second_credit_while_inflight(self):
+        from decimal import Decimal
+        from unittest.mock import patch
+        from checkout.models import Surcharge
+        from checkout.surcharges import reconcile_order_balance
+        self._auth()
+        oid, order = self._paid_order()
+        self._credit_order(oid)
+        s1 = order.surcharges.get(direction=Surcharge.Direction.REFUND)
+        with patch(
+            "payments.montonio.create_refund",
+            return_value={"uuid": "refund-uuid-1"},
+        ):
+            self.client.post(
+                f"/api/v1/ops/surcharges/{s1.id}/refund",
+                data={}, content_type="application/json",
+                HTTP_HOST="ops.local")
+        s1.refresh_from_db()
+
+        # in-flight row keeps its amount; a new obligation creates a
+        # separate pending row
+        original_amount = s1.amount_gross
+        order.items_gross = "1.00"
+        order.total_gross = "10.00"
+        order.save(update_fields=["items_gross", "total_gross"])
+        reconcile_order_balance(order=order, reason="test")
+        s1.refresh_from_db()
+        self.assertEqual(s1.amount_gross, original_amount)
+        extra = order.surcharges.get(
+            direction=Surcharge.Direction.REFUND,
+            status=Surcharge.Status.PENDING,
+            external_id="")
+        self.assertEqual(extra.amount_gross, Decimal("16.62"))
