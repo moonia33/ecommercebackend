@@ -95,6 +95,11 @@ Kai `TYPESENSE_API_KEY` sukonfigūruota, `q` eina per Typesense:
 - jei Typesense nepasiekiamas — automatinis fallback į `icontains` (tas pats kontraktas)
 - index'as atnaujinamas realiu laiku per Celery signals'us; `manage.py reindex_products` — pilnas rebuild'as
 
+Admin valdoma (sync į Typesense automatiškai + nightly 04:45):
+
+- **Search synonyms** — žodžių grupės (`meškerė, spiningas`) arba one-way (`root`)
+- **Search overrides** — pin'uotos/paslėptos prekės per užklausą (`query` + `exact`/`contains`, `*` = visoms); `starts_at`/`ends_at` — akcijų langai (akcijos prekė "iškelta" tik galiojimo metu)
+
 ### Kainų interpretacija
 
 - kainos gaunamos kaip `Money` breakdown (`net`, `vat`, `gross`);

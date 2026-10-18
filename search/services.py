@@ -288,3 +288,82 @@ def search_product_ids(
             logger.exception("Typesense search failed; falling back to ORM")
             _client_failed = True
         return None
+
+
+def sync_synonyms() -> dict:
+    """Push active SearchSynonym rows to Typesense; remove stale managed ones."""
+    from .models import SearchSynonym
+
+    client = get_client()
+    if client is None:
+        return {"synced": 0, "error": "typesense not configured"}
+    ensure_collection()
+
+    wanted: dict[str, dict] = {}
+    for s in SearchSynonym.objects.filter(is_active=True):
+        body = {"synonyms": s.terms_list}
+        if s.root:
+            body["root"] = s.root
+        wanted[s.typesense_id] = body
+
+    collection = client.collections[COLLECTION_NAME]
+    try:
+        existing = collection.synonyms.retrieve().get("synonyms", [])
+        for item in existing:
+            sid = item.get("id", "")
+            if sid.startswith("syn-") and sid not in wanted:
+                collection.synonyms[sid].delete()
+        for sid, body in wanted.items():
+            collection.synonyms.upsert(sid, body)
+    except Exception:
+        logger.exception("Failed to sync synonyms")
+        return {"synced": 0, "error": "typesense sync failed"}
+    return {"synced": len(wanted)}
+
+
+def sync_overrides() -> dict:
+    """Push currently-valid SearchOverride rules to Typesense."""
+    from .models import SearchOverride
+
+    client = get_client()
+    if client is None:
+        return {"synced": 0, "error": "typesense not configured"}
+    ensure_collection()
+
+    now = timezone.now()
+    wanted: dict[str, dict] = {}
+    for o in SearchOverride.objects.prefetch_related("pins", "excludes"):
+        if not o.is_currently_valid(now=now):
+            continue
+        includes = [
+            {"id": str(pin.product_id), "position": pin.position}
+            for pin in o.pins.all()
+        ]
+        excludes = [
+            {"id": str(ex.product_id)} for ex in o.excludes.all()
+        ]
+        if not includes and not excludes:
+            continue
+        wanted[o.typesense_id] = {
+            "rule": {"q": o.query, "match": o.match},
+            "includes": includes,
+            "excludes": excludes,
+        }
+
+    collection = client.collections[COLLECTION_NAME]
+    try:
+        existing = collection.overrides.retrieve().get("overrides", [])
+        for item in existing:
+            oid = item.get("id", "")
+            if oid.startswith("ovr-") and oid not in wanted:
+                collection.overrides[oid].delete()
+        for oid, body in wanted.items():
+            collection.overrides.upsert(oid, body)
+    except Exception:
+        logger.exception("Failed to sync overrides")
+        return {"synced": 0, "error": "typesense sync failed"}
+    return {"synced": len(wanted)}
+
+
+def sync_curation() -> dict:
+    return {**sync_synonyms(), "overrides": sync_overrides()}

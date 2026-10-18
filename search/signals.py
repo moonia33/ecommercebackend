@@ -126,3 +126,36 @@ def assortment_rule_changed(sender, instance: ShopAssortmentRule, **kwargs):
         safe_delay(reindex_products_task)
 
     transaction.on_commit(_dispatch)
+
+
+def _schedule_curation_sync():
+    from .services import search_enabled
+    if not search_enabled():
+        return
+
+    def _dispatch():
+        from config.celery import safe_delay
+        from .tasks import sync_search_curation_task
+        safe_delay(sync_search_curation_task)
+
+    transaction.on_commit(_dispatch)
+
+
+from .models import (  # noqa: E402
+    SearchOverride,
+    SearchOverrideExclude,
+    SearchOverridePin,
+    SearchSynonym,
+)
+
+
+@receiver(post_save, sender=SearchSynonym)
+@receiver(post_delete, sender=SearchSynonym)
+@receiver(post_save, sender=SearchOverride)
+@receiver(post_delete, sender=SearchOverride)
+@receiver(post_save, sender=SearchOverridePin)
+@receiver(post_delete, sender=SearchOverridePin)
+@receiver(post_save, sender=SearchOverrideExclude)
+@receiver(post_delete, sender=SearchOverrideExclude)
+def curation_changed(sender, **kwargs):
+    _schedule_curation_sync()

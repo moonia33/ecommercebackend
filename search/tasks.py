@@ -27,3 +27,13 @@ def reindex_products_task() -> dict:
     from .services import full_reindex
 
     return full_reindex()
+
+
+@shared_task
+def sync_search_curation_task() -> dict:
+    """Reconcile admin-managed synonyms + overrides into Typesense.
+
+    Run on admin changes and nightly — drops expired promo overrides."""
+    from .services import sync_curation
+
+    return sync_curation()
