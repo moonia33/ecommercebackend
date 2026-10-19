@@ -43,6 +43,8 @@ Abi sistemos mūsų (normalizeris = atskiras Django servisas) — nėra jokios p
 1. `manage.py import_catalog <file> [--dry-run] [--no-apply]` — cron / ops
 2. `POST /api/v1/ops/imports/catalog` (JSON body, `?dry_run=`/`?apply_async=`) + `GET /api/v1/ops/imports/runs*` — normalizeris push'ina tiesiai
 
+**Async apply**: `?apply_async=true` grąžina run'ą iš karto su `status=queued` — apply vyksta Celery worker'yje arba (kai `CELERY_TASK_ALWAYS_EAGER=True` / brokeris negyvas) fone daemon thread'e. Sinchroniškai (`apply_async=false`) endpoint'as blokuoja kol apply baigiasi — ilgiems katalogams naudoti `apply_async=true` ir poll'inti `GET /api/v1/ops/imports/runs/{id}` kol `status` ∈ `done` / `done_with_errors` / `failed` (tarpinės: `queued`, `applying`).
+
 Jei katalogas viršytų ~20-50k eilučių — NDJSON (viena eilutė = viena prekė, stream parsing). Iki tol — paprastas JSON dokumentas.
 
 ### Failo struktūra (v1)

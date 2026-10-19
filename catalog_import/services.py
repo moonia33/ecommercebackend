@@ -4,10 +4,12 @@ import hashlib
 import json
 import logging
 import re
+import threading
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 from django.utils.text import slugify
 from pydantic import ValidationError
@@ -106,11 +108,15 @@ def execute_run(run: ImportRun, *, triggered_by=None) -> ImportRun:
         return _fail_run(run, f"Invalid JSON: {exc}")
 
     dry_run = bool(run.options.get("dry_run"))
+    touched_product_ids: set[int] = set()
     try:
-        if run.kind == ImportRun.Kind.CATALOG:
-            _process_catalog(run, data, dry_run=dry_run)
-        else:
-            _process_stock(run, data, dry_run=dry_run)
+        from search.signals import suppress_search_sync
+
+        with suppress_search_sync():
+            if run.kind == ImportRun.Kind.CATALOG:
+                touched_product_ids = _process_catalog(run, data, dry_run=dry_run)
+            else:
+                touched_product_ids = _process_stock(run, data, dry_run=dry_run)
     except ValidationError as exc:
         return _fail_run(run, f"Schema error: {exc.errors(include_url=False)[:5]}")
     except (_ItemError, DjangoValidationError, TypeError, AttributeError) as exc:
@@ -128,41 +134,73 @@ def execute_run(run: ImportRun, *, triggered_by=None) -> ImportRun:
         run.error_message = "dry_run: no changes were written"
     run.save()
 
-    if run.kind == ImportRun.Kind.CATALOG and not dry_run:
-        _schedule_search_reindex()
+    if not dry_run:
+        _schedule_search_sync(touched_product_ids)
     return run
 
 
-def _schedule_search_reindex() -> None:
-    """Refresh the Typesense index after a catalog import.
+def _start_async_apply(run: ImportRun) -> None:
+    """Start a non-blocking apply for `apply_async=true` requests.
 
-    Product ids can change on re-import (delete+insert), so a full reindex
-    is the safe choice over per-product delta indexing. Deferred via
+    Celery first (unless task_always_eager, which would run inline and
+    block the HTTP request); a daemon thread is the fallback — needed
+    both for eager dev mode and for a dead broker. The run row is already
+    committed by create_run before this is called.
+    """
+    from config.celery import safe_delay
+
+    if not getattr(settings, "CELERY_TASK_ALWAYS_EAGER", False):
+        from .tasks import apply_import_run_task
+
+        if safe_delay(apply_import_run_task, run.id) is not None:
+            return
+
+    def _apply(run_id=run.id):
+        try:
+            execute_run(ImportRun.objects.get(id=run_id))
+        except Exception:  # noqa: BLE001 - surfaced via run status/logs
+            logger.exception("async apply of import run %s failed", run_id)
+        finally:
+            connection.close()
+
+    threading.Thread(target=_apply, daemon=True).start()
+
+
+def _schedule_search_sync(product_ids: set[int]) -> None:
+    """Reindex only the products an import run touched.
+
+    Per-row signal syncs are suppressed during the run, so this single
+    deferred sync is the only index traffic. Deferred via
     transaction.on_commit like the search signals — a no-op inside tests
     (TestCase never commits). Runs via Celery when a broker is up, inline
     otherwise; failures are logged, not raised.
     """
+    if not product_ids:
+        return
     from search.services import search_enabled
 
     if not search_enabled():
         return
 
-    def _dispatch():
+    ordered = sorted(int(pid) for pid in product_ids)
+    chunks = [ordered[i : i + 500] for i in range(0, len(ordered), 500)]
+
+    def _dispatch(chunks=chunks):
         from config.celery import safe_delay
+        from search.tasks import sync_products_task
 
-        try:
-            from search.tasks import reindex_products_task
+        for chunk in chunks:
+            try:
+                if safe_delay(sync_products_task, chunk) is not None:
+                    continue
+            except Exception:  # noqa: BLE001 - import must not fail over search
+                logger.exception("failed to enqueue search sync")
+            try:
+                from search.services import index_products
 
-            if safe_delay(reindex_products_task) is not None:
-                return
-        except Exception:  # noqa: BLE001 - import must not fail over search
-            logger.exception("failed to enqueue search reindex")
-        try:
-            from search.services import full_reindex
-
-            full_reindex()
-        except Exception:  # noqa: BLE001 - degrade to stale index + log
-            logger.exception("inline search reindex failed")
+                index_products(chunk)
+            except Exception:  # noqa: BLE001 - degrade to stale index + log
+                logger.exception("inline search sync failed")
 
     transaction.on_commit(_dispatch)
 
@@ -179,7 +217,7 @@ def _fail_run(run: ImportRun, message: str) -> ImportRun:
 # ---------------- catalog items ----------------
 
 
-def _process_catalog(run: ImportRun, data: dict, *, dry_run: bool) -> None:
+def _process_catalog(run: ImportRun, data: dict, *, dry_run: bool) -> set[int]:
     env = CatalogImportEnvelope(**data)
     if env.format_version != 1:
         raise _ItemError(f"unsupported format_version {env.format_version}")
@@ -200,12 +238,14 @@ def _process_catalog(run: ImportRun, data: dict, *, dry_run: bool) -> None:
         _apply_one(run, row, lambda: _apply_product(run, item, seen_product_ids, row), dry_run)
 
     if run.mode == ImportRun.Mode.FULL_SYNC and not dry_run:
-        _deactivate_absent(run, seen_product_ids)
+        # Deactivated products also need reindexing (doc removal).
+        seen_product_ids |= _deactivate_absent(run, seen_product_ids)
     run.recount()
     run.save(update_fields=["total_items", "ok_items", "failed_items", "skipped_items"])
+    return seen_product_ids
 
 
-def _process_stock(run: ImportRun, data: dict, *, dry_run: bool) -> None:
+def _process_stock(run: ImportRun, data: dict, *, dry_run: bool) -> set[int]:
     env = StockImportEnvelope(**data)
     if env.format_version != 1:
         raise _ItemError(f"unsupported format_version {env.format_version}")
@@ -217,6 +257,7 @@ def _process_stock(run: ImportRun, data: dict, *, dry_run: bool) -> None:
     except Warehouse.DoesNotExist:
         raise _ItemError(f"unknown warehouse_code '{env.warehouse_code}'")
 
+    touched_product_ids: set[int] = set()
     for row_no, raw in enumerate(env.items, start=1):
         row = ImportItem.objects.create(run=run, row_no=row_no, payload=raw)
         try:
@@ -226,15 +267,20 @@ def _process_stock(run: ImportRun, data: dict, *, dry_run: bool) -> None:
         except ValidationError as exc:
             _mark_error(row, _format_validation(exc))
             continue
-        _apply_one(run, row, lambda: _apply_stock(row, item, warehouse), dry_run)
+        product_id = _apply_one(
+            run, row, lambda: _apply_stock(row, item, warehouse), dry_run
+        )
+        if product_id and not dry_run:
+            touched_product_ids.add(product_id)
     run.recount()
     run.save(update_fields=["total_items", "ok_items", "failed_items", "skipped_items"])
+    return touched_product_ids
 
 
-def _apply_one(run: ImportRun, row: ImportItem, fn, dry_run: bool) -> None:
+def _apply_one(run: ImportRun, row: ImportItem, fn, dry_run: bool):
     try:
         with transaction.atomic():
-            fn()
+            result = fn()
             if dry_run:
                 raise _DryRunRollback
         if dry_run:
@@ -242,6 +288,7 @@ def _apply_one(run: ImportRun, row: ImportItem, fn, dry_run: bool) -> None:
         else:
             row.status = ImportItem.Status.OK
         row.save(update_fields=["status"])
+        return result
     except _DryRunRollback:
         row.status = ImportItem.Status.SKIPPED
         row.save(update_fields=["status"])
@@ -265,9 +312,11 @@ def _format_validation(exc: ValidationError) -> str:
     return "; ".join(parts)
 
 
-def _deactivate_absent(run: ImportRun, seen_ids: set[int]) -> None:
+def _deactivate_absent(run: ImportRun, seen_ids: set[int]) -> set[int]:
     qs = Product.objects.filter(import_source=run.source).exclude(id__in=seen_ids)
+    deactivated_ids = set(qs.values_list("id", flat=True))
     qs.update(is_active=False)
+    return deactivated_ids
 
 
 # ---------------- product upsert ----------------
@@ -740,7 +789,7 @@ def _write_stock(variant: Variant, stock: dict[str, int]) -> None:
 # ---------------- stock items ----------------
 
 
-def _apply_stock(row: ImportItem, item: StockImportItemIn, warehouse: Warehouse) -> None:
+def _apply_stock(row: ImportItem, item: StockImportItemIn, warehouse: Warehouse) -> int:
     if item.qty < 0:
         raise _ItemError(f"negative qty for '{item.code}'")
     variant = Variant.objects.filter(sku=item.code).first()
@@ -752,3 +801,4 @@ def _apply_stock(row: ImportItem, item: StockImportItemIn, warehouse: Warehouse)
         inv.save(update_fields=["qty_on_hand", "updated_at"])
     row.variant_id = variant.id
     row.save(update_fields=["variant_id"])
+    return variant.product_id

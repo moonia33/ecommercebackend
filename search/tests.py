@@ -25,11 +25,14 @@ from search.services import (
 
 
 class FakeDocuments:
-    def __init__(self, result=None, error=None):
+    def __init__(self, result=None, error=None, exported_ids=None):
         self.result = result or {"hits": []}
         self.error = error
         self.last_search_params = None
         self.imported_docs = None
+        self.exported_ids = exported_ids
+        self.delete_filters = []
+        self.deleted_doc_ids = []
 
     def search(self, params):
         self.last_search_params = params
@@ -40,6 +43,27 @@ class FakeDocuments:
     def import_(self, docs, opts):
         self.imported_docs = list(docs)
         return [{"success": True} for _ in docs]
+
+    def export(self, params):
+        import json as _json
+
+        ids = self.exported_ids
+        if ids is None:
+            ids = [d["id"] for d in (self.imported_docs or [])]
+        return "\n".join(_json.dumps({"id": i}) for i in ids)
+
+    def delete(self, params):
+        self.delete_filters.append(params)
+        return {"num_deleted": 0}
+
+    def __getitem__(self, doc_id):
+        store = self
+
+        class _Handle:
+            def delete(self):
+                store.deleted_doc_ids.append(doc_id)
+
+        return _Handle()
 
 
 class _NamedResourceStore:
@@ -262,6 +286,40 @@ class SearchTests(TestCase):
             out = full_reindex()
         self.assertEqual(out["indexed"], 2)
         self.assertEqual(len(client.documents.imported_docs), 2)
+
+    def test_full_reindex_purges_stale_docs(self):
+        a = self._product("R1", "Rod one", category=self.cat)
+        b = self._product("R2", "Rod two", category=self.cat)
+        client = FakeClient()
+        client.documents.exported_ids = [a.id, b.id, "9999", "8888"]
+        with mock.patch(
+            "search.services.get_client", return_value=client
+        ):
+            out = full_reindex()
+        self.assertEqual(out["purged"], 2)
+        self.assertEqual(len(client.documents.delete_filters), 1)
+        filter_by = client.documents.delete_filters[0]["filter_by"]
+        self.assertIn("9999", filter_by)
+        self.assertIn("8888", filter_by)
+        self.assertNotIn(str(a.id), filter_by)
+
+    def test_index_products_deletes_inactive_and_missing(self):
+        from search.services import index_products
+
+        p = self._product("R3", "Rod three", category=self.cat)
+        p.is_active = False
+        p.save()
+        missing_id = p.id + 9999
+        client = FakeClient()
+        with mock.patch(
+            "search.services.get_client", return_value=client
+        ):
+            index_products([p.id, missing_id])
+        self.assertEqual(
+            sorted(client.documents.deleted_doc_ids),
+            sorted([str(p.id), str(missing_id)]),
+        )
+        self.assertFalse(client.documents.imported_docs)
 
 
 @override_settings(ALLOWED_HOSTS=["*"])

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
+
 from django.db import transaction
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
@@ -16,8 +19,26 @@ from catalog.models import (
 )
 
 
+_state = threading.local()
+
+
+@contextmanager
+def suppress_search_sync():
+    """Mute per-row index sync (bulk imports re-sync once at the end)."""
+    prev = getattr(_state, "suppressed", False)
+    _state.suppressed = True
+    try:
+        yield
+    finally:
+        _state.suppressed = prev
+
+
+def search_sync_suppressed() -> bool:
+    return getattr(_state, "suppressed", False)
+
+
 def _enqueue(product_id: int | None):
-    if not product_id:
+    if not product_id or search_sync_suppressed():
         return
     from .services import search_enabled
     if not search_enabled():
@@ -33,7 +54,7 @@ def _enqueue(product_id: int | None):
 
 
 def _enqueue_delete(product_id: int | None):
-    if not product_id:
+    if not product_id or search_sync_suppressed():
         return
     from .services import search_enabled
     if not search_enabled():
@@ -106,6 +127,8 @@ def variant_feature_deleted(sender, instance: VariantFeatureValue, **kwargs):
 @receiver(post_save, sender=FeatureValue)
 def feature_value_saved(sender, instance: FeatureValue, **kwargs):
     """Renamed feature values must refresh every product using them."""
+    if search_sync_suppressed():
+        return
     product_ids = list(
         instance.product_values.values_list("product_id", flat=True)[:1000]
     )

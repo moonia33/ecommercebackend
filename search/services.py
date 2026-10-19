@@ -242,15 +242,33 @@ def index_products(product_ids: Iterable[int]) -> int:
     if client is None or not ensure_collection():
         return 0
 
+    ids = [int(pid) for pid in product_ids]
     qs = (
-        Product.objects.filter(id__in=list(product_ids))
+        Product.objects.filter(id__in=ids)
         .select_related(*_DOC_QS_SELECT)
         .prefetch_related(*_DOC_QS_PREFETCH)
     )
-    docs = [d for d in (product_document(p) for p in qs) if d]
+    docs = []
+    seen_ids = set()
+    stale_ids = []
+    for p in qs:
+        seen_ids.add(p.id)
+        doc = product_document(p)
+        if doc:
+            docs.append(doc)
+        else:
+            stale_ids.append(p.id)
+    # Unindexable (inactive) or deleted products must not linger in the index.
+    stale_ids.extend(pid for pid in ids if pid not in seen_ids)
+    collection = client.collections[COLLECTION_NAME]
+    for pid in stale_ids:
+        try:
+            collection.documents[str(pid)].delete()
+        except Exception:
+            pass
     if not docs:
         return 0
-    result = client.collections[COLLECTION_NAME].documents.import_(
+    result = collection.documents.import_(
         docs, {"action": "upsert"})
     if not isinstance(result, list):
         return 0
@@ -286,7 +304,60 @@ def full_reindex() -> dict:
         Product.objects.filter(is_active=True).values_list("id", flat=True)
     )
     indexed = index_products(ids)
-    return {"indexed": indexed, "total_active": len(ids)}
+    purged = _purge_stale_documents(client, {int(i) for i in ids})
+    return {"indexed": indexed, "total_active": len(ids), "purged": purged}
+
+
+def _purge_stale_documents(client, active_ids: set[int], *, batch_size: int = 200) -> int:
+    """Delete collection docs whose ids are not active product ids.
+
+    Upserts alone leave stale docs behind after DB reimports (old ids
+    keep eating result slots); export + filter_by delete is the sweep.
+    """
+    import json as _json
+
+    collection = client.collections[COLLECTION_NAME]
+    try:
+        exported = collection.documents.export({"include_fields": "id"})
+    except Exception:
+        logger.exception("Typesense export failed; skipping stale purge")
+        return 0
+    stale: list[str] = []
+    for line in (exported or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            doc_id = str(_json.loads(line).get("id") or "")
+        except ValueError:
+            continue
+        if not doc_id:
+            continue
+        try:
+            if int(doc_id) in active_ids:
+                continue
+        except ValueError:
+            pass  # non-product id in our collection: stale too
+        stale.append(doc_id)
+    purged = 0
+    for i in range(0, len(stale), batch_size):
+        batch = stale[i : i + batch_size]
+        try:
+            collection.documents.delete(
+                {"filter_by": f"id:[{','.join(batch)}]"}
+            )
+            purged += len(batch)
+        except Exception:
+            logger.exception(
+                "Typesense batch delete failed; falling back to per-doc"
+            )
+            for doc_id in batch:
+                try:
+                    collection.documents[doc_id].delete()
+                    purged += 1
+                except Exception:
+                    pass
+    return purged
 
 
 def search_product_ids(

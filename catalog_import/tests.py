@@ -393,6 +393,81 @@ from unittest.mock import MagicMock, patch
 
 from catalog.models import ProductImage
 
+from . import services as import_services
+
+
+class SearchSyncTestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        TaxClass.objects.get_or_create(code="standard", defaults={"name": "S"})
+        Warehouse.objects.get_or_create(
+            code="main", defaults={"name": "Main", "country_code": "LT"}
+        )
+
+    def _catalog_run(self, options=None):
+        doc = _catalog_doc([{
+            "code": "sync-p", "tax_class": "standard", "price_net": "1.00",
+            "translations": {"lt": {"name": "P"}},
+        }])
+        return create_run(kind="catalog", payload_bytes=doc, options=options or {})
+
+    def test_signal_sync_suppressed_during_execute_run(self):
+        from search.signals import search_sync_suppressed
+
+        seen = []
+        real_apply = import_services._apply_product
+
+        def spy(run, item, seen_ids, row):
+            seen.append(search_sync_suppressed())
+            return real_apply(run, item, seen_ids, row)
+
+        with patch.object(import_services, "_apply_product", side_effect=spy):
+            run = execute_run(self._catalog_run())
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        self.assertEqual(seen, [True])
+        self.assertFalse(search_sync_suppressed())
+
+    @patch("search.services.search_enabled", return_value=True)
+    def test_schedule_search_sync_registers_on_commit(self, _enabled):
+        with patch.object(
+            import_services.transaction, "on_commit"
+        ) as mock_on_commit:
+            run = execute_run(self._catalog_run())
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        product = Product.objects.get(sku="sync-p")
+        mock_on_commit.assert_called_once()
+        dispatch = mock_on_commit.call_args[0][0]
+        chunks = dispatch.__defaults__[0] if dispatch.__defaults__ else None
+        self.assertEqual(chunks, [[product.id]])
+
+    @patch("search.services.search_enabled", return_value=True)
+    def test_no_search_sync_on_dry_run(self, _enabled):
+        with patch.object(
+            import_services.transaction, "on_commit"
+        ) as mock_on_commit:
+            run = execute_run(self._catalog_run(options={"dry_run": True}))
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        mock_on_commit.assert_not_called()
+
+
+class AsyncApplyTestCase(TestCase):
+    def test_start_async_apply_starts_thread_when_eager(self):
+        run = create_run(
+            kind="catalog",
+            payload_bytes=_catalog_doc([]),
+        )
+        with (
+            patch.object(
+                import_services.settings, "CELERY_TASK_ALWAYS_EAGER", True
+            ),
+            patch.object(import_services.threading, "Thread") as mock_thread,
+        ):
+            import_services._start_async_apply(run)
+        mock_thread.assert_called_once()
+        self.assertTrue(mock_thread.call_args.kwargs["daemon"])
+        mock_thread.return_value.start.assert_called_once_with()
+        self.assertEqual(run.status, ImportRun.Status.QUEUED)
+
 
 class ImageIngestTestCase(TestCase):
     def setUp(self):

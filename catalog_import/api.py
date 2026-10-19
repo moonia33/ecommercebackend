@@ -7,11 +7,10 @@ from ninja.errors import HttpError
 
 from accounts.auth import JWTAuth
 from checkout.ops.shared import _require_ops_user, _to_iso
-from config.celery import safe_delay
 
 from .models import ImportItem, ImportRun
 from .schemas import ImportItemOut, ImportRunOut
-from .services import create_run, execute_run
+from .services import _start_async_apply, create_run, execute_run
 
 router = Router(tags=["ops-imports"])
 _auth = JWTAuth()
@@ -54,11 +53,7 @@ def import_catalog(
     )
     if run.status == ImportRun.Status.QUEUED:
         if apply_async:
-            from .tasks import apply_import_run_task
-
-            if safe_delay(apply_import_run_task, run.id) is None:
-                execute_run(run)
-            run.refresh_from_db()
+            _start_async_apply(run)
         else:
             execute_run(run)
     return _serialize_run(run)
@@ -83,11 +78,7 @@ def import_stock(
     )
     if run.status == ImportRun.Status.QUEUED:
         if apply_async:
-            from .tasks import apply_import_run_task
-
-            if safe_delay(apply_import_run_task, run.id) is None:
-                execute_run(run)
-            run.refresh_from_db()
+            _start_async_apply(run)
         else:
             execute_run(run)
     return _serialize_run(run)
