@@ -97,7 +97,13 @@ Taisyklės:
 - `product_group_code` — laisvas tekstinis laukas `Product.product_group_code` **ir** `Variant.product_group_code` (indeksuota). `ProductGroup` neliečiamas — tai atskiras "collections"-tipo grupavimas. Variantas turi savo grupės kodą šalia `sku`+`ean`.
 - `category` — normalizeris siunčia shop kategorijos `slug` (map'as normalizeryje, čia tas pats kategorijų rinkinys). Nežinomas slug → item ERROR (arba `create_missing_taxonomy` flag'as).
 - `price_net`/`cost_net` — visada **be PVM** → `Variant.price_eur`/`cost_eur`. B2B kainos faile nereikalingos — jos daromos per `ShopPriceRule` taisykles.
-
+- Variantų pakuotės laukai (gamintojo duomenys, ne tiekėjo offer'io):
+  - `pack_unit` — vieneto žymuo consumer pakuotėje (`"pcs"` ir t.t.) → `Variant.pack_unit`
+  - `pack_quantity` — vienetų consumer/retail pakuotėje (twin pack; 0 = parduodama po vieną) → `Variant.pack_quantity`
+  - `trade_pack_qty` — vienetų transporto dėžėje (tiekėjo "Trade Pack QTY") → `Variant.trade_pack_qty`
+  - `pack_barcode` — GS1 EAN transporto dėžės (sandėlio scan'ui) → `Variant.pack_barcode`
+  - `sold_as_pack` — `true` jei nėra vienetinio EAN ir prekė parduodama tik pilnomis dėžėmis; tada `price_net`/`cost_net` jau yra **už visą dėžę** → `Variant.sold_as_pack`
+  - `pack_price`/`pack_purchase_price` — skaičiuoti normalyzerio pusėje (vieneto kaina × `trade_pack_qty`); backend'as saugo kaip `Variant.pack_price_eur`/`pack_purchase_price_eur` ir eksponuoja `pack_price` API atsakyme.
 ### Likučių feed'as (atskiras, lengvesnis)
 
 ```json

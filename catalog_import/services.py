@@ -503,6 +503,19 @@ def _sync_variants(product: Product, item: ImportProductIn, source: str) -> list
         variant.length_cm = spec.length_cm or item.length_cm
         variant.width_cm = spec.width_cm or item.width_cm
         variant.height_cm = spec.height_cm or item.height_cm
+        variant.pack_unit = spec.pack_unit or ""
+        variant.pack_quantity = spec.pack_quantity or 0
+        variant.trade_pack_qty = spec.trade_pack_qty or 0
+        variant.pack_barcode = spec.pack_barcode or ""
+        variant.sold_as_pack = bool(spec.sold_as_pack)
+        variant.pack_price_eur = (
+            Decimal(spec.pack_price) if spec.pack_price is not None else None
+        )
+        variant.pack_purchase_price_eur = (
+            Decimal(spec.pack_purchase_price)
+            if spec.pack_purchase_price is not None
+            else None
+        )
         variant.save()
         _sync_variant_options(product, variant, spec.options, item.option_labels)
         _sync_variant_images(product, variant, spec)

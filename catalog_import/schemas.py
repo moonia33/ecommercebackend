@@ -50,6 +50,16 @@ class ImportVariantIn(Schema):
     width_cm: int = 0
     height_cm: int = 0
     is_active: bool = True
+    # Pakuotės / trade-pack info (FOX): pack_unit='pcs', trade_pack_qty=dėžėje
+    # vienetų, pack_barcode=dėžės EAN; sold_as_pack=True -> variantas = visa
+    # dėžė (ean=dėžės EAN, kainos jau padaugintos iš trade_pack_qty).
+    pack_unit: str = ""
+    pack_quantity: int = 0
+    trade_pack_qty: int = 0
+    pack_barcode: str = ""
+    sold_as_pack: bool = False
+    pack_price: Decimal | None = None
+    pack_purchase_price: Decimal | None = None
     # variant-specific image URLs (attached to this variant only)
     images: list[ImportImageIn] = []
     # warehouse_code -> qty

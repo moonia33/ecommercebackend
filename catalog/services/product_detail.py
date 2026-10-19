@@ -148,6 +148,16 @@ def build_product_detail_payload(
                 "condition_grade": (best_offer.condition_grade if best_offer else ""),
                 "offer_visibility": (best_offer.offer_visibility if best_offer else ""),
                 "discount_percent": disc_pct,
+                "sold_as_pack": bool(v.sold_as_pack),
+                "pack_quantity": int(v.pack_quantity or 0),
+                "trade_pack_qty": int(v.trade_pack_qty or 0),
+                "pack_unit": v.pack_unit or "",
+                "pack_barcode": v.pack_barcode or "",
+                "pack_price": (
+                    money_out(currency="EUR", unit_net=Decimal(v.pack_price_eur), vat_rate=Decimal(vat_rate))
+                    if v.pack_price_eur is not None
+                    else None
+                ),
                 "options": [
                     {
                         "option_type_code": r.option_type.code,

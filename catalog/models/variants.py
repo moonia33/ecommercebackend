@@ -76,6 +76,45 @@ class Variant(models.Model):
     width_cm = models.PositiveIntegerField(default=0)
     height_cm = models.PositiveIntegerField(default=0)
 
+    # Trade-pack (supplier carton) info — manufacturer-defined product data,
+    # NOT per-supplier offer data. Supplier pricing stays on InventoryItem.
+    pack_unit = models.CharField(
+        max_length=32,
+        blank=True,
+        help_text="Unit label inside consumer pack (e.g. 'pcs', 'pcs/pair').",
+    )
+    pack_quantity = models.PositiveIntegerField(
+        default=0,
+        help_text="Units in the consumer/retail pack (twin pack etc.). 0 = sold as singles.",
+    )
+    trade_pack_qty = models.PositiveIntegerField(
+        default=0,
+        help_text="Units in the transport carton (supplier 'Trade Pack QTY').",
+    )
+    pack_barcode = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="GS1 EAN of the trade pack carton (for warehouse scanning).",
+    )
+    sold_as_pack = models.BooleanField(
+        default=False,
+        help_text="Sold only as a whole trade pack; price_eur/cost_eur are per-pack.",
+    )
+    pack_price_eur = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Net retail price per trade pack (price_eur × trade_pack_qty).",
+    )
+    pack_purchase_price_eur = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Net purchase cost per trade pack (cost_eur × trade_pack_qty).",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

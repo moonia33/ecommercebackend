@@ -737,10 +737,11 @@ class VariantAdmin(admin.ModelAdmin):
         "stock_available",
         "is_active",
     )
-    list_filter = ("is_active", "product")
+    list_filter = ("is_active", "sold_as_pack", "product")
     search_fields = (
         "sku",
         "barcode",
+        "pack_barcode",
         "product__sku",
         "product__name",
         "option_values__option_value__label",
@@ -754,6 +755,8 @@ class VariantAdmin(admin.ModelAdmin):
         "import_source", "import_code", "product_group_code",
         "product", "sku", "barcode", "name", "price_eur", "cost_eur",
         "weight_g", "length_cm", "width_cm", "height_cm", "is_active",
+        "sold_as_pack", "pack_quantity", "trade_pack_qty", "pack_unit",
+        "pack_barcode", "pack_price_eur", "pack_purchase_price_eur",
         "variant_images_display",
     )
     inlines = (VariantOptionValueInline, InventoryItemInline)

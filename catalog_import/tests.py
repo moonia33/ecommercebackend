@@ -83,6 +83,38 @@ class CatalogImportTestCase(TestCase):
             InventoryItem.objects.get(variant=variants["xxxx-M"]).qty_on_hand, 5
         )
 
+    def test_variant_pack_fields_are_imported(self):
+        run = self._run([
+            {
+                "code": "boxitem",
+                "tax_class": "standard",
+                "price_net": "10.00",
+                "translations": {"lt": {"name": "Dežė"}},
+                "variants": [
+                    {
+                        "code": "boxitem-1",
+                        "price_net": "120.00",
+                        "pack_unit": "pcs",
+                        "pack_quantity": 6,
+                        "trade_pack_qty": 60,
+                        "pack_barcode": "5056212116980",
+                        "sold_as_pack": True,
+                        "pack_price": "120.00",
+                        "pack_purchase_price": "84.00",
+                    },
+                ],
+            }
+        ])
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        v = Variant.objects.get(sku="boxitem-1")
+        self.assertTrue(v.sold_as_pack)
+        self.assertEqual(v.pack_unit, "pcs")
+        self.assertEqual(v.pack_quantity, 6)
+        self.assertEqual(v.trade_pack_qty, 60)
+        self.assertEqual(v.pack_barcode, "5056212116980")
+        self.assertEqual(str(v.pack_price_eur), "120.00")
+        self.assertEqual(str(v.pack_purchase_price_eur), "84.00")
+
     def test_variant_images_are_attached_to_specific_variant(self):
         run = self._run([
             {

@@ -76,6 +76,13 @@ class VariantOut(Schema):
     condition_grade: str = ""
     offer_visibility: str = ""
     discount_percent: int | None = None
+    # Trade-pack info (manufacturer data, same for all suppliers)
+    sold_as_pack: bool = False
+    pack_quantity: int = 0
+    trade_pack_qty: int = 0
+    pack_unit: str = ""
+    pack_barcode: str = ""
+    pack_price: MoneyOut | None = None
     options: list[VariantOptionOut]
     images: list[ProductImageOut] = []
 
