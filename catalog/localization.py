@@ -112,8 +112,8 @@ def localize_feature(feature: Feature, *, language_code: str | None) -> str:
 def localize_feature_value(feature_value: FeatureValue, *, language_code: str | None) -> str:
     translation = _best_translation(feature_value.translations.all(), language_code=language_code)
     if translation is None:
-        return feature_value.value
-    return translation.value or feature_value.value
+        return feature_value.label or feature_value.value
+    return translation.value or feature_value.label or feature_value.value
 
 
 def localize_option_type(option_type: OptionType, *, language_code: str | None) -> str:

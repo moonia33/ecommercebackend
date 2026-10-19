@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -400,18 +401,64 @@ def _sync_taxonomy(product: Product, item: ImportProductIn) -> None:
     product.save()
 
 
+_DASH_UNDERSCORE = re.compile(r"(?<=[A-Za-z])[-_]+|[-_]+(?=[A-Za-z])")
+
+
+def _humanize(code: str) -> str:
+    """'material_fabric'/'100-polyester' -> 'material fabric'/'100 polyester'.
+
+    Dashes between digits are kept ('10-30' stays a range). Underscores
+    always become spaces.
+    """
+    return _DASH_UNDERSCORE.sub(" ", code.replace("_", " ")).strip()
+
+
+def _first_translation(translations: dict[str, str]) -> str:
+    """Pick the display string: 'en' first, then any non-empty value."""
+    en = (translations.get("en") or "").strip()
+    if en:
+        return en
+    for t in translations.values():
+        t = (t or "").strip()
+        if t:
+            return t
+    return ""
+
+
 def _upsert_feature_value(f: ImportFeatureIn) -> tuple[Feature, FeatureValue]:
-    feature, _ = Feature.objects.get_or_create(
-        code=f.code, defaults={"name": f.code.replace("-", " ").title()}
+    # Canonical code: feeds send both 'ball_bearings' and 'ball-bearings'
+    # for the same attribute; normalize so they share one Feature row.
+    code = f.code.strip().lower().replace("_", "-")
+    humanized = _humanize(code).title()
+    feature, created = Feature.objects.get_or_create(
+        code=code, defaults={"name": humanized}
     )
+    name_from_feed = _first_translation(f.name_translations)
+    # Refresh the display name only when it is still the raw/auto code —
+    # names curated in the admin are never overwritten by imports.
+    if name_from_feed and (
+        created
+        or not feature.name.strip()
+        or feature.name in {f.code, code, humanized}
+    ):
+        feature.name = name_from_feed
+        feature.save(update_fields=["name"])
     for lang, name in f.name_translations.items():
         feature.translations.update_or_create(
             language_code=lang,
             defaults={"name": name},
         )
-    value, _ = FeatureValue.objects.get_or_create(
+    value, v_created = FeatureValue.objects.get_or_create(
         feature=feature, value=f.value
     )
+    label_from_feed = _first_translation(f.value_translations) or _humanize(
+        f.value
+    )
+    if label_from_feed and (
+        v_created or not value.label.strip() or value.label == value.value
+    ):
+        value.label = label_from_feed
+        value.save(update_fields=["label"])
     for lang, label in f.value_translations.items():
         value.translations.update_or_create(
             language_code=lang, defaults={"value": label}
@@ -634,15 +681,17 @@ def _sync_variant_options(
         return
     labels = option_labels or {}
     value_ids = []
-    for type_code, value_code in options.items():
+    for raw_type_code, value_code in options.items():
+        type_code = raw_type_code.strip().lower().replace("_", "-")
         opt_type, _ = OptionType.objects.get_or_create(
             code=type_code,
-            defaults={"name": type_code.replace("-", " ").replace("_", " ").title()},
+            defaults={"name": _humanize(type_code).title()},
         )
         ProductOptionType.objects.get_or_create(product=product, option_type=opt_type)
-        label = (labels.get(type_code) or {}).get(value_code) or value_code.replace(
-            "-", " "
-        ).replace("_", " ").title()
+        label = (
+            (labels.get(type_code) or labels.get(raw_type_code) or {}).get(value_code)
+            or _humanize(value_code).title()
+        )
         opt_value, created = OptionValue.objects.get_or_create(
             option_type=opt_type,
             code=value_code,

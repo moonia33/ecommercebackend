@@ -122,6 +122,16 @@ class FeatureValue(models.Model):
     feature = models.ForeignKey(
         Feature, on_delete=models.CASCADE, related_name="values")
     value = models.CharField(max_length=255)
+    label = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text=(
+            "Human-readable base-language label shown when no translation "
+            "row wins. 'value' stays a normalized machine slug (facets, "
+            "dedup); 'label' is what customers see."
+        ),
+    )
     sort_order = models.IntegerField(default=0)
     is_active = models.BooleanField(default=True)
 

@@ -115,6 +115,56 @@ class CatalogImportTestCase(TestCase):
         self.assertEqual(str(v.pack_price_eur), "120.00")
         self.assertEqual(str(v.pack_purchase_price_eur), "84.00")
 
+    def test_feature_names_and_labels_are_humanized(self):
+        run = self._run([
+            {
+                "code": "chair",
+                "tax_class": "standard",
+                "price_net": "50.00",
+                "translations": {"lt": {"name": "Kėdė"}},
+                "features": [
+                    {"code": "material_fabric", "value": "100-polyester"},
+                    {"code": "cast-range", "value": "10-30"},
+                ],
+            }
+        ])
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        product = Product.objects.get(sku="chair")
+        rows = {
+            r.feature.code: r.feature_value
+            for r in product.feature_values.select_related(
+                "feature", "feature_value"
+            )
+        }
+        # Kodai normalizuojami ('_' -> '-'), slugai lieka 'value',
+        # bet 'label'/'name' yra žmogui skaitomi.
+        self.assertEqual(rows["material-fabric"].feature.name, "Material Fabric")
+        self.assertEqual(rows["material-fabric"].label, "100 polyester")
+        # Skaičius-skaičius brūkšnys išlieka (diapazonas).
+        self.assertEqual(rows["cast-range"].label, "10-30")
+
+    def test_feature_label_prefers_en_translation(self):
+        run = self._run([
+            {
+                "code": "net",
+                "tax_class": "standard",
+                "price_net": "20.00",
+                "translations": {"lt": {"name": "Graibštas"}},
+                "features": [
+                    {
+                        "code": "length",
+                        "value": "2-5-m",
+                        "name_translations": {"en": "Handle Length"},
+                        "value_translations": {"en": "2.5 m"},
+                    }
+                ],
+            }
+        ])
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        fv = Product.objects.get(sku="net").feature_values.get().feature_value
+        self.assertEqual(fv.label, "2.5 m")
+        self.assertEqual(fv.feature.name, "Handle Length")
+
     def test_variant_features_are_imported_per_variant(self):
         run = self._run([
             {
