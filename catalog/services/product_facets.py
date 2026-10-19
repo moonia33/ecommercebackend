@@ -17,6 +17,7 @@ from catalog.models import (
     Product,
     ProductFeatureValue,
     ProductGroup,
+    VariantFeatureValue,
     VariantOptionValue,
 )
 
@@ -93,16 +94,27 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
     brands_qs = Brand.objects.filter(is_active=True, products__id__in=product_ids).prefetch_related("translations").distinct().order_by("name")
     groups_qs = ProductGroup.objects.filter(is_active=True, products__id__in=product_ids).distinct().order_by("name")
 
-    feature_ids = list(
+    feature_ids = set(
         ProductFeatureValue.objects.filter(product_id__in=product_ids)
+        .values_list("feature_id", flat=True)
+        .distinct()
+    ) | set(
+        VariantFeatureValue.objects.filter(variant__product_id__in=product_ids)
         .values_list("feature_id", flat=True)
         .distinct()
     )
     features_qs = Feature.objects.filter(is_active=True, is_filterable=True, id__in=feature_ids).prefetch_related("translations", "values", "values__translations", "values__groups").order_by("sort_order", "code")
-    # Single grouped query for all feature values used by the filtered products.
+    # Single grouped query for all feature values used by the filtered products —
+    # product-level rows plus variant-level rows (values differ per variant).
     used_vals_by_feature: dict[int, set[str]] = {}
     for fid, val in (
         ProductFeatureValue.objects.filter(product_id__in=product_ids)
+        .values_list("feature_id", "feature_value__value")
+        .distinct()
+    ):
+        used_vals_by_feature.setdefault(int(fid), set()).add(val)
+    for fid, val in (
+        VariantFeatureValue.objects.filter(variant__product_id__in=product_ids)
         .values_list("feature_id", "feature_value__value")
         .distinct()
     ):

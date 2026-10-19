@@ -43,6 +43,9 @@ class ImportVariantIn(Schema):
     ean: str = ""
     # option_type_code -> option_value code/label, e.g. {"size": "m"}
     options: dict[str, str] = {}
+    # variant-level features (differ between variants, e.g. weight/length);
+    # shared features stay on the product-level `features` list
+    features: list[ImportFeatureIn] = []
     price_net: Decimal | None = None
     cost_net: Decimal | None = None
     weight_g: int = 0

@@ -104,6 +104,7 @@ Taisyklės:
   - `pack_barcode` — GS1 EAN transporto dėžės (sandėlio scan'ui) → `Variant.pack_barcode`
   - `sold_as_pack` — `true` jei nėra vienetinio EAN ir prekė parduodama tik pilnomis dėžėmis; tada `price_net`/`cost_net` jau yra **už visą dėžę** → `Variant.sold_as_pack`
   - `pack_price`/`pack_purchase_price` — skaičiuoti normalyzerio pusėje (vieneto kaina × `trade_pack_qty`); backend'as saugo kaip `Variant.pack_price_eur`/`pack_purchase_price_eur` ir eksponuoja `pack_price` API atsakyme.
+- `variants[].features` — **varianto lygmens** features (`VariantFeatureValue`): reikšmės, kurios skiriasi tarp variantų (svoris, ilgis, dydis ir t.t.). Bendros visam produktui reikšmės lieka `features` sąraše (`ProductFeatureValue`). Facetai ir `feature=` filtras apima abu lygmenis; PDP — product features + pasirinkto varianto features (varianto reikšmė laimi tuo pačiu `code`).
 ### Likučių feed'as (atskiras, lengvesnis)
 
 ```json

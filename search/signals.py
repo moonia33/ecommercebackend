@@ -12,6 +12,7 @@ from catalog.models import (
     ProductTranslation,
     ShopAssortmentRule,
     Variant,
+    VariantFeatureValue,
 )
 
 
@@ -90,6 +91,16 @@ def product_feature_deleted(sender, instance: ProductFeatureValue, **kwargs):
 @receiver(post_save, sender=ProductTranslation)
 def product_translation_saved(sender, instance: ProductTranslation, **kwargs):
     _enqueue(instance.product_id)
+
+
+@receiver(post_save, sender=VariantFeatureValue)
+def variant_feature_saved(sender, instance: VariantFeatureValue, **kwargs):
+    _enqueue(instance.variant.product_id if instance.variant_id else None)
+
+
+@receiver(post_delete, sender=VariantFeatureValue)
+def variant_feature_deleted(sender, instance: VariantFeatureValue, **kwargs):
+    _enqueue(instance.variant.product_id if instance.variant_id else None)
 
 
 @receiver(post_save, sender=FeatureValue)

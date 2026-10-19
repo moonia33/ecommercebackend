@@ -84,6 +84,9 @@ class VariantOut(Schema):
     pack_barcode: str = ""
     pack_price: MoneyOut | None = None
     options: list[VariantOptionOut]
+    # Variant-level features (differ between variants; override product
+    # features with the same feature_code on PDP merge)
+    features: list["ProductFeatureOut"] = []
     images: list[ProductImageOut] = []
 
 

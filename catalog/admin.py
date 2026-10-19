@@ -40,6 +40,7 @@ from .models import (
     TaxClass,
     TaxRate,
     Variant,
+    VariantFeatureValue,
     VariantOptionValue,
     Warehouse,
     InventoryItem,
@@ -718,6 +719,11 @@ class VariantOptionValueInline(admin.TabularInline):
     extra = 0
 
 
+class VariantFeatureValueInline(admin.TabularInline):
+    model = VariantFeatureValue
+    extra = 0
+
+
 class InventoryItemInline(admin.TabularInline):
     model = InventoryItem
     extra = 0
@@ -759,7 +765,7 @@ class VariantAdmin(admin.ModelAdmin):
         "pack_barcode", "pack_price_eur", "pack_purchase_price_eur",
         "variant_images_display",
     )
-    inlines = (VariantOptionValueInline, InventoryItemInline)
+    inlines = (VariantOptionValueInline, VariantFeatureValueInline, InventoryItemInline)
 
     @admin.display(description="Varianto nuotraukos")
     def variant_images_display(self, obj):

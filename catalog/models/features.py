@@ -184,6 +184,34 @@ class ProductFeatureValue(models.Model):
         return f"{self.product_id}:{self.feature.code}={self.feature_value.value}"
 
 
+class VariantFeatureValue(models.Model):
+    """Feature value belonging to one variant (weight/size differ per variant).
+
+    Product-level `ProductFeatureValue` holds values shared by all variants;
+    this model holds values that differ between variants. Display merges
+    them — the variant's value wins for the same feature code.
+    """
+
+    variant = models.ForeignKey(
+        "catalog.Variant", on_delete=models.CASCADE, related_name="feature_values")
+    feature = models.ForeignKey(
+        Feature, on_delete=models.PROTECT, related_name="variant_values")
+    feature_value = models.ForeignKey(
+        FeatureValue, on_delete=models.PROTECT, related_name="variant_values"
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["variant", "feature_value"],
+                name="uniq_variant_feature_value",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.variant_id}:{self.feature.code}={self.feature_value.value}"
+
+
 class OptionType(models.Model):
     class DisplayType(models.TextChoices):
         SELECT = "select", "Select"

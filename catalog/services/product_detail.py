@@ -52,7 +52,12 @@ def build_product_detail_payload(
     ]
 
     variants_qs = [
-        v for v in product.variants.prefetch_related("variant_images").all()
+        v
+        for v in product.variants.prefetch_related(
+            "variant_images",
+            "feature_values__feature__translations",
+            "feature_values__feature_value__translations",
+        ).all()
         if v.is_active
     ]
     variants_qs.sort(key=lambda v: (v.sku, v.id))
@@ -132,6 +137,28 @@ def build_product_detail_payload(
         options = list(v.option_values.select_related("option_type", "option_value").all())
         options.sort(key=lambda r: (r.option_type.sort_order, r.option_type.code))
 
+        vfeature_rows = list(v.feature_values.all())
+        vfeature_rows.sort(
+            key=lambda r: (
+                r.feature.sort_order,
+                r.feature.code,
+                r.feature_value.sort_order,
+                r.feature_value.value,
+                r.id,
+            )
+        )
+        vfeatures_out = [
+            {
+                "feature_id": r.feature_id,
+                "feature_code": r.feature.code,
+                "feature_name": localize_feature(r.feature, language_code=language_code),
+                "value_id": r.feature_value_id,
+                "value": r.feature_value.value,
+                "value_label": localize_feature_value(r.feature_value, language_code=language_code),
+            }
+            for r in vfeature_rows
+        ]
+
         variants.append(
             {
                 "id": v.id,
@@ -167,6 +194,7 @@ def build_product_detail_payload(
                     }
                     for r in options
                 ],
+                "features": vfeatures_out,
                 "images": [
                     {
                         "avif_url": img.avif_url or None,

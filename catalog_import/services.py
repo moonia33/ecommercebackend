@@ -25,6 +25,7 @@ from catalog.models import (
     ProductVideo,
     TaxClass,
     Variant,
+    VariantFeatureValue,
     VariantOptionValue,
     OptionType,
     OptionValue,
@@ -399,24 +400,29 @@ def _sync_taxonomy(product: Product, item: ImportProductIn) -> None:
     product.save()
 
 
+def _upsert_feature_value(f: ImportFeatureIn) -> tuple[Feature, FeatureValue]:
+    feature, _ = Feature.objects.get_or_create(
+        code=f.code, defaults={"name": f.code.replace("-", " ").title()}
+    )
+    for lang, name in f.name_translations.items():
+        feature.translations.update_or_create(
+            language_code=lang,
+            defaults={"name": name},
+        )
+    value, _ = FeatureValue.objects.get_or_create(
+        feature=feature, value=f.value
+    )
+    for lang, label in f.value_translations.items():
+        value.translations.update_or_create(
+            language_code=lang, defaults={"value": label}
+        )
+    return feature, value
+
+
 def _sync_features(product: Product, item: ImportProductIn) -> None:
     feature_ids = []
     for f in item.features:
-        feature, _ = Feature.objects.get_or_create(
-            code=f.code, defaults={"name": f.code.replace("-", " ").title()}
-        )
-        for lang, name in f.name_translations.items():
-            feature.translations.update_or_create(
-                language_code=lang,
-                defaults={"name": name},
-            )
-        value, _ = FeatureValue.objects.get_or_create(
-            feature=feature, value=f.value
-        )
-        for lang, label in f.value_translations.items():
-            value.translations.update_or_create(
-                language_code=lang, defaults={"value": label}
-            )
+        feature, value = _upsert_feature_value(f)
         ProductFeatureValue.objects.filter(
             product=product, feature=feature
         ).exclude(feature_value=value).delete()
@@ -425,6 +431,22 @@ def _sync_features(product: Product, item: ImportProductIn) -> None:
         )
         feature_ids.append(feature.id)
     ProductFeatureValue.objects.filter(product=product).exclude(
+        feature_id__in=feature_ids
+    ).delete()
+
+
+def _sync_variant_features(variant: Variant, spec: ImportVariantIn) -> None:
+    feature_ids = []
+    for f in spec.features:
+        feature, value = _upsert_feature_value(f)
+        VariantFeatureValue.objects.filter(
+            variant=variant, feature=feature
+        ).exclude(feature_value=value).delete()
+        VariantFeatureValue.objects.get_or_create(
+            variant=variant, feature=feature, feature_value=value
+        )
+        feature_ids.append(feature.id)
+    VariantFeatureValue.objects.filter(variant=variant).exclude(
         feature_id__in=feature_ids
     ).delete()
 
@@ -559,6 +581,7 @@ def _sync_variants(product: Product, item: ImportProductIn, source: str) -> list
         )
         variant.save()
         _sync_variant_options(product, variant, spec.options, item.option_labels)
+        _sync_variant_features(variant, spec)
         _sync_variant_images(product, variant, spec)
         out.append(variant)
     return out

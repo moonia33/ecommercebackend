@@ -115,6 +115,41 @@ class CatalogImportTestCase(TestCase):
         self.assertEqual(str(v.pack_price_eur), "120.00")
         self.assertEqual(str(v.pack_purchase_price_eur), "84.00")
 
+    def test_variant_features_are_imported_per_variant(self):
+        run = self._run([
+            {
+                "code": "rod",
+                "tax_class": "standard",
+                "price_net": "100.00",
+                "translations": {"lt": {"name": "Meškerė"}},
+                "features": [{"code": "material", "value": "carbon"}],
+                "variants": [
+                    {
+                        "code": "rod-175",
+                        "options": {"size": "1.75m"},
+                        "price_net": "100.00",
+                        "features": [{"code": "length", "value": "175cm"}],
+                    },
+                    {
+                        "code": "rod-195",
+                        "options": {"size": "1.95m"},
+                        "price_net": "110.00",
+                        "features": [{"code": "length", "value": "195cm"}],
+                    },
+                ],
+            }
+        ])
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        product = Product.objects.get(sku="rod")
+        self.assertEqual(product.feature_values.get().feature.code, "material")
+        variants = {v.sku: v for v in product.variants.all()}
+        v175 = variants["rod-175"].feature_values.get()
+        self.assertEqual(v175.feature.code, "length")
+        self.assertEqual(v175.feature_value.value, "175cm")
+        self.assertEqual(
+            variants["rod-195"].feature_values.get().feature_value.value, "195cm"
+        )
+
     def test_variant_images_are_attached_to_specific_variant(self):
         run = self._run([
             {

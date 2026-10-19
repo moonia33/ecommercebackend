@@ -179,6 +179,14 @@ def product_document(product) -> dict | None:
         for pfv in p.feature_values.select_related("feature", "feature_value")
         if pfv.feature.is_active and pfv.feature_value.is_active
     ]
+    # Variant-level values are facets too (weight/size differ per variant);
+    # a product is findable by any of its variants' feature values.
+    feature_facets += [
+        f"{vfv.feature.code}:{vfv.feature_value.value}"
+        for v in variants
+        for vfv in v.feature_values.all()
+        if vfv.feature.is_active and vfv.feature_value.is_active
+    ]
 
     search_bits = [
         p.name, p.sku,
@@ -220,6 +228,8 @@ def product_document(product) -> dict | None:
 
 _DOC_QS_SELECT = ("brand", "category")
 _DOC_QS_PREFETCH = ("variants", "variants__inventory_items",
+                    "variants__feature_values", "variants__feature_values__feature",
+                    "variants__feature_values__feature_value",
                     "feature_values", "feature_values__feature",
                     "feature_values__feature_value")
 
