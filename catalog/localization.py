@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.db.models import Case, IntegerField, Value, When
 
-from api.i18n import translation_fallback_chain
+from api.i18n import get_default_language_code, translation_fallback_chain
 
 from .models import (
     Brand,
@@ -23,8 +23,12 @@ def _best_translation(rows, *, language_code: str | None):
     if not langs:
         return None
     order_index = {lang: i for i, lang in enumerate(langs)}
+    # Base fields already carry the base-language content, so they behave like an
+    # implicit translation row at the base language's chain position. A stored
+    # translation must outrank that slot to win; otherwise callers use base fields.
+    base_rank = order_index.get(get_default_language_code(), 10_000)
     best = None
-    best_idx = 10_000
+    best_idx = base_rank
     for row in rows:
         idx = order_index.get((getattr(row, "language_code", "") or "").lower(), 10_000)
         if idx < best_idx:
