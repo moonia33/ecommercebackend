@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -38,6 +39,9 @@ from .schemas import (
     StockImportEnvelope,
     StockImportItemIn,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def file_sha256(payload_bytes: bytes) -> str:
@@ -121,7 +125,44 @@ def execute_run(run: ImportRun, *, triggered_by=None) -> ImportRun:
         run.status = ImportRun.Status.DONE
         run.error_message = "dry_run: no changes were written"
     run.save()
+
+    if run.kind == ImportRun.Kind.CATALOG and not dry_run:
+        _schedule_search_reindex()
     return run
+
+
+def _schedule_search_reindex() -> None:
+    """Refresh the Typesense index after a catalog import.
+
+    Product ids can change on re-import (delete+insert), so a full reindex
+    is the safe choice over per-product delta indexing. Deferred via
+    transaction.on_commit like the search signals — a no-op inside tests
+    (TestCase never commits). Runs via Celery when a broker is up, inline
+    otherwise; failures are logged, not raised.
+    """
+    from search.services import search_enabled
+
+    if not search_enabled():
+        return
+
+    def _dispatch():
+        from config.celery import safe_delay
+
+        try:
+            from search.tasks import reindex_products_task
+
+            if safe_delay(reindex_products_task) is not None:
+                return
+        except Exception:  # noqa: BLE001 - import must not fail over search
+            logger.exception("failed to enqueue search reindex")
+        try:
+            from search.services import full_reindex
+
+            full_reindex()
+        except Exception:  # noqa: BLE001 - degrade to stale index + log
+            logger.exception("inline search reindex failed")
+
+    transaction.on_commit(_dispatch)
 
 
 def _fail_run(run: ImportRun, message: str) -> ImportRun:
