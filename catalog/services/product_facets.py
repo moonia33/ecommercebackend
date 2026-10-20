@@ -195,6 +195,9 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
                 "id": v.id,
                 "code": v.code,
                 "label": localize_option_value(v, language_code=language_code),
+                "value_num": v.value_num,
+                "value_num_max": v.value_num_max,
+                "unit": v.unit,
             }
             for v in oungrouped
         ]

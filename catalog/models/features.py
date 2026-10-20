@@ -6,9 +6,23 @@ from .product import Product
 from .shared import _normalize_and_validate_translation_language_code
 
 
+class AttributeDatatype(models.TextChoices):
+    TEXT = "text", "Text"
+    NUMBER = "number", "Number"
+    RANGE = "range", "Range"
+    ENUM = "enum", "Enum"
+    BOOL = "bool", "Bool"
+
+
 class Feature(models.Model):
     code = models.SlugField(max_length=100, unique=True)
     name = models.CharField(max_length=255)
+    datatype = models.CharField(
+        max_length=16,
+        choices=AttributeDatatype.choices,
+        default=AttributeDatatype.TEXT,
+    )
+    unit = models.CharField(max_length=16, blank=True, default="")
     is_filterable = models.BooleanField(default=True)
     allows_multiple = models.BooleanField(default=False)
     recommendation_boost = models.BooleanField(
@@ -134,6 +148,18 @@ class FeatureValue(models.Model):
     )
     sort_order = models.IntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    value_num = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True,
+        help_text="Normalized numeric value in the feature's canonical unit.",
+    )
+    value_num_max = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True,
+        help_text="Upper bound for range values; empty for scalars.",
+    )
+    unit = models.CharField(
+        max_length=16, blank=True, default="",
+        help_text="Canonical unit for value_num (mm, cm, m, g, kg, ...).",
+    )
 
     class Meta:
         ordering = ["sort_order", "value"]
@@ -235,6 +261,12 @@ class OptionType(models.Model):
 
     code = models.SlugField(max_length=100, unique=True)
     name = models.CharField(max_length=255)
+    datatype = models.CharField(
+        max_length=16,
+        choices=AttributeDatatype.choices,
+        default=AttributeDatatype.TEXT,
+    )
+    unit = models.CharField(max_length=16, blank=True, default="")
     is_active = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
     display_type = models.CharField(
@@ -347,6 +379,18 @@ class OptionValue(models.Model):
     label = models.CharField(max_length=255)
     sort_order = models.IntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    value_num = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True,
+        help_text="Normalized numeric value in the option type's canonical unit.",
+    )
+    value_num_max = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True,
+        help_text="Upper bound for range values; empty for scalars.",
+    )
+    unit = models.CharField(
+        max_length=16, blank=True, default="",
+        help_text="Canonical unit for value_num (mm, cm, m, g, kg, ...).",
+    )
 
     class Meta:
         ordering = ["sort_order", "label"]

@@ -107,6 +107,21 @@ Taisyklės:
   - `sold_as_pack` — `true` jei nėra vienetinio EAN ir prekė parduodama tik pilnomis dėžėmis; tada `price_net`/`cost_net` jau yra **už visą dėžę** → `Variant.sold_as_pack`
   - `pack_price`/`pack_purchase_price` — skaičiuoti normalyzerio pusėje (vieneto kaina × `trade_pack_qty`); backend'as saugo kaip `Variant.pack_price_eur`/`pack_purchase_price_eur` ir eksponuoja `pack_price` API atsakyme.
 - `variants[].features` — **varianto lygmens** features (`VariantFeatureValue`): reikšmės, kurios skiriasi tarp variantų (svoris, ilgis, dydis ir t.t.). Bendros visam produktui reikšmės lieka `features` sąraše (`ProductFeatureValue`). Facetai ir `feature=` filtras apima abu lygmenis; PDP — product features + pasirinkto varianto features (varianto reikšmė laimi tuo pačiu `code`).
+
+### Normalizuoti atributai (format_version=2)
+
+| Laukas | Kur | Paskirtis |
+|---|---|---|
+| `features[].value_num` | product + variant features | `FeatureValue.value_num` — normalizuota reikšmė kanoniniu vienetu |
+| `features[].value_num_max` | product + variant features | `FeatureValue.value_num_max` — range viršutinė riba (scalar -> NULL) |
+| `features[].unit` | product + variant features | `Feature.unit`/`FeatureValue.unit` (mm, cm, m, ft, g, kg, lb, ml, ...) |
+| `features[].datatype` | product + variant features | `Feature.datatype` — `text`/`number`/`range`/`enum`/`bool` |
+| `option_value_meta` | product | `{option_code: {value_code: {num, num_max, unit}}}` → `OptionValue.value_num`/`value_num_max`/`unit` ir `OptionType.unit` |
+| `variants[].name` | variant | `Variant.name` (pvz. tiekėjo `variantas` liekana); tuščias nekeičia esamo |
+
+- `value_num`/`value_num_max` — Decimal; `option_value_meta` rakta value'ai = variantų `options` kodai (`"casting-weight": {"10-40-g": {...}}`).
+- `datatype`/`unit` pildomi tik kai feed'as atsiunčia ne tuščią — rankom admin'e pakeisti laukai neperrašomi tuščiu.
+- `auto_assign` grupės (FeatureValueGroup/OptionValueGroup) pirmiausia naudoja `value_num`/`value_num_max`; kai jų nėra — fallback į `parse_numeric_range(label/value)`.
 ### Likučių feed'as (atskiras, lengvesnis)
 
 ```json

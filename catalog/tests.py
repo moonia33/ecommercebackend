@@ -242,3 +242,79 @@ class FeatureValueGroupTests(TestCase):
         self.assertIn(("20-100", "20-100"), values)  # ungrouped stays raw
         self.assertIn(("green", "green"), values)
         self.assertNotIn(("10-30", "10-30"), values)  # grouped value hidden
+
+
+class NumericValueGroupTests(TestCase):
+    """auto_assign_* naudoja value_num/value_num_max kai jie užpildyti."""
+
+    def setUp(self):
+        from decimal import Decimal
+
+        self.feature = Feature.objects.create(
+            code="line_strength", name="Line Strength",
+            is_active=True, is_filterable=True,
+        )
+        # Tekstas neparsinamas ("green") — bet value_num turi tilpti.
+        self.v_ok = FeatureValue.objects.create(
+            feature=self.feature, value="green", value_num=Decimal("20"),
+        )
+        self.v_far = FeatureValue.objects.create(
+            feature=self.feature, value="blue", value_num=Decimal("300"),
+        )
+        self.v_text = FeatureValue.objects.create(
+            feature=self.feature, value="10-30",
+        )
+        self.group = FeatureValueGroup.objects.create(
+            feature=self.feature, code="iki-50", label="iki 50 kg",
+            max_value=Decimal("50"),
+        )
+
+    def test_value_num_used_without_text_parsing(self):
+        added = auto_assign_feature_group(self.group)
+        self.assertEqual(added, 2)
+        members = set(self.group.values.values_list("value", flat=True))
+        self.assertEqual(members, {"green", "10-30"})
+
+    def test_range_uses_num_max(self):
+        from decimal import Decimal
+
+        v = FeatureValue.objects.create(
+            feature=self.feature, value="r", value_num=Decimal("10"),
+            value_num_max=Decimal("80"),
+        )
+        added = auto_assign_feature_group(self.group)
+        self.assertFalse(self.group.values.filter(pk=v.pk).exists())
+
+
+class ProductFeatureNumericOutTests(TestCase):
+    def test_value_num_serialized(self):
+        from decimal import Decimal
+
+        tc, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"}
+        )
+        TaxRate.objects.create(
+            tax_class=tc, country_code="LT", rate="0.21",
+            valid_from=datetime.date(2020, 1, 1), is_active=True,
+        )
+        product = Product.objects.create(
+            sku="NUM-1", name="Num", slug="num-1", is_active=True,
+            tax_class=tc,
+        )
+        Variant.objects.create(
+            product=product, sku="NUM-1-A", price_eur="10.00", is_active=True,
+        )
+        feature = Feature.objects.create(code="weight", name="Weight")
+        value = FeatureValue.objects.create(
+            feature=feature, value="85-g", value_num=Decimal("85"), unit="g",
+        )
+        ProductFeatureValue.objects.create(
+            product=product, feature=feature, feature_value=value,
+        )
+        payload = build_product_detail_payload(
+            product=product, shop_id=None, country_code="LT",
+            channel="normal", language_code="lt",
+        )
+        f = next(f for f in payload["features"] if f["feature_code"] == "weight")
+        self.assertEqual(f["value_num"], Decimal("85"))
+        self.assertEqual(f["unit"], "g")

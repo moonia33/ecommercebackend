@@ -50,6 +50,13 @@ class Variant(models.Model):
         db_index=True,
         help_text="External variant code within import_source.",
     )
+    supplier_code = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Tiekėjo tikrasis art-no (be sku prefikso) – užsakymų administravimui.",
+    )
     product_group_code = models.CharField(
         max_length=64,
         blank=True,

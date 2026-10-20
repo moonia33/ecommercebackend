@@ -39,6 +39,19 @@ def parse_numeric_range(text: str) -> tuple[Decimal, Decimal] | None:
     return None
 
 
+def _stored_range(value) -> tuple[Decimal, Decimal] | None:
+    """Normalized numeric fields from the import payload (value_num/max).
+
+    Ranges use value_num..value_num_max; scalars use value_num..value_num.
+    Returns None when no numeric fields were imported -> caller falls
+    back to parse_numeric_range() on the raw text.
+    """
+    if value.value_num is None:
+        return None
+    hi = value.value_num_max if value.value_num_max is not None else value.value_num
+    return (min(value.value_num, hi), max(value.value_num, hi))
+
+
 def _within(
     rng: tuple[Decimal, Decimal],
     min_value: Decimal | None,
@@ -69,7 +82,7 @@ def auto_assign_feature_group(group: FeatureValueGroup) -> int:
     for v in group.feature.values.filter(is_active=True).prefetch_related("groups"):
         if v.groups.filter(pk=group.pk).exists():
             continue
-        rng = parse_numeric_range(v.value)
+        rng = _stored_range(v) or parse_numeric_range(v.value)
         if rng is None:
             continue
         if _within(rng, group.min_value, group.max_value):
@@ -86,7 +99,11 @@ def auto_assign_option_group(group: OptionValueGroup) -> int:
     for v in group.option_type.values.filter(is_active=True).prefetch_related("groups"):
         if v.groups.filter(pk=group.pk).exists():
             continue
-        rng = parse_numeric_range(v.label) or parse_numeric_range(v.code)
+        rng = (
+            _stored_range(v)
+            or parse_numeric_range(v.label)
+            or parse_numeric_range(v.code)
+        )
         if rng is None:
             continue
         if _within(rng, group.min_value, group.max_value):

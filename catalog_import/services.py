@@ -219,7 +219,7 @@ def _fail_run(run: ImportRun, message: str) -> ImportRun:
 
 def _process_catalog(run: ImportRun, data: dict, *, dry_run: bool) -> set[int]:
     env = CatalogImportEnvelope(**data)
-    if env.format_version != 1:
+    if env.format_version not in (1, 2):
         raise _ItemError(f"unsupported format_version {env.format_version}")
     run.source = env.source
     run.mode = env.mode if env.mode in (ImportRun.Mode.UPSERT, ImportRun.Mode.FULL_SYNC) else ImportRun.Mode.UPSERT
@@ -247,7 +247,7 @@ def _process_catalog(run: ImportRun, data: dict, *, dry_run: bool) -> set[int]:
 
 def _process_stock(run: ImportRun, data: dict, *, dry_run: bool) -> set[int]:
     env = StockImportEnvelope(**data)
-    if env.format_version != 1:
+    if env.format_version not in (1, 2):
         raise _ItemError(f"unsupported format_version {env.format_version}")
     run.source = env.source
     run.save(update_fields=["source"])
@@ -497,17 +497,38 @@ def _upsert_feature_value(f: ImportFeatureIn) -> tuple[Feature, FeatureValue]:
             language_code=lang,
             defaults={"name": name},
         )
+    feature_dirty = []
+    if f.datatype and feature.datatype != f.datatype:
+        feature.datatype = f.datatype
+        feature_dirty.append("datatype")
+    if f.unit and feature.unit != f.unit:
+        feature.unit = f.unit
+        feature_dirty.append("unit")
+    if feature_dirty:
+        feature.save(update_fields=feature_dirty)
     value, v_created = FeatureValue.objects.get_or_create(
         feature=feature, value=f.value
     )
     label_from_feed = _first_translation(f.value_translations) or _humanize(
         f.value
     )
+    value_dirty = []
+    if value.value_num != f.value_num:
+        value.value_num = f.value_num
+        value_dirty.append("value_num")
+    if value.value_num_max != f.value_num_max:
+        value.value_num_max = f.value_num_max
+        value_dirty.append("value_num_max")
+    if f.unit and value.unit != f.unit:
+        value.unit = f.unit
+        value_dirty.append("unit")
     if label_from_feed and (
         v_created or not value.label.strip() or value.label == value.value
     ):
         value.label = label_from_feed
-        value.save(update_fields=["label"])
+        value_dirty.append("label")
+    if value_dirty:
+        value.save(update_fields=value_dirty)
     for lang, label in f.value_translations.items():
         value.translations.update_or_create(
             language_code=lang, defaults={"value": label}
@@ -643,6 +664,7 @@ def _sync_variants(product: Product, item: ImportProductIn, source: str) -> list
             variant = Variant(product=product, sku=spec.code)
         variant.import_source = source
         variant.import_code = spec.code
+        variant.supplier_code = spec.supplier_code or ""
         variant.product_group_code = spec.product_group_code or item.product_group_code
         if spec.ean:
             conflict = (
@@ -667,6 +689,8 @@ def _sync_variants(product: Product, item: ImportProductIn, source: str) -> list
         variant.trade_pack_qty = spec.trade_pack_qty or 0
         variant.pack_barcode = spec.pack_barcode or ""
         variant.sold_as_pack = bool(spec.sold_as_pack)
+        if spec.name.strip():
+            variant.name = spec.name.strip()
         variant.pack_price_eur = (
             Decimal(spec.pack_price) if spec.pack_price is not None else None
         )
@@ -676,7 +700,10 @@ def _sync_variants(product: Product, item: ImportProductIn, source: str) -> list
             else None
         )
         variant.save()
-        _sync_variant_options(product, variant, spec.options, item.option_labels)
+        _sync_variant_options(
+            product, variant, spec.options, item.option_labels,
+            item.option_value_meta,
+        )
         _sync_variant_features(variant, spec)
         _sync_variant_images(product, variant, spec)
         out.append(variant)
@@ -725,10 +752,12 @@ def _sync_variant_options(
     variant: Variant,
     options: dict[str, str],
     option_labels: dict[str, dict[str, str]] | None = None,
+    option_value_meta: dict | None = None,
 ) -> None:
     if not options:
         return
     labels = option_labels or {}
+    meta = option_value_meta or {}
     value_ids = []
     for raw_type_code, value_code in options.items():
         type_code = raw_type_code.strip().lower().replace("_", "-")
@@ -736,6 +765,12 @@ def _sync_variant_options(
             code=type_code,
             defaults={"name": _humanize(type_code).title()},
         )
+        value_meta = (
+            (meta.get(type_code) or meta.get(raw_type_code) or {}).get(value_code)
+        )
+        if value_meta and value_meta.unit and opt_type.unit != value_meta.unit:
+            opt_type.unit = value_meta.unit
+            opt_type.save(update_fields=["unit"])
         ProductOptionType.objects.get_or_create(product=product, option_type=opt_type)
         label = (
             (labels.get(type_code) or labels.get(raw_type_code) or {}).get(value_code)
@@ -746,9 +781,22 @@ def _sync_variant_options(
             code=value_code,
             defaults={"label": label},
         )
+        dirty = []
         if not created and opt_value.label != label:
             opt_value.label = label
-            opt_value.save(update_fields=["label"])
+            dirty.append("label")
+        if value_meta:
+            if opt_value.value_num != value_meta.num:
+                opt_value.value_num = value_meta.num
+                dirty.append("value_num")
+            if opt_value.value_num_max != value_meta.num_max:
+                opt_value.value_num_max = value_meta.num_max
+                dirty.append("value_num_max")
+            if value_meta.unit and opt_value.unit != value_meta.unit:
+                opt_value.unit = value_meta.unit
+                dirty.append("unit")
+        if dirty:
+            opt_value.save(update_fields=dirty)
         VariantOptionValue.objects.update_or_create(
             variant=variant,
             option_type=opt_type,

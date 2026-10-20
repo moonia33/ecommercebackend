@@ -155,6 +155,10 @@ def build_product_detail_payload(
                 "value_id": r.feature_value_id,
                 "value": r.feature_value.value,
                 "value_label": localize_feature_value(r.feature_value, language_code=language_code),
+                "value_num": r.feature_value.value_num,
+                "value_num_max": r.feature_value.value_num_max,
+                "unit": r.feature_value.unit,
+                "datatype": r.feature.datatype,
             }
             for r in vfeature_rows
         ]
@@ -230,6 +234,10 @@ def build_product_detail_payload(
             "value_id": r.feature_value_id,
             "value": r.feature_value.value,
             "value_label": localize_feature_value(r.feature_value, language_code=language_code),
+            "value_num": r.feature_value.value_num,
+            "value_num_max": r.feature_value.value_num_max,
+            "unit": r.feature_value.unit,
+            "datatype": r.feature.datatype,
         }
         for r in feature_rows
     ]

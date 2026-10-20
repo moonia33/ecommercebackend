@@ -543,3 +543,112 @@ class ImageIngestTestCase(TestCase):
         img.refresh_from_db()
         self.assertEqual(img.ingest_status, ProductImage.INGEST_ERROR)
         self.assertIn("large", img.ingest_error)
+
+
+class AttributeNormalizationImportTests(CatalogImportTestCase):
+    """format_version=2: normalized numeric/datatype/unit fields persist."""
+
+    def test_feature_numeric_fields_persist(self):
+        run = self._run(
+            [
+                {
+                    "code": "rod1",
+                    "tax_class": "standard",
+                    "price_net": "10.00",
+                    "translations": {"lt": {"name": "Meškerė"}},
+                    "features": [
+                        {
+                            "code": "line-strength",
+                            "value": "9-07-kg",
+                            "value_num": "9.07",
+                            "unit": "kg",
+                            "datatype": "number",
+                            "value_translations": {"en": "9,07 kg (20 lb)"},
+                        },
+                        {
+                            "code": "casting-weight",
+                            "value": "10-40-g",
+                            "value_num": "10",
+                            "value_num_max": "40",
+                            "unit": "g",
+                            "datatype": "range",
+                        },
+                    ],
+                    "variants": [
+                        {
+                            "code": "rod1-a",
+                            "name": "2.70m / 10-40g",
+                            "options": {"casting-weight": "10-40-g"},
+                            "price_net": "10.00",
+                        }
+                    ],
+                    "option_value_meta": {
+                        "casting-weight": {
+                            "10-40-g": {"num": "10", "num_max": "40", "unit": "g"}
+                        }
+                    },
+                }
+            ]
+        )
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        product = Product.objects.get(sku="rod1")
+
+        strength = product.feature_values.get(feature__code="line-strength")
+        self.assertEqual(str(strength.feature_value.value_num), "9.0700")
+        self.assertEqual(strength.feature_value.unit, "kg")
+        self.assertEqual(strength.feature.datatype, "number")
+        self.assertEqual(strength.feature.unit, "kg")
+
+        cast = product.feature_values.get(feature__code="casting-weight")
+        self.assertEqual(str(cast.feature_value.value_num), "10.0000")
+        self.assertEqual(str(cast.feature_value.value_num_max), "40.0000")
+        self.assertEqual(cast.feature.datatype, "range")
+
+        variant = Variant.objects.get(sku="rod1-a")
+        self.assertEqual(variant.name, "2.70m / 10-40g")
+        opt_value = variant.option_values.get().option_value
+        self.assertEqual(str(opt_value.value_num), "10.0000")
+        self.assertEqual(str(opt_value.value_num_max), "40.0000")
+        self.assertEqual(opt_value.unit, "g")
+        self.assertEqual(opt_value.option_type.unit, "g")
+
+    def test_empty_variant_name_keeps_existing(self):
+        self._run(
+            [
+                {
+                    "code": "rod2",
+                    "tax_class": "standard",
+                    "price_net": "10.00",
+                    "translations": {"lt": {"name": "Meškerė"}},
+                    "variants": [
+                        {"code": "rod2-a", "name": "Old name", "price_net": "10.00"}
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(Variant.objects.get(sku="rod2-a").name, "Old name")
+        self._run(
+            [
+                {
+                    "code": "rod2",
+                    "tax_class": "standard",
+                    "price_net": "10.00",
+                    "translations": {"lt": {"name": "Meškerė"}},
+                    "variants": [{"code": "rod2-a", "name": "", "price_net": "10.00"}],
+                }
+            ]
+        )
+        self.assertEqual(Variant.objects.get(sku="rod2-a").name, "Old name")
+
+    def test_v1_payload_still_accepted(self):
+        run = self._run(
+            [
+                {
+                    "code": "v1item",
+                    "tax_class": "standard",
+                    "price_net": "1.00",
+                    "translations": {"lt": {"name": "V1"}},
+                }
+            ]
+        )
+        self.assertEqual(run.status, ImportRun.Status.DONE)

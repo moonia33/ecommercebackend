@@ -120,6 +120,10 @@ class ProductFeatureOut(Schema):
     value_id: int
     value: str
     value_label: str | None = None
+    value_num: Decimal | None = None
+    value_num_max: Decimal | None = None
+    unit: str = ""
+    datatype: str = ""
 
 
 class DeliveryWindowOut(Schema):
@@ -197,6 +201,9 @@ class OptionValueOut(Schema):
     id: int
     code: str
     label: str
+    value_num: Decimal | None = None
+    value_num_max: Decimal | None = None
+    unit: str = ""
 
 
 class OptionTypeOut(Schema):

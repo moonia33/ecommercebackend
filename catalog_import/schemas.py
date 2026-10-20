@@ -21,6 +21,20 @@ class ImportFeatureIn(Schema):
     name_translations: dict[str, str] = {}
     # value translations: {"lt": "Raudona", "pl": "Czerwony"}
     value_translations: dict[str, str] = {}
+    # Normalized numeric value(s) in the canonical unit (format_version=2+).
+    value_num: Decimal | None = None
+    value_num_max: Decimal | None = None
+    unit: str = ""
+    # text | number | range | enum | bool
+    datatype: str = ""
+
+
+class OptionValueMetaIn(Schema):
+    """Numeric metadata for one option value (format_version=2+)."""
+
+    num: Decimal | None = None
+    num_max: Decimal | None = None
+    unit: str = ""
 
 
 class ImportImageIn(Schema):
@@ -40,7 +54,12 @@ class ImportVideoIn(Schema):
 class ImportVariantIn(Schema):
     code: str
     product_group_code: str = ""
+    # Tikrasis tiekėjo art-no (be vardų-erdvės prefikso) – užsakymų administravimui.
+    # `code` gali būti prefiksuotas ('korda-GRD198') dėl globalaus SKU unikalumo.
+    supplier_code: str = ""
     ean: str = ""
+    # Variant display name (e.g. supplier 'variantas' remainder); empty keeps existing.
+    name: str = ""
     # option_type_code -> option_value code/label, e.g. {"size": "m"}
     options: dict[str, str] = {}
     # variant-level features (differ between variants, e.g. weight/length);
@@ -91,6 +110,8 @@ class ImportProductIn(Schema):
     additional_info: dict[str, str] = {}
     # option value label'ai filtrams/UI: {"size": {"2xl": "2XL"}}
     option_labels: dict[str, dict[str, str]] = {}
+    # option value numeric meta: {"casting-weight": {"10-40-g": {num,num_max,unit}}}
+    option_value_meta: dict[str, dict[str, OptionValueMetaIn]] = {}
     images: list[ImportImageIn] = []
     videos: list[ImportVideoIn] = []
     # warehouse_code -> qty (product-level stock goes to the default variant)
