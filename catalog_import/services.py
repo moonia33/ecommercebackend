@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import threading
+from contextlib import contextmanager
 from decimal import Decimal
 
 from django.conf import settings
@@ -112,7 +113,7 @@ def execute_run(run: ImportRun, *, triggered_by=None) -> ImportRun:
     try:
         from search.signals import suppress_search_sync
 
-        with suppress_search_sync():
+        with suppress_search_sync(), _suppress_image_ingest():
             if run.kind == ImportRun.Kind.CATALOG:
                 touched_product_ids = _process_catalog(run, data, dry_run=dry_run)
             else:
@@ -592,15 +593,34 @@ def _sync_variant_features(variant: Variant, spec: ImportVariantIn) -> None:
     ).delete()
 
 
+_image_ingest_state = threading.local()
+
+
+@contextmanager
+def _suppress_image_ingest():
+    """Mute per-row image downloads during import runs.
+
+    Importing a supplier catalog must not block on tens of thousands of
+    upstream HTTP downloads — rows stay INGEST_PENDING and are filled by
+    `ingest_pending_images` (cron/worker/CLI) afterwards.
+    """
+    prev = getattr(_image_ingest_state, "suppressed", False)
+    _image_ingest_state.suppressed = True
+    try:
+        yield
+    finally:
+        _image_ingest_state.suppressed = prev
+
+
 def _dispatch_image_ingest(obj: ProductImage) -> None:
     """Queue download of external image_url into object storage (after commit)."""
     if obj.image or not obj.image_url:
         return
-    if obj.ingest_status == ProductImage.INGEST_PENDING:
-        return
     if obj.ingest_status != ProductImage.INGEST_PENDING:
         obj.ingest_status = ProductImage.INGEST_PENDING
         obj.save(update_fields=["ingest_status"])
+    if getattr(_image_ingest_state, "suppressed", False):
+        return
     pk = obj.pk
 
     def _dispatch(pk=pk):
