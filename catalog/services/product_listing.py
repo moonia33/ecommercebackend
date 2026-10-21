@@ -157,6 +157,7 @@ def serialize_products_listing(
                 "slug": product_loc["slug"],
                 "name": product_loc["name"],
                 "is_active": bool(p.is_active),
+                "is_part": bool(p.is_part),
                 "product_group_code": p.product_group_code or "",
                 "brand": {"id": p.brand.id, "slug": brand_loc["slug"], "name": brand_loc["name"]} if p.brand and brand_loc else None,
                 "category": {"id": p.category.id, "slug": category_loc["slug"], "name": category_loc["name"]} if p.category and category_loc else None,

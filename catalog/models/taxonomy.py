@@ -7,6 +7,10 @@ from .shared import _normalize_and_validate_translation_language_code
 
 
 class Category(MPTTModel):
+    class ListTemplate(models.TextChoices):
+        GRID = "grid", "Grid"
+        LIST = "list", "List"
+
     import_source = models.CharField(
         max_length=64,
         blank=True,
@@ -54,6 +58,13 @@ class Category(MPTTModel):
     seo_description = models.CharField(max_length=320, blank=True)
     seo_keywords = models.CharField(max_length=255, blank=True)
     is_active = models.BooleanField(default=True)
+    # Kaip storefront renderina prekių sąrašą: 'grid' (kortelės, default)
+    # arba 'list' (eilinė lentelė – pvz. atsarginių dalių kategorijai).
+    list_template = models.CharField(
+        max_length=8,
+        choices=ListTemplate.choices,
+        default=ListTemplate.GRID,
+    )
 
     class MPTTMeta:
         order_insertion_by = ["name"]
@@ -117,6 +128,68 @@ class CategoryTranslation(models.Model):
     def clean(self):
         super().clean()
         self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
+
+
+class CategoryFacet(models.Model):
+    """Per-category facet configuration (F4).
+
+    When a category has enabled rows here, `build_facets_payload` returns
+    only these facets, in `order`, with the configured `widget`. Categories
+    without rows fall back to the default behaviour (all filterable
+    features + used option types).
+    """
+
+    class Source(models.TextChoices):
+        AUTO = "auto", "Auto"
+        FEATURE = "feature", "Feature"
+        OPTION = "option", "Option"
+
+    class Widget(models.TextChoices):
+        CHECKBOX = "checkbox", "Checkbox"
+        RANGE = "range", "Range"
+
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        related_name="facet_config",
+    )
+    code = models.SlugField(
+        max_length=100,
+        help_text=(
+            "Canonical kebab attribute code — the same code used in "
+            "?feature=/?option=/?range= params. Matches Feature.code and "
+            "OptionType.code (same-code facets merge)."
+        ),
+    )
+    source = models.CharField(
+        max_length=16,
+        choices=Source.choices,
+        default=Source.AUTO,
+        help_text=(
+            "Which side the code resolves on: 'auto' accepts either "
+            "features or option types; 'feature'/'option' pin it to one."
+        ),
+    )
+    widget = models.CharField(
+        max_length=16,
+        choices=Widget.choices,
+        default=Widget.CHECKBOX,
+        help_text="'checkbox' = value list; 'range' = numeric min/max slider.",
+    )
+    order = models.IntegerField(default=0)
+    is_enabled = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["order", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["category", "code"],
+                name="uniq_category_facet",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.category_id}:{self.code}"
 
 
 class Brand(models.Model):

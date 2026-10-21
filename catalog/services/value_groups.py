@@ -52,6 +52,25 @@ def _stored_range(value) -> tuple[Decimal, Decimal] | None:
     return (min(value.value_num, hi), max(value.value_num, hi))
 
 
+def value_numeric_range(
+    value, *texts: str
+) -> tuple[Decimal, Decimal] | None:
+    """Numeric (lo, hi) bounds of a FeatureValue/OptionValue.
+
+    Prefers the imported value_num/value_num_max fields; falls back to
+    parsing the first cleanly-numeric text in `texts` (e.g. `value` for
+    FeatureValue, `label`/`code` for OptionValue).
+    """
+    rng = _stored_range(value)
+    if rng is not None:
+        return rng
+    for t in texts:
+        rng = parse_numeric_range(t)
+        if rng is not None:
+            return rng
+    return None
+
+
 def _within(
     rng: tuple[Decimal, Decimal],
     min_value: Decimal | None,

@@ -1,6 +1,7 @@
 from .content import ContentBlock, ContentBlockTranslation, ContentRule
 from .enrichment import EnrichmentMatch, EnrichmentRule, EnrichmentRun
 from .features import (
+    AttributeDatatype,
     Feature,
     FeatureTranslation,
     FeatureValue,
@@ -23,16 +24,19 @@ from .taxonomy import (
     Brand,
     BrandTranslation,
     Category,
+    CategoryFacet,
     CategoryTranslation,
     ProductGroup,
 )
 from .variants import ProductOptionType, Variant, VariantOptionValue
 
 __all__ = [
+    "AttributeDatatype",
     "BackInStockSubscription",
     "Brand",
     "BrandTranslation",
     "Category",
+    "CategoryFacet",
     "CategoryTranslation",
     "ContentBlock",
     "ContentBlockTranslation",

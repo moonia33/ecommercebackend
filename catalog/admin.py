@@ -17,6 +17,7 @@ from .models import (
     Brand,
     BrandTranslation,
     Category,
+    CategoryFacet,
     CategoryTranslation,
     ContentBlock,
     ContentBlockTranslation,
@@ -103,6 +104,13 @@ class BrandTranslationInline(admin.StackedInline):
     form = Form
 
 
+class CategoryFacetInline(admin.TabularInline):
+    model = CategoryFacet
+    extra = 0
+    fields = ("code", "source", "widget", "order", "is_enabled")
+    ordering = ("order", "code")
+
+
 @admin.register(Category)
 class CategoryAdmin(DraggableMPTTAdmin):
     list_display = ("tree_actions", "indented_title", "import_source", "import_code", "slug", "is_active")
@@ -110,7 +118,7 @@ class CategoryAdmin(DraggableMPTTAdmin):
     list_filter = ("is_active", "import_source")
     search_fields = ("name", "slug", "import_code")
     prepopulated_fields = {"slug": ("name",)}
-    inlines = (CategoryTranslationInline,)
+    inlines = (CategoryTranslationInline, CategoryFacetInline)
 
     class Form(forms.ModelForm):
         description = forms.CharField(

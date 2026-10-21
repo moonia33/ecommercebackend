@@ -350,6 +350,7 @@ def _apply_product(run: ImportRun, item: ImportProductIn, seen_ids: set[int], ro
     product.seo_description = lt.seo_description or ""
     product.seo_keywords = lt.seo_keywords or ""
     product.additional_info = item.additional_info or {}
+    product.is_part = item.is_part
     if created or not product.slug:
         product.slug = _unique_slug(Product, lt.slug or lt.name)
     product.save()
@@ -431,8 +432,31 @@ def _unique_translation_slug(product: Product, lang: str, base: str) -> str:
     return candidate
 
 
+_PARTS_CATEGORY_SLUG = "atsargines-dalys"
+_PARTS_CATEGORY_NAME = "Atsarginės dalys"
+
+
+def _parts_category() -> Category:
+    """Dedikuota atsarginių dalių kategorija (list template)."""
+    category, _ = Category.objects.get_or_create(
+        slug=_PARTS_CATEGORY_SLUG,
+        defaults={
+            "name": _PARTS_CATEGORY_NAME,
+            "list_template": Category.ListTemplate.LIST,
+        },
+    )
+    if category.list_template != Category.ListTemplate.LIST:
+        category.list_template = Category.ListTemplate.LIST
+        category.save(update_fields=["list_template"])
+    return category
+
+
 def _sync_taxonomy(product: Product, item: ImportProductIn) -> None:
-    if item.category:
+    if item.is_part:
+        # Dalių produktai visada patenka į 'atsargines-dalys', nepriklausomai
+        # nuo payload `category`. Be is_part -> kategorija atstatoma į payload.
+        product.category = _parts_category()
+    elif item.category:
         category = Category.objects.filter(slug=item.category).first()
         if category is None:
             raise _ItemError(f"unknown category slug '{item.category}'")

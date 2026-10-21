@@ -97,6 +97,9 @@ class ImportProductIn(Schema):
     category: str = ""
     tax_class: str = "standard"
     is_active: bool = True
+    # Atsarginė dalis: True -> prekė perkeliama į 'atsargines-dalys'
+    # kategoriją (list template). False -> `category` iš payload'as.
+    is_part: bool = False
     price_net: Decimal
     cost_net: Decimal | None = None
     weight_g: int = 0

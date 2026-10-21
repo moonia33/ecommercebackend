@@ -54,6 +54,43 @@ SCHEMA = {
 }
 
 
+def numeric_attribute_codes() -> list[str]:
+    """Canonical codes of numeric attributes (Feature/OptionType with
+    datatype 'number' or 'range'). These get `num_<code>` float[] fields
+    in the Typesense schema for `range=` filtering."""
+    from catalog.models import AttributeDatatype, Feature, OptionType
+
+    numeric = (AttributeDatatype.NUMBER, AttributeDatatype.RANGE)
+    codes = set(
+        Feature.objects.filter(is_active=True, datatype__in=numeric)
+        .values_list("code", flat=True)
+    )
+    codes |= set(
+        OptionType.objects.filter(is_active=True, datatype__in=numeric)
+        .values_list("code", flat=True)
+    )
+    return sorted(codes)
+
+
+def num_field_name(code: str) -> str:
+    # Typesense field names are restricted to [\w]+ — kebab '-' becomes '_'.
+    return f"num_{code.replace('-', '_')}"
+
+
+def get_schema() -> dict:
+    """SCHEMA + dynamic float[] fields for every numeric attribute code."""
+    fields = list(SCHEMA["fields"]) + [
+        {
+            "name": num_field_name(code),
+            "type": "float[]",
+            "facet": True,
+            "optional": True,
+        }
+        for code in numeric_attribute_codes()
+    ]
+    return {**SCHEMA, "fields": fields}
+
+
 def search_enabled() -> bool:
     return bool(getattr(settings, "TYPESENSE_API_KEY", ""))
 
@@ -83,6 +120,7 @@ def ensure_collection(*, force_recreate: bool = False) -> bool:
     client = get_client()
     if client is None:
         return False
+    schema = get_schema()
     recreate = force_recreate
     if not recreate:
         try:
@@ -99,9 +137,27 @@ def ensure_collection(*, force_recreate: bool = False) -> bool:
                 )
 
             # 'id' is implicit/managed by Typesense — excluded from the diff.
-            wanted = {_sig(f) for f in SCHEMA["fields"] if f["name"] != "id"}
+            wanted = {_sig(f) for f in schema["fields"] if f["name"] != "id"}
             actual = {_sig(f) for f in existing.get("fields", []) if f["name"] != "id"}
-            recreate = wanted != actual
+            missing = wanted - actual
+            extra = actual - wanted
+            if not extra and missing:
+                # Purely additive drift (new num_* facet fields): add them
+                # via the collection update endpoint — supported since
+                # Typesense 0.24 — instead of dropping the whole index.
+                defs_by_name = {f["name"]: f for f in schema["fields"]}
+                try:
+                    client.collections[COLLECTION_NAME].update(
+                        {"fields": [defs_by_name[s[0]] for s in missing]}
+                    )
+                    return True
+                except Exception:
+                    logger.exception(
+                        "Typesense field update failed; recreating collection"
+                    )
+                    recreate = True
+            else:
+                recreate = wanted != actual
         except Exception:
             recreate = False
     if recreate:
@@ -109,12 +165,12 @@ def ensure_collection(*, force_recreate: bool = False) -> bool:
             client.collections[COLLECTION_NAME].delete()
         except Exception:
             pass
-        client.collections.create(SCHEMA)
+        client.collections.create(schema)
         return True
     try:
         client.collections[COLLECTION_NAME].retrieve()
     except Exception:
-        client.collections.create(SCHEMA)
+        client.collections.create(schema)
     return True
 
 
@@ -146,7 +202,7 @@ def _shop_ids_for_product(product_id: int) -> list[int]:
     return ids
 
 
-def product_document(product) -> dict | None:
+def product_document(product, *, numeric_codes=None) -> dict | None:
     """Build the Typesense document for a product; None if not indexable."""
     from catalog.api.shared import _effective_offer_unit_net
     from catalog.models import InventoryItem
@@ -154,6 +210,8 @@ def product_document(product) -> dict | None:
     p = product
     if not p.is_active:
         return None
+    if numeric_codes is None:
+        numeric_codes = set(numeric_attribute_codes())
 
     variants = [v for v in p.variants.all() if v.is_active]
     offer_items = [
@@ -206,6 +264,37 @@ def product_document(product) -> dict | None:
     if p.category_id:
         category_ids = [c.id for c in p.category.get_ancestors()] + [p.category_id]
 
+    # F4: numeric attribute values -> num_<code> float[] fields, enabling
+    # `range=` filter_by clauses. ALL values are indexed (product-level +
+    # variant-level features + variant option values). Range values
+    # contribute both endpoints (lo, hi) — Typesense matches arrays
+    # elementwise, so `num_x:[a..b]` is a "any endpoint inside" check; the
+    # ORM range filter remains the authoritative overlap check.
+    numeric: dict[str, list[float]] = {}
+
+    def _push_num(code: str, value) -> None:
+        if code not in numeric_codes or value.value_num is None:
+            return
+        arr = numeric.setdefault(num_field_name(code), [])
+        lo = float(value.value_num)
+        hi = float(value.value_num_max) if value.value_num_max is not None else lo
+        lo, hi = min(lo, hi), max(lo, hi)
+        if lo not in arr:
+            arr.append(lo)
+        if hi not in arr:
+            arr.append(hi)
+
+    for pfv in p.feature_values.select_related("feature", "feature_value"):
+        if pfv.feature.is_active and pfv.feature_value.is_active:
+            _push_num(pfv.feature.code, pfv.feature_value)
+    for v in variants:
+        for vfv in v.feature_values.all():
+            if vfv.feature.is_active and vfv.feature_value.is_active:
+                _push_num(vfv.feature.code, vfv.feature_value)
+        for vov in v.option_values.all():
+            if vov.option_type.is_active and vov.option_value.is_active:
+                _push_num(vov.option_type.code, vov.option_value)
+
     return {
         "id": str(p.id),
         "shop_ids": _shop_ids_for_product(p.id),
@@ -223,6 +312,7 @@ def product_document(product) -> dict | None:
         "vis_outlet": price_outlet is not None,
         "created_ts": int(p.created_at.timestamp()) if p.created_at else 0,
         "popularity": 0,
+        **numeric,
     }
 
 
@@ -230,6 +320,8 @@ _DOC_QS_SELECT = ("brand", "category")
 _DOC_QS_PREFETCH = ("variants", "variants__inventory_items",
                     "variants__feature_values", "variants__feature_values__feature",
                     "variants__feature_values__feature_value",
+                    "variants__option_values", "variants__option_values__option_type",
+                    "variants__option_values__option_value",
                     "feature_values", "feature_values__feature",
                     "feature_values__feature_value")
 
@@ -251,9 +343,10 @@ def index_products(product_ids: Iterable[int]) -> int:
     docs = []
     seen_ids = set()
     stale_ids = []
+    numeric_codes = set(numeric_attribute_codes())
     for p in qs:
         seen_ids.add(p.id)
-        doc = product_document(p)
+        doc = product_document(p, numeric_codes=numeric_codes)
         if doc:
             docs.append(doc)
         else:
@@ -367,9 +460,15 @@ def search_product_ids(
     channel: str,
     limit: int = MAX_IDS,
     sort: str | None = None,
+    ranges: list[tuple[str, object, object]] | None = None,
 ) -> list[int] | None:
     """Ordered product ids matching q. None when Typesense unavailable
-    (caller should fall back to ORM search)."""
+    (caller should fall back to ORM search).
+
+    `ranges` = parsed `range=` pairs [(code, min, max)] (Decimal|None
+    bounds). Translated to `num_<code>:[min..max]` filter clauses —
+    pre-filtering only; the ORM range filter applies on top.
+    """
     global _client_failed
     client = get_client()
     if client is None:
@@ -381,6 +480,25 @@ def search_product_ids(
     filters.append(
         "vis_outlet:=true" if channel == "outlet" else "vis_normal:=true"
     )
+
+    if ranges:
+        try:
+            valid_fields = {num_field_name(c) for c in numeric_attribute_codes()}
+        except Exception:
+            valid_fields = None
+        for code, lo, hi in ranges:
+            field = num_field_name(code)
+            # Unknown/non-numeric codes are skipped — the ORM filter is the
+            # authoritative check; a clause on a field missing from the
+            # schema would just error the whole search.
+            if valid_fields is not None and field not in valid_fields:
+                continue
+            if lo is not None and hi is not None:
+                filters.append(f"{field}:[{lo}..{hi}]")
+            elif lo is not None:
+                filters.append(f"{field}:>={lo}")
+            elif hi is not None:
+                filters.append(f"{field}:<={hi}")
 
     sort_by = SORT_MAP.get((sort or "").strip().lower(), "")
 

@@ -98,6 +98,7 @@ Taisyklės:
 - `code` — pagrindinis matching raktas (mūsų SKU, `Variant.sku` unique). `ean` → `Variant.barcode` (unique; tuščias saugomas kaip NULL).
 - `product_group_code` — laisvas tekstinis laukas `Product.product_group_code` **ir** `Variant.product_group_code` (indeksuota). `ProductGroup` neliečiamas — tai atskiras "collections"-tipo grupavimas. Variantas turi savo grupės kodą šalia `sku`+`ean`.
 - `category` — normalizeris siunčia shop kategorijos `slug` (map'as normalizeryje, čia tas pats kategorijų rinkinys). Nežinomas slug → item ERROR (arba `create_missing_taxonomy` flag'as).
+- `is_part` (format_version=2, bool, default `false`) — prekė yra atsarginė dalis. Kai `true`: `Product.is_part=True` ir kategorija perrašoma į dedikuotą `atsargines-dalys` (LT 'Atsarginės dalys', `Category.list_template='list'` – storefront renderina eilučių sąrašą, ne kortelių grid'ą). Kai `false` – kategorija atstatoma į payload `category`. Normalyzeris flag'ą skaičiuoja iš tiekėjų kategorijų/pavadinimų (`apps/catalog/parts.py`, >=50% offer'ių).
 - `price_net`/`cost_net` — visada **be PVM** → `Variant.price_eur`/`cost_eur`. B2B kainos faile nereikalingos — jos daromos per `ShopPriceRule` taisykles.
 - Variantų pakuotės laukai (gamintojo duomenys, ne tiekėjo offer'io):
   - `pack_unit` — vieneto žymuo consumer pakuotėje (`"pcs"` ir t.t.) → `Variant.pack_unit`

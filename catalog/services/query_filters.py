@@ -4,8 +4,45 @@ from django.db.models import Q, QuerySet
 from ninja.errors import HttpError
 
 from catalog.localization import resolve_brand_by_slug, resolve_category_by_slug
-from catalog.models import Category, Product, ProductGroup
-from .catalog_core import descendant_category_ids, parse_pairs
+from catalog.models import Category, FeatureValue, OptionValue, Product, ProductGroup
+from .catalog_core import descendant_category_ids, parse_pairs, parse_range_pairs
+from .value_groups import value_numeric_range
+
+
+def _range_value_ids(
+    *, code: str, lo, hi
+) -> tuple[list[int], list[int]]:
+    """FeatureValue/OptionValue ids under `code` whose numeric range
+    overlaps [lo, hi] (open bounds allowed — None = unbounded).
+
+    Numeric bounds come from value_num/value_num_max when imported, else
+    a clean numeric parse of the raw value/label.
+    """
+    def overlaps(rng) -> bool:
+        if rng is None:
+            return False
+        v_lo, v_hi = rng
+        if hi is not None and v_lo > hi:
+            return False
+        if lo is not None and v_hi < lo:
+            return False
+        return True
+
+    fv_ids = [
+        v.id
+        for v in FeatureValue.objects.filter(
+            feature__code=code, is_active=True, feature__is_active=True
+        )
+        if overlaps(value_numeric_range(v, v.value))
+    ]
+    ov_ids = [
+        v.id
+        for v in OptionValue.objects.filter(
+            option_type__code=code, is_active=True, option_type__is_active=True
+        )
+        if overlaps(value_numeric_range(v, v.label, v.code))
+    ]
+    return fv_ids, ov_ids
 
 
 def apply_catalog_filters(
@@ -18,6 +55,7 @@ def apply_catalog_filters(
     group_code: str | None = None,
     feature: str | None = None,
     option: str | None = None,
+    range_filter: str | None = None,
 ) -> tuple[QuerySet[Product], Category | None]:
     selected_category: Category | None = None
 
@@ -81,7 +119,21 @@ def apply_catalog_filters(
             variants__option_values__option_type__code=o_type,
         )
 
-    if feature or option:
+    # `range=<code>:<min>-<max>` — overlap semantics: a product matches when
+    # any of its feature/option numeric ranges under `code` intersects the
+    # requested window (a '10-40 g' rod matches 'weight:20-50').
+    for r_code, r_lo, r_hi in parse_range_pairs(range_filter):
+        fv_ids, ov_ids = _range_value_ids(code=r_code, lo=r_lo, hi=r_hi)
+        if not fv_ids and not ov_ids:
+            qs = qs.none()
+            continue
+        qs = qs.filter(
+            Q(feature_values__feature_value_id__in=fv_ids)
+            | Q(variants__feature_values__feature_value_id__in=fv_ids)
+            | Q(variants__option_values__option_value_id__in=ov_ids)
+        )
+
+    if feature or option or range_filter:
         qs = qs.distinct()
 
     return qs, selected_category

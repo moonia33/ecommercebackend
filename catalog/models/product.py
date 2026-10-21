@@ -73,6 +73,10 @@ class Product(models.Model):
 
     is_active = models.BooleanField(default=True)
 
+    # Atsarginė dalis (spare part): importas (is_part) permeta tokią prekę
+    # į 'atsargines-dalys' kategoriją, kuri renderinama list template'u.
+    is_part = models.BooleanField(default=False, db_index=True)
+
     # Returns: non-returnable products (e.g. perishables, custom orders)
     # are excluded from RMA flows. return_days=None -> shop/default window.
     returnable = models.BooleanField(default=True)

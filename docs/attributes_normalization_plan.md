@@ -157,12 +157,43 @@ lieka `variants[].features`; `variants[].name` fallback'as — generuotas
 
 ### Fazė 4 — shop: facetų konfigūracija ir atributo tapatybė
 
-- `Feature.is_filterable` default `False`.
-- `CategoryFacet(category, attribute_code, sort_order, widget ∈ {checkbox, range, swatch})`,
-  paveldima žemyn medžiu; be įrašų → jokių facetų (ne „visi").
-- Facetai ir Typesense laukai raktuojami **kodu**, nepriklausomai ar reikšmė
-  atėjo iš `OptionValue` (ašis) ar `FeatureValue` (feature) — viena tapatybė.
-- Admin: `CategoryFacet` inline prie kategorijos.
+Statusas: **iš dalies implementuota** (2026-10-21).
+
+Padaryta:
+- `CategoryFacet(category, code, source ∈ {auto, feature, option},
+  widget ∈ {checkbox, range}, order, is_enabled)` — migration 0047,
+  inline `CategoryAdmin`. Config taikoma tik pačiai pasirinktai
+  kategorijai (medžio paveldėjimas žemyn — neimplementuota).
+- `build_facets_payload`: kategorija su `CategoryFacet` eilutėmis →
+  grąžinami tik enabled kodai `order` tvarka, su `widget`. `range`
+  facetai nešioja `min`/`max`/`unit` (iš `value_num`/`value_num_max`,
+  fallback — skaitinis `value`/`label` parsinimas), `values` tuščias.
+  Be konfigūracijos — senas elgesys (visi `is_filterable`).
+- Naujas parametras `range=<code>:<min>-<max>` (repeatable, `,`/`;`
+  atskyrimas, atviros ribos `code:10-` / `code:-50`) — overlap semantika
+  per `apply_catalog_filters` (feature + option reikšmės, scalar ir range).
+- Typesense: `num_<code>` `float[]` laukai visoms `datatype ∈ {number,
+  range}` ašims (dinamiška schema); `ensure_collection` prideda laukus
+  per collection `update` endpoint'ą (be drop/reindex), fallback —
+  recreate. `search_product_ids(ranges=...)` → `num_<code>:[min..max]`
+  / `>=` / `<=` filter_by. Pastaba: masyvų match'inimas elementwise —
+  ORM filtras lieka autoritetingas overlap check'as; Typesense tik
+  pre-filtruoja, todėl gali būti under-inclusive kai reikšmės range'as
+  pilnai dengia užklausos range'ą.
+- `seed_category_facets` management komanda: siūlo ≤8 top-varying kodus
+  per kategoriją (`--dry-run` default, `--apply` upsert'ina).
+- Storefront: `widget`, `min`, `max`, `unit` ant `FeatureOut`/
+  `OptionTypeOut`; `FilterSidebar` renderina range facetus (min/max
+  inputai + apply), `range=` param'ai kartu su feature/option.
+
+Nepadaryta / palikta vėliau:
+- `Feature.is_filterable` default `False` ir „be įrašų → jokių facetų"
+  (šiuo metu be config → visi filterable, kad neišjungtų dabartinio UI).
+- `widget = 'swatch'` (swatch'ai kol kas per `display_type`/`swatch_type`).
+- CategoryFacet paveldėjimas žemyn kategorijų medžiu.
+- Reindex reikalingas, kad `num_*` laukai turėtų reikšmes (schema
+  pridedama per update, bet dokumentų turinys atsinaujina tik per
+  `index_products`/`full_reindex`).
 
 ### Fazė 0 (po pirmo reimport'o su F1–F3) — valymas
 

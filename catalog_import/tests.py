@@ -318,6 +318,33 @@ class CatalogImportTestCase(TestCase):
         self.assertEqual(run.items.first().status, "skipped")
         self.assertFalse(Product.objects.filter(sku="dry").exists())
 
+    def test_is_part_moves_product_to_parts_category(self):
+        run = self._run([
+            {
+                "code": "sp-1", "price_net": "3.00", "tax_class": "standard",
+                "category": "cat-a", "is_part": True,
+                "translations": {"lt": {"name": "Atsarginė spole"}},
+            }
+        ])
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        product = Product.objects.get(sku="sp-1")
+        self.assertTrue(product.is_part)
+        self.assertEqual(product.category.slug, "atsargines-dalys")
+        self.assertEqual(product.category.name, "Atsarginės dalys")
+        self.assertEqual(product.category.list_template, "list")
+
+        # Antras importas be is_part -> kategorija atstatoma į payload.
+        self._run([
+            {
+                "code": "sp-1", "price_net": "3.00", "tax_class": "standard",
+                "category": "cat-a",
+                "translations": {"lt": {"name": "Atsarginė spole"}},
+            }
+        ])
+        product.refresh_from_db()
+        self.assertFalse(product.is_part)
+        self.assertEqual(product.category.slug, "cat-a")
+
     def test_full_sync_deactivates_absent(self):
         self._run([
             {"code": "keep", "price_net": "1.00", "tax_class": "standard",

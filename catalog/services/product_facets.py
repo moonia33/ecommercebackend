@@ -12,6 +12,7 @@ from catalog.localization import (
 from catalog.models import (
     Brand,
     Category,
+    CategoryFacet,
     Feature,
     OptionType,
     Product,
@@ -20,6 +21,18 @@ from catalog.models import (
     VariantFeatureValue,
     VariantOptionValue,
 )
+from catalog.services.value_groups import value_numeric_range
+
+
+def _collect_num_stats(
+    num_stats: dict, code: str, ranges: list, attr_unit: str
+) -> None:
+    """Merge (lo, hi, unit) tuples into per-code numeric bounds."""
+    for lo, hi, unit in ranges:
+        st = num_stats.setdefault(code, {"min": None, "max": None, "unit": ""})
+        st["min"] = lo if st["min"] is None else min(st["min"], lo)
+        st["max"] = hi if st["max"] is None else max(st["max"], hi)
+        st["unit"] = st["unit"] or unit or attr_unit or ""
 
 
 def build_facets_payload(*, product_ids, selected_category: Category | None, language_code: str | None = None):
@@ -82,6 +95,7 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
                     "slug": category_loc["slug"],
                     "name": category_loc["name"],
                     "parent_id": c.parent_id,
+                    "list_template": c.list_template,
                     "description": category_loc["description"],
                     "hero_image_url": (c.hero_url or None),
                     "menu_icon_url": (c.menu_icon_url_resolved or None),
@@ -120,6 +134,9 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
     ):
         used_vals_by_feature.setdefault(int(fid), set()).add(val)
     features_out: list[FeatureOut] = []
+    # Per canonical code numeric bounds across used values — feeds the
+    # 'range' widget facets (CategoryFacet config).
+    num_stats: dict[str, dict] = {}
     for f in features_qs:
         used_vals = used_vals_by_feature.get(int(f.id), set())
         # Grouped raw values collapse into their group checkbox; ungrouped
@@ -127,9 +144,13 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
         # never collide with FeatureValue ids.
         groups_seen: dict[int, object] = {}
         ungrouped: list = []
+        f_num: list = []
         for v in f.values.all():
             if not v.is_active or v.value not in used_vals:
                 continue
+            rng = value_numeric_range(v, v.value)
+            if rng is not None:
+                f_num.append((*rng, v.unit))
             matched = [g for g in v.groups.all() if g.is_active]
             if matched:
                 for g in matched:
@@ -155,9 +176,11 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
                 "id": f.id,
                 "code": f.code,
                 "name": localize_feature(f, language_code=language_code),
+                "widget": "checkbox",
                 "values": values_out,
             }
         )
+        _collect_num_stats(num_stats, f.code, f_num, f.unit)
 
     option_type_ids = list(
         VariantOptionValue.objects.filter(variant__product_id__in=product_ids)
@@ -177,9 +200,13 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
         used_codes = used_codes_by_type.get(int(t.id), set())
         ogroups_seen: dict[int, object] = {}
         oungrouped: list = []
+        t_num: list = []
         for v in t.values.all():
             if not v.is_active or v.code not in used_codes:
                 continue
+            rng = value_numeric_range(v, v.label, v.code)
+            if rng is not None:
+                t_num.append((*rng, v.unit))
             matched = [g for g in v.groups.all() if g.is_active]
             if matched:
                 for g in matched:
@@ -210,9 +237,11 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
                 "name": localize_option_type(t, language_code=language_code),
                 "display_type": t.display_type,
                 "swatch_type": t.swatch_type,
+                "widget": "checkbox",
                 "values": ovals_out,
             }
         )
+        _collect_num_stats(num_stats, t.code, t_num, t.unit)
 
     # Feature ir option type su tuo pačiu canonical code -> VIENAS facetas
     # (option reikšmės suliejamos į feature values, dedupe pagal code).
@@ -236,6 +265,51 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
                 }
             )
     option_types_out = merged_option_types
+
+    # F4: per-category facet configuration. When the selected category has
+    # enabled CategoryFacet rows, only those codes are returned — in the
+    # configured order, with the configured widget. `source` pins a code to
+    # the feature or option side; 'auto' accepts either (same-code facets
+    # already merged above). Range facets carry min/max/unit and no values.
+    if selected_category is not None:
+        facet_rows = list(
+            CategoryFacet.objects.filter(
+                category_id=int(selected_category.id),
+                is_enabled=True,
+            ).order_by("order", "code")
+        )
+    else:
+        facet_rows = []
+
+    if facet_rows:
+        cfg_by_code = {r.code: r for r in facet_rows}
+        order_idx = {r.code: i for i, r in enumerate(facet_rows)}
+
+        def _apply_facet_cfg(entry: dict) -> dict:
+            cfg = cfg_by_code[entry["code"]]
+            entry["widget"] = cfg.widget
+            if cfg.widget == CategoryFacet.Widget.RANGE:
+                st = num_stats.get(entry["code"]) or {}
+                entry["min"] = st.get("min")
+                entry["max"] = st.get("max")
+                entry["unit"] = st.get("unit") or ""
+                entry["values"] = []
+            return entry
+
+        features_out = [
+            _apply_facet_cfg(f)
+            for f in features_out
+            if f["code"] in cfg_by_code
+            and cfg_by_code[f["code"]].source != CategoryFacet.Source.OPTION
+        ]
+        features_out.sort(key=lambda f: order_idx[f["code"]])
+        option_types_out = [
+            _apply_facet_cfg(t)
+            for t in option_types_out
+            if t["code"] in cfg_by_code
+            and cfg_by_code[t["code"]].source != CategoryFacet.Source.FEATURE
+        ]
+        option_types_out.sort(key=lambda t: order_idx[t["code"]])
 
     brands_out = []
     for b in brands_qs:

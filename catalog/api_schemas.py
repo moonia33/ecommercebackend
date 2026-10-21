@@ -30,6 +30,8 @@ class CategoryOut(Schema):
     slug: str
     name: str
     parent_id: int | None = None
+    # 'grid' (default) arba 'list' – storefront prekių sąrašo template.
+    list_template: str = "grid"
 
     description: str = ""
     hero_image_url: str | None = None
@@ -96,6 +98,7 @@ class ProductListOut(Schema):
     slug: str
     name: str
     is_active: bool
+    is_part: bool = False
     product_group_code: str = ""
 
     brand: BrandRefOut | None = None
@@ -194,6 +197,12 @@ class FeatureOut(Schema):
     id: int
     code: str
     name: str
+    # 'checkbox' (default) renders values; 'range' renders a numeric
+    # min/max slider and carries min/max/unit instead of values.
+    widget: str = "checkbox"
+    min: Decimal | None = None
+    max: Decimal | None = None
+    unit: str = ""
     values: list[FeatureValueOut] = []
 
 
@@ -212,6 +221,11 @@ class OptionTypeOut(Schema):
     name: str
     display_type: str = "radio"
     swatch_type: str | None = None
+    # Same facet widget contract as FeatureOut (F4).
+    widget: str = "checkbox"
+    min: Decimal | None = None
+    max: Decimal | None = None
+    unit: str = ""
     values: list[OptionValueOut] = []
 
 

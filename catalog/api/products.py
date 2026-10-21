@@ -24,6 +24,7 @@ from .shared import (
     track_event,
 )
 from ..models import Product
+from ..services.catalog_core import parse_range_pairs
 from ..api_schemas import CatalogFacetsOut, ProductDetailOut, ProductPageOut
 
 
@@ -51,13 +52,16 @@ def _serialize_product_page(
     )
 
 
-def _apply_search_engine(qs, *, q, shop_id, channel, sort):
+def _apply_search_engine(qs, *, q, shop_id, channel, sort, range_filter=None):
     """Resolve q via Typesense when configured.
 
     Returns (qs, remaining_q, engine_ordered). When Typesense answers, qs is
     restricted to the hit ids in engine order and q is consumed (None) so the
     ORM icontains filter is skipped. When Typesense is unavailable, returns
     (qs, q, False) unchanged — the ORM path handles q.
+
+    `range` params are pushed into the Typesense filter_by as a pre-filter;
+    the ORM range filter still applies on top, so semantics stay exact.
     """
     qv = (q or "").strip()
     if not qv:
@@ -65,8 +69,9 @@ def _apply_search_engine(qs, *, q, shop_id, channel, sort):
 
     from search.services import SORT_MAP, search_product_ids
 
+    ranges = parse_range_pairs(range_filter) if range_filter else None
     ids = search_product_ids(
-        q=qv, shop_id=shop_id, channel=channel, sort=sort)
+        q=qv, shop_id=shop_id, channel=channel, sort=sort, ranges=ranges)
     if ids is None:
         return qs, q, False
     if not ids:
@@ -98,6 +103,7 @@ def products(
     group_code: str | None = None,
     feature: str | None = None,
     option: str | None = None,
+    range: str | None = None,
     sort: str | None = None,
     in_stock_only: bool = False,
     page: int = 1,
@@ -139,7 +145,8 @@ def products(
         qs = qs.filter(_has_stock=1)
 
     qs, q, engine_ordered = _apply_search_engine(
-        qs, q=q, shop_id=shop_id, channel=channel, sort=sort)
+        qs, q=q, shop_id=shop_id, channel=channel, sort=sort,
+        range_filter=range)
 
     if not engine_ordered:
         qs = apply_products_sorting(qs=qs, sort=sort)
@@ -153,6 +160,7 @@ def products(
         group_code=group_code,
         feature=feature,
         option=option,
+        range_filter=range,
     )
 
     if channel == "outlet":
@@ -180,6 +188,7 @@ def product_facets(
     group_code: str | None = None,
     feature: str | None = None,
     option: str | None = None,
+    range: str | None = None,
 ):
     country_code, channel = _validate_country_and_channel(
         country_code=country_code, channel=channel
@@ -200,7 +209,8 @@ def product_facets(
         qs = qs.filter(_has_offer__gt=0)
 
     qs, q, _engine_ordered = _apply_search_engine(
-        qs, q=q, shop_id=shop_id, channel=channel, sort=None)
+        qs, q=q, shop_id=shop_id, channel=channel, sort=None,
+        range_filter=range)
 
     qs, selected_category = apply_catalog_filters(
         qs=qs,
@@ -211,6 +221,7 @@ def product_facets(
         group_code=group_code,
         feature=feature,
         option=option,
+        range_filter=range,
     )
 
     return build_facets_payload(
@@ -232,6 +243,7 @@ def category_products(
     group_code: str | None = None,
     feature: str | None = None,
     option: str | None = None,
+    range: str | None = None,
     sort: str | None = None,
     in_stock_only: bool = False,
     page: int = 1,
@@ -248,6 +260,7 @@ def category_products(
         group_code=group_code,
         feature=feature,
         option=option,
+        range=range,
         sort=sort,
         in_stock_only=in_stock_only,
         page=page,
@@ -267,6 +280,7 @@ def brand_products(
     group_code: str | None = None,
     feature: str | None = None,
     option: str | None = None,
+    range: str | None = None,
     sort: str | None = None,
     in_stock_only: bool = False,
     page: int = 1,
@@ -283,6 +297,7 @@ def brand_products(
         group_code=group_code,
         feature=feature,
         option=option,
+        range=range,
         sort=sort,
         in_stock_only=in_stock_only,
         page=page,
@@ -302,6 +317,7 @@ def product_group_products(
     brand_slug: str | None = None,
     feature: str | None = None,
     option: str | None = None,
+    range: str | None = None,
     sort: str | None = None,
     in_stock_only: bool = False,
     page: int = 1,
@@ -318,6 +334,7 @@ def product_group_products(
         group_code=code,
         feature=feature,
         option=option,
+        range=range,
         sort=sort,
         in_stock_only=in_stock_only,
         page=page,

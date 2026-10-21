@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from unittest import mock
 
 from django.test import Client, TestCase, override_settings
@@ -10,15 +11,19 @@ from catalog.models import (
     Feature,
     FeatureValue,
     InventoryItem,
+    OptionType,
+    OptionValue,
     Product,
     ProductFeatureValue,
     TaxClass,
     TaxRate,
     Variant,
+    VariantOptionValue,
     Warehouse,
 )
 from search.services import (
     full_reindex,
+    index_products,
     product_document,
     search_product_ids,
 )
@@ -115,11 +120,23 @@ class FakeCollection:
         self.overrides = _OverridesStore()
         self.schema = schema
         self.deleted = False
+        self.update_calls = []
 
     def retrieve(self):
         from search.services import SCHEMA
 
         return {"name": "products", "fields": (self.schema or SCHEMA)["fields"]}
+
+    def update(self, body):
+        """Additive field update (Typesense >= 0.24)."""
+        from search.services import SCHEMA
+
+        self.update_calls.append(body)
+        base = list((self.schema or SCHEMA)["fields"])
+        existing = {f["name"] for f in base}
+        base += [f for f in body.get("fields", []) if f["name"] not in existing]
+        self.schema = {"fields": base}
+        return {}
 
     def delete(self):
         self.deleted = True
@@ -302,6 +319,106 @@ class SearchTests(TestCase):
         self.assertIn("9999", filter_by)
         self.assertIn("8888", filter_by)
         self.assertNotIn(str(a.id), filter_by)
+
+    def test_document_includes_numeric_fields(self):
+        feat = Feature.objects.create(
+            code="line-diameter", name="LD", datatype="number", unit="mm")
+        fv = FeatureValue.objects.create(
+            feature=feat, value="0.26", value_num=Decimal("0.26"))
+        feat_rng = Feature.objects.create(
+            code="weight", name="W", datatype="range", unit="g")
+        fv_rng = FeatureValue.objects.create(
+            feature=feat_rng, value="10-40",
+            value_num=Decimal("10"), value_num_max=Decimal("40"))
+        p = self._product("NR-1", "Numeric", category=self.cat)
+        ProductFeatureValue.objects.create(
+            product=p, feature=feat, feature_value=fv)
+        ProductFeatureValue.objects.create(
+            product=p, feature=feat_rng, feature_value=fv_rng)
+
+        doc = product_document(p)
+        self.assertEqual(doc["num_line_diameter"], [0.26])
+        # Range values contribute both endpoints to the float[] field.
+        self.assertEqual(sorted(doc["num_weight"]), [10.0, 40.0])
+
+    def test_document_indexes_variant_option_numeric_values(self):
+        ot = OptionType.objects.create(
+            code="spool", name="Spool", datatype="number")
+        ov = OptionValue.objects.create(
+            option_type=ot, code="2500", label="2500",
+            value_num=Decimal("2500"))
+        p = self._product("OV-1", "Reel", category=self.cat)
+        VariantOptionValue.objects.create(
+            variant=p.variants.first(), option_type=ot, option_value=ov)
+
+        doc = product_document(p)
+        self.assertEqual(doc["num_spool"], [2500.0])
+
+    def test_non_numeric_datatype_not_indexed(self):
+        feat = Feature.objects.create(code="shade", name="Shade")
+        fv = FeatureValue.objects.create(
+            feature=feat, value="0.26", value_num=Decimal("0.26"))
+        p = self._product("NN-1", "Texty", category=self.cat)
+        ProductFeatureValue.objects.create(
+            product=p, feature=feat, feature_value=fv)
+        doc = product_document(p)
+        self.assertNotIn("num_shade", doc)
+
+    def test_search_range_clause_translation(self):
+        Feature.objects.create(
+            code="line-diameter", name="LD", datatype="number")
+        client = FakeClient(hits=_hits(1))
+        with mock.patch(
+            "search.services.get_client", return_value=client
+        ):
+            ids = search_product_ids(
+                q="x", shop_id=None, channel="normal",
+                ranges=[("line-diameter", Decimal("0.2"), Decimal("0.3"))])
+        self.assertEqual(ids, [1])
+        fb = client.documents.last_search_params["filter_by"]
+        self.assertIn("num_line_diameter:[0.2..0.3]", fb)
+
+    def test_search_range_open_bounds(self):
+        Feature.objects.create(code="weight", name="W", datatype="range")
+        client = FakeClient(hits=_hits(1))
+        with mock.patch(
+            "search.services.get_client", return_value=client
+        ):
+            search_product_ids(
+                q="x", shop_id=None, channel="normal",
+                ranges=[("weight", Decimal("20"), None),
+                        ("weight", None, Decimal("50"))])
+        fb = client.documents.last_search_params["filter_by"]
+        self.assertIn("num_weight:>=20", fb)
+        self.assertIn("num_weight:<=50", fb)
+
+    def test_search_range_skips_non_numeric_code(self):
+        Feature.objects.create(code="shade", name="Shade")  # datatype=text
+        client = FakeClient(hits=_hits(1))
+        with mock.patch(
+            "search.services.get_client", return_value=client
+        ):
+            search_product_ids(
+                q="x", shop_id=None, channel="normal",
+                ranges=[("shade", Decimal("1"), Decimal("2"))])
+        fb = client.documents.last_search_params["filter_by"]
+        self.assertNotIn("num_shade", fb)
+
+    def test_ensure_collection_adds_numeric_fields_via_update(self):
+        Feature.objects.create(
+            code="line-diameter", name="LD", datatype="number")
+        p = self._product("NU-1", "Num", category=self.cat)
+        client = FakeClient()
+        with mock.patch(
+            "search.services.get_client", return_value=client
+        ):
+            index_products([p.id])
+        coll = client.collections["products"]
+        # Additive drift -> update endpoint, not delete+recreate.
+        self.assertFalse(coll.deleted)
+        self.assertTrue(coll.update_calls)
+        names = [f["name"] for f in coll.update_calls[0]["fields"]]
+        self.assertIn("num_line_diameter", names)
 
     def test_index_products_deletes_inactive_and_missing(self):
         from search.services import index_products
