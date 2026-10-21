@@ -318,3 +318,68 @@ class ProductFeatureNumericOutTests(TestCase):
         f = next(f for f in payload["features"] if f["feature_code"] == "weight")
         self.assertEqual(f["value_num"], Decimal("85"))
         self.assertEqual(f["unit"], "g")
+
+
+class FacetCodeMergeTests(TestCase):
+    """Feature ir OptionType su tuo pačiu code -> vienas facetas."""
+
+    def test_same_code_merges_into_single_facet(self):
+        product = Product.objects.create(
+            sku="M-1", name="M", slug="m-1", is_active=True,
+        )
+        variant = Variant.objects.create(
+            product=product, sku="M-1-A", price_eur="10.00", is_active=True,
+        )
+        feature = Feature.objects.create(code="weight", name="Weight")
+        fv = FeatureValue.objects.create(feature=feature, value="85-g")
+        ProductFeatureValue.objects.create(
+            product=product, feature=feature, feature_value=fv,
+        )
+        opt_type = OptionType.objects.create(code="weight", name="Weight opt")
+        ov = OptionValue.objects.create(
+            option_type=opt_type, code="90-g", label="90 g",
+        )
+        from catalog.models import VariantOptionValue
+        VariantOptionValue.objects.create(
+            variant=variant, option_type=opt_type, option_value=ov,
+        )
+        payload = build_facets_payload(
+            product_ids=[product.id],
+            selected_category=None,
+            language_code="lt",
+        )
+        weights_f = [f for f in payload["features"] if f["code"] == "weight"]
+        weights_o = [t for t in payload["option_types"] if t["code"] == "weight"]
+        self.assertEqual(len(weights_f), 1)
+        self.assertEqual(weights_o, [])
+        vals = {v["value"] for v in weights_f[0]["values"]}
+        self.assertEqual(vals, {"85-g", "90-g"})
+
+        # Ir filtras per feature= randa abi reikšmes (ir option pusę).
+        qs, _ = apply_catalog_filters(
+            qs=Product.objects.filter(is_active=True), feature="weight:90-g",
+        )
+        self.assertEqual(list(qs.values_list("id", flat=True)), [product.id])
+
+
+class VariantNameOutTests(TestCase):
+    def test_variant_name_serialized(self):
+        tc, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"}
+        )
+        TaxRate.objects.create(
+            tax_class=tc, country_code="LT", rate="0.21",
+            valid_from=datetime.date(2020, 1, 1), is_active=True,
+        )
+        product = Product.objects.create(
+            sku="VN-1", name="VN", slug="vn-1", is_active=True, tax_class=tc,
+        )
+        Variant.objects.create(
+            product=product, sku="VN-1-A", name="2.70m / 10-40g",
+            price_eur="10.00", is_active=True,
+        )
+        payload = build_product_detail_payload(
+            product=product, shop_id=None, country_code="LT",
+            channel="normal", language_code="lt",
+        )
+        self.assertEqual(payload["variants"][0]["name"], "2.70m / 10-40g")

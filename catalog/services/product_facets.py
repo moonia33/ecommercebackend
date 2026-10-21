@@ -214,6 +214,29 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
             }
         )
 
+    # Feature ir option type su tuo pačiu canonical code -> VIENAS facetas
+    # (option reikšmės suliejamos į feature values, dedupe pagal code).
+    feature_by_code = {f["code"]: f for f in features_out}
+    merged_option_types = []
+    for t in option_types_out:
+        target = feature_by_code.get(t["code"])
+        if target is None:
+            merged_option_types.append(t)
+            continue
+        seen_vals = {v["value"] for v in target["values"]}
+        for v in t["values"]:
+            if v["code"] in seen_vals:
+                continue
+            seen_vals.add(v["code"])
+            target["values"].append(
+                {
+                    "id": int(v["id"]) - 1_000_000,
+                    "value": v["code"],
+                    "label": v["label"],
+                }
+            )
+    option_types_out = merged_option_types
+
     brands_out = []
     for b in brands_qs:
         brand_loc = localize_brand(b, language_code=language_code)

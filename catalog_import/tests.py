@@ -7,9 +7,12 @@ from django.test import TestCase
 from catalog.models import (
     Category,
     InventoryItem,
+    OptionValue,
     Product,
+    ProductOptionType,
     TaxClass,
     Variant,
+    VariantOptionValue,
     Warehouse,
 )
 
@@ -652,3 +655,34 @@ class AttributeNormalizationImportTests(CatalogImportTestCase):
             ]
         )
         self.assertEqual(run.status, ImportRun.Status.DONE)
+
+
+class OptionCleanupTests(CatalogImportTestCase):
+    """Kai vėlesnis importas ateina be options (n -> 0) – senos eilutės
+    ProductOptionType/VariantOptionValue valomos."""
+
+    def _item(self, options):
+        return {
+            "code": "rodz",
+            "tax_class": "standard",
+            "price_net": "10.00",
+            "translations": {"lt": {"name": "Meškerė"}},
+            "variants": [
+                {"code": "rodz-a", "options": options, "price_net": "10.00"}
+            ],
+        }
+
+    def test_options_cleared_on_reimport(self):
+        run = self._run([self._item({"casting-weight": "10-40-g"})])
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        variant = Variant.objects.get(sku="rodz-a")
+        self.assertEqual(variant.option_values.count(), 1)
+        self.assertEqual(
+            ProductOptionType.objects.filter(product=variant.product).count(), 1
+        )
+        self._run([self._item({})])
+        variant.refresh_from_db()
+        self.assertEqual(variant.option_values.count(), 0)
+        self.assertEqual(
+            ProductOptionType.objects.filter(product=variant.product).count(), 0
+        )

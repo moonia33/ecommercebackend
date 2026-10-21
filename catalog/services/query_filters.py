@@ -65,6 +65,13 @@ def apply_catalog_filters(
                 | Q(variants__feature_values__feature_value__groups__code=f_val)
             )
             & Q(variants__feature_values__feature__code=f_code)
+            # Facetai merge'inami pagal code: ta pati reikšmė gali gyventi
+            # kaip option value su tuo pačiu tipu-kodu.
+            | (
+                Q(variants__option_values__option_value__code=f_val)
+                | Q(variants__option_values__option_value__groups__code=f_val)
+            )
+            & Q(variants__option_values__option_type__code=f_code)
         )
 
     for o_type, o_val in parse_pairs(option):

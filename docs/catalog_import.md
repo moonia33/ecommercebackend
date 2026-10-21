@@ -121,6 +121,14 @@ Taisyklės:
 
 - `value_num`/`value_num_max` — Decimal; `option_value_meta` rakta value'ai = variantų `options` kodai (`"casting-weight": {"10-40-g": {...}}`).
 - `datatype`/`unit` pildomi tik kai feed'as atsiunčia ne tuščią — rankom admin'e pakeisti laukai neperrašomi tuščiu.
+
+### Options semantika (kategorijų profiliai)
+
+- Normalyzeris renkasi option ašis **deklaratyviai per-kategoriją** (`apps/catalog/profiles.py` `PROFILES`), ne kombinatoriškai — `variants[].options` ateina tik iš profilio leidžiamų ašių.
+- **All-or-nothing**: jei profilio ašys visų variantų pilnai neatskiria, `options` išvis neeksportuojamos — pirkėjas renkasi pagal `variants[].name` (tiekėjo `variantas` arba generuota "label₁ · label₂").
+- Option ašys visada **ir** yra `variants[].features` (option = feature + selektorius).
+- Importo pusėje `options` -> `VariantOptionValue` + `ProductOptionType`; kai vėlesnis importas ateina **be** options (n -> 0), senos `VariantOptionValue`/`ProductOptionType` eilutės ištrinamos.
+- Facet'uose `feature` ir `option_type` su tuo pačiu `code` suliejami į vieną facet'ą (reikšmių dedupe pagal code); `?feature=code:val` filtras randa ir option reikšmes.
 - `auto_assign` grupės (FeatureValueGroup/OptionValueGroup) pirmiausia naudoja `value_num`/`value_num_max`; kai jų nėra — fallback į `parse_numeric_range(label/value)`.
 ### Likučių feed'as (atskiras, lengvesnis)
 

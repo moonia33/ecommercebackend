@@ -123,7 +123,16 @@ option 173 reikšmės **ir** kaip feature 596 reikšmės) facetuose nėra viena 
   Typesense `attr_<code>_num` (float) → range facetai; `FeatureValueGroup.auto_assign`
   naudoja `value_num` vietoj parsinimo iš teksto.
 
-### Fazė 3 — composite splitter (Moss, Korda/Shimano liekanos)
+### Profiliai (atlikta, prieš F3)
+
+Deklaratyvūs per-kategoriją variantų option profiliai
+(`apps/catalog/profiles.py`): `_plan_variants` renkasi option ašis iš
+`profile.axes` su all-or-nothing taisykle; neoption varijuojančios ašys
+lieka `variants[].features`; `variants[].name` fallback'as — generuotas
+"label₁ · label₂" kai `variantas` neteiktas. Auditas:
+`variant_axes_audit`.
+
+## Fazė 3 — composite splitter (Moss, Korda/Shimano liekanos)
 
 - Tokenizer: skaldo per `/`, `,`, tarpą-prieš-vienetą; token tipas pagal
   vienetą/formą: `#mm`, `#kg|#lb(s)`, `#m`, `#g`, `#-#g`, `#cm`, `#x#cm`,

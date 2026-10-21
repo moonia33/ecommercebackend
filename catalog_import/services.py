@@ -707,6 +707,14 @@ def _sync_variants(product: Product, item: ImportProductIn, source: str) -> list
         _sync_variant_features(variant, spec)
         _sync_variant_images(product, variant, spec)
         out.append(variant)
+    # ProductOptionType eilutės tik tiems tipams, kuriuos dar naudoja
+    # bent vienas variantas (options n -> 0 atveju tipai pranyksta).
+    used_type_ids = VariantOptionValue.objects.filter(
+        variant__product=product
+    ).values_list("option_type_id", flat=True).distinct()
+    ProductOptionType.objects.filter(product=product).exclude(
+        option_type_id__in=used_type_ids
+    ).delete()
     return out
 
 
@@ -755,6 +763,9 @@ def _sync_variant_options(
     option_value_meta: dict | None = None,
 ) -> None:
     if not options:
+        # Produkto options dingo (n -> 0 importas): išvalom senas
+        # varianto option eilutes, kad filtruose nesimatytų.
+        VariantOptionValue.objects.filter(variant=variant).delete()
         return
     labels = option_labels or {}
     meta = option_value_meta or {}
