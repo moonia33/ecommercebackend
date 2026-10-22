@@ -23,9 +23,11 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         from catalog.tasks import process_product_image_task
 
+        from django.db.models import Q
+
         qs = ProductImage.objects.exclude(image="").order_by("id")
         if options["only_missing"]:
-            qs = qs.filter(detail_avif__in=(None, ""))
+            qs = qs.filter(Q(detail_avif__isnull=True) | Q(detail_avif=""))
         ids = list(qs.values_list("id", flat=True)[: options["limit"] or None])
         self.stdout.write(f"images: {len(ids)}")
         if not ids:
