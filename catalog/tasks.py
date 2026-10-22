@@ -43,9 +43,38 @@ def ingest_product_image_task(self, product_image_id: int):
     max_bytes = int(getattr(settings, "IMAGE_INGEST_MAX_BYTES", 8 * 1024 * 1024))
     timeout = int(getattr(settings, "IMAGE_INGEST_TIMEOUT", 20))
 
+    # Tiekeju URL'uose buna tarpu/ne-ASCII simboliu kelio dalyje
+    # (pvz. shimanoshop-eu.com 'Aero Float_1.jpg') — encoduojam path.
+    from urllib.parse import urlunsplit, quote
+
+    url = urlunsplit(
+        (parsed.scheme, parsed.netloc, quote(parsed.path, safe="/%:@!$&'()*+,;=-._~"), parsed.query, parsed.fragment)
+    )
+
+    def _open(u):
+        req = urllib.request.Request(u, headers={"User-Agent": "catalog-image-ingest/1.0"})
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.URLError as exc:
+            # Kai kuriuose hostuose OpenSSL neprivercia grandines (pvz. naujas
+            # Let's Encrypt ECDSA 'Root YE' kelias). Fallback tik whitelisto
+            # hostams — nuotraukos, ne autentifikuota API.
+            insecure_hosts = getattr(
+                settings, "IMAGE_INGEST_INSECURE_TLS_HOSTS", {"team.kordashop.net"}
+            )
+            if (
+                parsed.netloc.lower() in insecure_hosts
+                and "CERTIFICATE_VERIFY_FAILED" in str(getattr(exc, "reason", exc))
+            ):
+                import ssl
+
+                return urllib.request.urlopen(
+                    req, timeout=timeout, context=ssl._create_unverified_context()
+                )
+            raise
+
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "catalog-image-ingest/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _open(url) as resp:
             content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             allowed = getattr(
                 settings, "IMAGE_INGEST_CONTENT_TYPES",

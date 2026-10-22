@@ -19,13 +19,22 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--workers", type=int, default=8)
         parser.add_argument("--limit", type=int, default=0)
+        parser.add_argument(
+            "--retry-errors",
+            action="store_true",
+            default=False,
+            help="Taip pat apdoroti INGEST_ERROR irasus (transient/ispaistos klaidos).",
+        )
 
     def handle(self, *args, **options):
         from catalog.tasks import ingest_product_image_task
 
+        statuses = [ProductImage.INGEST_PENDING]
+        if options["retry_errors"]:
+            statuses.append(ProductImage.INGEST_ERROR)
         qs = (
             ProductImage.objects.filter(
-                ingest_status=ProductImage.INGEST_PENDING, image=""
+                ingest_status__in=statuses, image=""
             )
             .exclude(image_url="")
             .order_by("id")
