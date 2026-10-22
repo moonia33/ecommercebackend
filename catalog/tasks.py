@@ -204,45 +204,59 @@ def process_product_image_task(product_image_id: int):
         elif img.mode != "RGB":
             img = img.convert("RGB")
 
-        medium_edge = int(getattr(settings, "MEDIUM_SIZE", 300) or 300)
-        rendition = img.copy()
-        if max(rendition.size) > medium_edge:
-            rendition.thumbnail((medium_edge, medium_edge))
-
         base_name = instance.image.name.rsplit("/", 1)[-1]
         stem = base_name.rsplit(".", 1)[0] if "." in base_name else base_name
 
-        avif_buf = BytesIO()
-        rendition.save(avif_buf, format="AVIF", quality=60)
-        avif_buf.seek(0)
-        instance.image_avif.save(f"{stem}_m{medium_edge}.avif", ContentFile(avif_buf.read()), save=False)
+        def _save(rendition, fmt, field, name, **kw):
+            buf = BytesIO()
+            rendition.save(buf, format=fmt, **kw)
+            buf.seek(0)
+            getattr(instance, field).save(name, ContentFile(buf.read()), save=False)
 
-        webp_buf = BytesIO()
-        rendition.save(webp_buf, format="WEBP", quality=75, method=6)
-        webp_buf.seek(0)
-        instance.image_webp.save(f"{stem}_m{medium_edge}.webp", ContentFile(webp_buf.read()), save=False)
+        # Proporcingos rendition'os: thumbnail (m), PDP (detail). Niekada
+        # ne-upscale'inam — jei saltinis mazesnis, thumbnail() palieka.
+        for edge, prefix, field_a, field_w in (
+            (int(getattr(settings, "MEDIUM_SIZE", 300) or 300), "m", "image_avif", "image_webp"),
+            (int(getattr(settings, "DETAIL_IMAGE_SIZE", 800) or 800), "d", "detail_avif", "detail_webp"),
+        ):
+            rendition = img.copy()
+            if max(rendition.size) > edge:
+                rendition.thumbnail((edge, edge))
+            _save(rendition, "AVIF", field_a, f"{stem}_{prefix}{edge}.avif", quality=60)
+            _save(rendition, "WEBP", field_w, f"{stem}_{prefix}{edge}.webp", quality=75, method=6)
 
-        listing_edge = int(getattr(settings, "LISTING_IMAGE_SIZE", medium_edge) or medium_edge)
+        # Kvadratines (1:1) listing rendition'os: trim whitespace + fit/pad.
         listing_tol = int(getattr(settings, "LISTING_TRIM_TOLERANCE", 18) or 18)
         trimmed = _trim_whitespace(img.copy(), tol=listing_tol)
-        square = _fit_pad_square(trimmed, edge=listing_edge, bg=(255, 255, 255))
-
-        listing_avif_buf = BytesIO()
-        square.save(listing_avif_buf, format="AVIF", quality=60)
-        listing_avif_buf.seek(0)
-        instance.listing_avif.save(
-            f"{stem}_sq{listing_edge}.avif", ContentFile(listing_avif_buf.read()), save=False
-        )
-
-        listing_webp_buf = BytesIO()
-        square.save(listing_webp_buf, format="WEBP", quality=78, method=6)
-        listing_webp_buf.seek(0)
-        instance.listing_webp.save(
-            f"{stem}_sq{listing_edge}.webp", ContentFile(listing_webp_buf.read()), save=False
-        )
+        for edge, field_a, field_w in (
+            (
+                int(getattr(settings, "LISTING_IMAGE_SIZE", 300) or 300),
+                "listing_avif",
+                "listing_webp",
+            ),
+            (
+                int(getattr(settings, "LISTING_IMAGE_SIZE_2X", 600) or 600),
+                "listing_avif_2x",
+                "listing_webp_2x",
+            ),
+        ):
+            square = _fit_pad_square(trimmed.copy(), edge=edge, bg=(255, 255, 255))
+            _save(square, "AVIF", field_a, f"{stem}_sq{edge}.avif", quality=60)
+            _save(square, "WEBP", field_w, f"{stem}_sq{edge}.webp", quality=78, method=6)
 
         instance._skip_image_processing = True
-        instance.save(update_fields=["image_avif", "image_webp", "listing_avif", "listing_webp"])
+        instance.save(
+            update_fields=[
+                "image_avif",
+                "image_webp",
+                "detail_avif",
+                "detail_webp",
+                "listing_avif",
+                "listing_webp",
+                "listing_avif_2x",
+                "listing_webp_2x",
+            ]
+        )
     except Exception:
         pass
 

@@ -20,6 +20,7 @@ from .localization import (
 from .api_schemas import MoneyOut, ProductListOut
 from .models import Brand, Category, InventoryItem, Product, ProductGroup
 from .services.catalog_core import descendant_category_ids, parse_pairs
+from .services.image_out import image_out
 from .services.money import discount_percent as calc_discount_percent
 
 
@@ -186,20 +187,10 @@ def get_products_by_slugs_for_grid(
         imgs.sort(key=lambda i: (i.sort_order, i.id))
         images_out = []
         for img in imgs:
-            if not img.url:
+            o = image_out(img, context="listing")
+            if not o:
                 continue
-            list_avif = img.listing_avif_url or None
-            list_webp = img.listing_webp_url or None
-            list_url = list_avif or list_webp or img.url
-            images_out.append(
-                {
-                    "avif_url": list_avif or (img.avif_url or None),
-                    "webp_url": list_webp or (img.webp_url or None),
-                    "url": list_url,
-                    "alt_text": img.alt_text,
-                    "sort_order": img.sort_order,
-                }
-            )
+            images_out.append(o)
             if len(images_out) >= 2:
                 break
 
@@ -474,21 +465,10 @@ def get_products_for_grid(
         imgs.sort(key=lambda i: (i.sort_order, i.id))
         images_out = []
         for img in imgs:
-            if not img.url:
+            o = image_out(img, context="listing")
+            if not o:
                 continue
-
-            list_avif = img.listing_avif_url or None
-            list_webp = img.listing_webp_url or None
-            list_url = list_avif or list_webp or img.url
-            images_out.append(
-                {
-                    "avif_url": list_avif or (img.avif_url or None),
-                    "webp_url": list_webp or (img.webp_url or None),
-                    "url": list_url,
-                    "alt_text": img.alt_text,
-                    "sort_order": img.sort_order,
-                }
-            )
+            images_out.append(o)
             if len(images_out) >= 2:
                 break
 

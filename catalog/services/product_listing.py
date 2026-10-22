@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from decimal import Decimal
 
 from django.db.models import Case, DecimalField, F, IntegerField, Q, Sum, Value, When
+from django.utils import timezone
 from django.db.models.functions import Coalesce
 from ninja.errors import HttpError
 
 from catalog.localization import localize_brand, localize_category, localize_product
 from catalog.api_schemas import ProductListOut
-from catalog.models import Product
+from catalog.models import Product, ProductVideo
+from catalog.services.image_out import image_out
 from catalog.services.money import discount_percent, money_out
 from pricing.services import get_vat_rate
 from promotions.services import apply_promo_to_unit_net, load_active_promo_rules
@@ -72,6 +75,25 @@ def serialize_products_listing(
     channel: str,
     language_code: str | None = None,
 ) -> list[ProductListOut]:
+    products = list(qs)
+    video_product_ids = (
+        set(
+            ProductVideo.objects.filter(product_id__in=[p.id for p in products]).values_list(
+                "product_id", flat=True
+            )
+        )
+        if products
+        else set()
+    )
+
+    new_cutoff = timezone.now() - timedelta(days=30)
+
+    def labels_for(product: Product) -> list[str]:
+        labels: list[str] = []
+        if product.created_at and product.created_at >= new_cutoff:
+            labels.append("new")
+        return labels
+
     vat_cache: dict[int, Decimal] = {}
 
     def vat_rate_for(product: Product) -> Decimal:
@@ -90,7 +112,7 @@ def serialize_products_listing(
     promo_rules: list | None = None
 
     out: list[ProductListOut] = []
-    for p in qs:
+    for p in products:
         if promo_rules is None:
             promo_rules = load_active_promo_rules(channel=channel)
         product_loc = localize_product(p, language_code=language_code)
@@ -133,20 +155,10 @@ def serialize_products_listing(
         imgs.sort(key=lambda i: (i.sort_order, i.id))
         images_out = []
         for img in imgs:
-            if not img.url:
+            o = image_out(img, context="listing")
+            if not o:
                 continue
-            list_avif = img.listing_avif_url or None
-            list_webp = img.listing_webp_url or None
-            list_url = list_avif or list_webp or img.url
-            images_out.append(
-                {
-                    "avif_url": list_avif or (img.avif_url or None),
-                    "webp_url": list_webp or (img.webp_url or None),
-                    "url": list_url,
-                    "alt_text": img.alt_text,
-                    "sort_order": img.sort_order,
-                }
-            )
+            images_out.append(o)
             if len(images_out) >= 2:
                 break
 
@@ -166,6 +178,8 @@ def serialize_products_listing(
                 "price_to": price_to,
                 "compare_at_price": compare_at_price,
                 "discount_percent": disc_pct,
+                "has_video": p.id in video_product_ids,
+                "labels": labels_for(p),
             }
         )
     return out

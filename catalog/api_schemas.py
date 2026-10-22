@@ -48,12 +48,23 @@ class CategoryRefOut(Schema):
     name: str
 
 
+class ImageSourceOut(Schema):
+    url: str
+    width: int
+
+
 class ProductImageOut(Schema):
     avif_url: str | None = None
     webp_url: str | None = None
     url: str
     alt_text: str
     sort_order: int
+    # srcset rinkiniai FE <source srcset>: [{url, width}]. Listing kontekstas
+    # duoda kvadratines (300/600), PDP — proporcingas (300/800) versijas.
+    avif_srcset: list[ImageSourceOut] = []
+    webp_srcset: list[ImageSourceOut] = []
+    # Originalas (zoom/lightbox PDP'je).
+    full_url: str | None = None
 
 
 class VariantOptionOut(Schema):
@@ -114,6 +125,9 @@ class ProductListOut(Schema):
 
     compare_at_price: MoneyOut | None = None
     discount_percent: int | None = None
+
+    has_video: bool = False
+    labels: list[str] = []
 
 
 class ProductFeatureOut(Schema):

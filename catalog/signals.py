@@ -39,7 +39,17 @@ def inventory_item_post_save(sender, instance: InventoryItem, created: bool, **k
 @receiver(post_delete, sender=ProductImage)
 def product_image_post_delete(sender, instance: ProductImage, **kwargs):
     """Remove files from object storage — Django does not do this on delete."""
-    for field in ("image", "image_avif", "image_webp", "listing_avif", "listing_webp"):
+    for field in (
+        "image",
+        "image_avif",
+        "image_webp",
+        "listing_avif",
+        "listing_webp",
+        "listing_avif_2x",
+        "listing_webp_2x",
+        "detail_avif",
+        "detail_webp",
+    ):
         f = getattr(instance, field, None)
         if f and getattr(f, "name", ""):
             try:

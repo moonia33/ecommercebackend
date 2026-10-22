@@ -17,6 +17,7 @@ from catalog.localization import (
 )
 from catalog.models import InventoryItem
 from catalog.shop_pricing import resolve_shop_variant_price
+from catalog.services.image_out import image_out
 from catalog.services.money import discount_percent, effective_offer_unit_net, money_out
 from pricing.services import get_vat_rate
 from promotions.services import apply_promo_to_unit_net, load_active_promo_rules
@@ -46,10 +47,15 @@ def build_product_detail_payload(
     images = list(product.images.all())
     images.sort(key=lambda i: (i.sort_order, i.id))
 
+    all_videos = list(product.videos.all())
     videos = [
-        v for v in product.videos.all()
+        v for v in all_videos
         if not v.language_code or v.language_code == (language_code or "")
     ]
+    # Jei nėra video prašoma kalba — geriau parodyti bet kurią kalbą
+    # (video vis tiek informatyvu), nei visai nieko.
+    if not videos:
+        videos = all_videos
 
     variants_qs = [
         v
@@ -200,18 +206,13 @@ def build_product_detail_payload(
                 ],
                 "features": vfeatures_out,
                 "images": [
-                    {
-                        "avif_url": img.avif_url or None,
-                        "webp_url": img.webp_url or None,
-                        "url": img.url,
-                        "alt_text": img.alt_text,
-                        "sort_order": img.sort_order,
-                    }
+                    o
                     for img in sorted(
                         v.variant_images.all(),
                         key=lambda i: (i.sort_order, i.id),
                     )
-                    if img.url
+                    for o in [image_out(img, context="detail")]
+                    if o
                 ],
             }
         )
@@ -267,15 +268,10 @@ def build_product_detail_payload(
         "brand": {"id": product.brand.id, "slug": brand_loc["slug"], "name": brand_loc["name"]} if product.brand and brand_loc else None,
         "category": {"id": product.category.id, "slug": category_loc["slug"], "name": category_loc["name"]} if product.category and category_loc else None,
         "images": [
-            {
-                "avif_url": img.avif_url or None,
-                "webp_url": img.webp_url or None,
-                "url": img.url,
-                "alt_text": img.alt_text,
-                "sort_order": img.sort_order,
-            }
+            o
             for img in images
-            if img.url
+            for o in [image_out(img, context="detail")]
+            if o
         ],
         "videos": [
             {

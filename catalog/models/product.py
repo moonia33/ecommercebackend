@@ -199,6 +199,28 @@ class ProductImage(models.Model):
         null=True,
         blank=True,
     )
+    # Retina (2x) square listing renditions — LISTING_IMAGE_SIZE_2X.
+    listing_avif_2x = models.ImageField(
+        upload_to="product-images/derived/%Y/%m/",
+        null=True,
+        blank=True,
+    )
+    listing_webp_2x = models.ImageField(
+        upload_to="product-images/derived/%Y/%m/",
+        null=True,
+        blank=True,
+    )
+    # PDP main image: proportional, max edge DETAIL_IMAGE_SIZE (never upscaled).
+    detail_avif = models.ImageField(
+        upload_to="product-images/derived/%Y/%m/",
+        null=True,
+        blank=True,
+    )
+    detail_webp = models.ImageField(
+        upload_to="product-images/derived/%Y/%m/",
+        null=True,
+        blank=True,
+    )
     # Legacy/external image source (optional). Prefer `image`.
     # max_length=1000 – tiekėjų CDN URL'ai būna ilgesni nei default 200.
     image_url = models.URLField(blank=True, default="", max_length=1000)
@@ -282,6 +304,51 @@ class ProductImage(models.Model):
         if self.listing_webp:
             try:
                 return self.listing_webp.url
+            except Exception:
+                return ""
+        return ""
+
+    @property
+    def listing_avif_2x_url(self) -> str:
+        if self.listing_avif_2x:
+            try:
+                return self.listing_avif_2x.url
+            except Exception:
+                return ""
+        return ""
+
+    @property
+    def listing_webp_2x_url(self) -> str:
+        if self.listing_webp_2x:
+            try:
+                return self.listing_webp_2x.url
+            except Exception:
+                return ""
+        return ""
+
+    @property
+    def detail_avif_url(self) -> str:
+        if self.detail_avif:
+            try:
+                return self.detail_avif.url
+            except Exception:
+                return ""
+        return ""
+
+    @property
+    def detail_webp_url(self) -> str:
+        if self.detail_webp:
+            try:
+                return self.detail_webp.url
+            except Exception:
+                return ""
+        return ""
+
+    @property
+    def original_url(self) -> str:
+        if self.image:
+            try:
+                return self.image.url
             except Exception:
                 return ""
         return ""
