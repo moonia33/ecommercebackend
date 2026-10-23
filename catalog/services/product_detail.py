@@ -63,7 +63,7 @@ def build_product_detail_payload(
             "variant_images",
             "feature_values__feature__translations",
             "feature_values__feature_value__translations",
-        ).all()
+        ).prefetch_related("inventory_items__warehouse").all()
         if v.is_active
     ]
     variants_qs.sort(key=lambda v: (v.sku, v.id))
@@ -110,6 +110,44 @@ def build_product_detail_payload(
                     "rule_code": dw.rule_code,
                     "source": dw.source,
                 }
+
+        # Sandėlių išskirstymas pagal Warehouse.kind: qty + ETA per
+        # „geriausią" (priority) available offer'ą tame sandėlyje.
+        def _stock_line(kind: str) -> dict:
+            items = [
+                ii
+                for ii in inv
+                if getattr(ii.warehouse, "kind", "local") == kind
+            ]
+            qty = sum(int(ii.qty_available) for ii in items)
+            kind_offer = None
+            avail = [ii for ii in items if ii.qty_available > 0]
+            if avail:
+                avail.sort(
+                    key=lambda ii: (-int(ii.offer_priority or 0), int(ii.id))
+                )
+                kind_offer = avail[0]
+            dw_out = None
+            if kind_offer is not None:
+                dw = estimate_delivery_window(
+                    now=timezone.now(),
+                    country_code=country_code,
+                    channel=channel,
+                    warehouse_id=int(kind_offer.warehouse_id),
+                    product_id=int(product.id),
+                    brand_id=int(product.brand_id) if product.brand_id else None,
+                    category_id=int(product.category_id) if product.category_id else None,
+                    product_group_id=int(product.group_id) if getattr(product, "group_id", None) else None,
+                )
+                if dw is not None:
+                    dw_out = {
+                        "min_date": dw.min_date.isoformat(),
+                        "max_date": dw.max_date.isoformat(),
+                        "kind": dw.kind,
+                        "rule_code": dw.rule_code,
+                        "source": dw.source,
+                    }
+            return {"qty": qty, "delivery_window": dw_out}
 
         price_res = resolve_shop_variant_price(
             variant=v,
@@ -195,6 +233,8 @@ def build_product_detail_payload(
                     if v.pack_price_eur is not None
                     else None
                 ),
+                "stock_local": _stock_line("local"),
+                "stock_remote": _stock_line("remote"),
                 "options": [
                     {
                         "option_type_code": r.option_type.code,

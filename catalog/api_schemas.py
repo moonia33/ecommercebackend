@@ -120,6 +120,9 @@ class VariantOut(Schema):
     # features with the same feature_code on PDP merge)
     features: list["ProductFeatureOut"] = []
     images: list[ProductImageOut] = []
+    # Sandėlių išskirstymas pagal Warehouse.kind (local=mine, remote=tiekėjo).
+    stock_local: "StockLineOut | None" = None
+    stock_remote: "StockLineOut | None" = None
 
 
 class ProductListOut(Schema):
@@ -168,6 +171,11 @@ class DeliveryWindowOut(Schema):
     kind: str = "estimated"
     rule_code: str = ""
     source: str = ""
+
+
+class StockLineOut(Schema):
+    qty: int
+    delivery_window: DeliveryWindowOut | None = None
 
 
 class ContentBlockOut(Schema):
