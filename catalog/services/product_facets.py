@@ -272,12 +272,30 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
     # the feature or option side; 'auto' accepts either (same-code facets
     # already merged above). Range facets carry min/max/unit and no values.
     if selected_category is not None:
-        facet_rows = list(
+        # Paveldėjimas žemyn medžiu: tevo facet config galioja vaikams,
+        # vaiko eilutes override'ina ta pati koda. Gilesnes kategorijos
+        # laimi; rikiavimas (level, order, code).
+        try:
+            ancestors = list(selected_category.get_ancestors(include_self=True))
+        except Exception:
+            ancestors = [selected_category]
+        cat_ids = [c.id for c in ancestors]
+        level_by_id = {c.id: getattr(c, "level", 0) for c in ancestors}
+        rows = list(
             CategoryFacet.objects.filter(
-                category_id=int(selected_category.id),
-                is_enabled=True,
-            ).order_by("order", "code")
+                category_id__in=cat_ids, is_enabled=True
+            )
         )
+        # Merge root->leaf: gilesnės kategorijos override'ina tą patį kodą.
+        # Galutinė tvarka — grynas `order` (vaiko eilutė paveldi poziciją,
+        # ne dedasi į galą).
+        merged: dict[str, CategoryFacet] = {}
+        for r in sorted(
+            rows,
+            key=lambda r: (level_by_id.get(r.category_id, 0), r.order, r.code),
+        ):
+            merged[r.code] = r
+        facet_rows = sorted(merged.values(), key=lambda r: (r.order, r.code))
     else:
         facet_rows = []
 

@@ -13,6 +13,12 @@ class MoneyOut(Schema):
     gross: Decimal
 
 
+class BrandCategoryOut(Schema):
+    slug: str
+    name: str
+    product_count: int
+
+
 class BrandOut(Schema):
     id: int
     slug: str
@@ -23,6 +29,8 @@ class BrandOut(Schema):
     seo_title: str = ""
     seo_description: str = ""
     seo_keywords: str = ""
+    # Brand „shelf": kategorijos, kuriose brand'as turi prekių (detail endpoint).
+    categories: list[BrandCategoryOut] = []
 
 
 class BrandRefOut(Schema):

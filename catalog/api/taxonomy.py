@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.db.models import Count
 from ninja.errors import HttpError
 
 from .shared import (
@@ -126,6 +127,34 @@ def brand_detail(request, slug: str, language_code: str | None = None):
     if not b:
         raise HttpError(404, "Brand not found")
     loc = localize_brand(b, language_code=language_code)
+
+    # „Shelf": kategorijos, kuriose brand'as turi aktyviu prekiu
+    # (pagal shop scope — kaip /brands sarase).
+    shop = _shop_or_404_when_strict(request)
+    products_qs = apply_shop_product_scope(
+        qs=Product.objects.filter(is_active=True, brand_id=b.id),
+        shop_id=(int(shop.id) if shop else None),
+    )
+    cat_counts = (
+        products_qs.exclude(category__isnull=True)
+        .values("category_id")
+        .annotate(n=Count("id"))
+    )
+    count_by_cat = {r["category_id"]: r["n"] for r in cat_counts}
+    cats = (
+        Category.objects.filter(id__in=count_by_cat, is_active=True)
+        .prefetch_related("translations")
+        .order_by("name")
+    )
+    categories_out = [
+        {
+            "slug": localize_category(c, language_code=language_code)["slug"],
+            "name": localize_category(c, language_code=language_code)["name"],
+            "product_count": count_by_cat[c.id],
+        }
+        for c in cats
+    ]
+
     return {
         "id": b.id,
         "slug": loc["slug"],
@@ -136,6 +165,7 @@ def brand_detail(request, slug: str, language_code: str | None = None):
         "seo_title": loc["seo_title"],
         "seo_description": loc["seo_description"],
         "seo_keywords": loc["seo_keywords"],
+        "categories": categories_out,
     }
 
 

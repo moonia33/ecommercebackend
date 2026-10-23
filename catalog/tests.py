@@ -688,6 +688,49 @@ class CategoryFacetPayloadTests(TestCase):
         self.assertIn("line-diameter", codes)
         self.assertIn("weight", codes)
 
+    def test_parent_config_inherited_by_child(self):
+        """Tėvo CategoryFacet galioja vaiko kategorijai."""
+        CF = self._CategoryFacet
+        parent = Category.objects.create(
+            name="Ritės", slug="rites", is_active=True
+        )
+        self.cat.parent = parent
+        self.cat.save()
+        CF.objects.create(
+            category=parent, code="color", widget="checkbox", order=20,
+        )
+        CF.objects.create(
+            category=parent, code="line-diameter", widget="range", order=10,
+        )
+        payload = self._payload()
+        self.assertEqual(
+            [f["code"] for f in payload["features"]],
+            ["line-diameter", "color"],
+        )
+
+    def test_child_row_overrides_parent_same_code(self):
+        """Vaiko eilutė toje pačioje kode laimi prieš tėvo."""
+        CF = self._CategoryFacet
+        parent = Category.objects.create(
+            name="Ritės", slug="rites", is_active=True
+        )
+        self.cat.parent = parent
+        self.cat.save()
+        CF.objects.create(
+            category=parent, code="color", widget="checkbox", order=10,
+        )
+        CF.objects.create(
+            category=parent, code="line-diameter", widget="range", order=20,
+        )
+        CF.objects.create(
+            category=self.cat, code="color", widget="checkbox", order=5,
+        )
+        payload = self._payload()
+        feats = payload["features"]
+        self.assertEqual(
+            [f["code"] for f in feats], ["color", "line-diameter"]
+        )
+
 
 class RangeFilterTests(TestCase):
     """`range=<code>:<min>-<max>` — numeric overlap filtering (F4)."""
