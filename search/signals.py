@@ -40,8 +40,8 @@ def search_sync_suppressed() -> bool:
 def _enqueue(product_id: int | None):
     if not product_id or search_sync_suppressed():
         return
-    from .services import search_enabled
-    if not search_enabled():
+    from .services import search_available
+    if not search_available():
         return
     pk = int(product_id)
 
@@ -56,8 +56,8 @@ def _enqueue(product_id: int | None):
 def _enqueue_delete(product_id: int | None):
     if not product_id or search_sync_suppressed():
         return
-    from .services import search_enabled
-    if not search_enabled():
+    from .services import search_available
+    if not search_available():
         return
     pk = int(product_id)
 
@@ -134,8 +134,8 @@ def feature_value_saved(sender, instance: FeatureValue, **kwargs):
     )
     if not product_ids:
         return
-    from .services import search_enabled
-    if not search_enabled():
+    from .services import search_available
+    if not search_available():
         return
 
     def _dispatch(ids=tuple(product_ids)):
@@ -150,8 +150,8 @@ def feature_value_saved(sender, instance: FeatureValue, **kwargs):
 @receiver(post_delete, sender=ShopAssortmentRule)
 def assortment_rule_changed(sender, instance: ShopAssortmentRule, **kwargs):
     """Shop scope changes can flip shop_ids on many products."""
-    from .services import search_enabled
-    if not search_enabled():
+    from .services import search_available
+    if not search_available():
         return
 
     def _dispatch():
@@ -163,8 +163,8 @@ def assortment_rule_changed(sender, instance: ShopAssortmentRule, **kwargs):
 
 
 def _schedule_curation_sync():
-    from .services import search_enabled
-    if not search_enabled():
+    from .services import search_available
+    if not search_available():
         return
 
     def _dispatch():

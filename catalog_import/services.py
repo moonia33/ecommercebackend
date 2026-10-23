@@ -178,9 +178,9 @@ def _schedule_search_sync(product_ids: set[int]) -> None:
     """
     if not product_ids:
         return
-    from search.services import search_enabled
+    from search.services import search_available
 
-    if not search_enabled():
+    if not search_available():
         return
 
     ordered = sorted(int(pid) for pid in product_ids)

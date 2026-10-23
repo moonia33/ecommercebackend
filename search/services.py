@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import unicodedata
 from typing import Iterable
 
@@ -25,6 +26,31 @@ SORT_MAP = {
 
 _client = None
 _client_failed = False
+_search_down_until = 0.0
+SEARCH_DOWN_SECONDS = 60.0
+
+
+def search_available() -> bool:
+    """search_enabled() + circuit breaker: po connection failure ~60s
+    sync/užklausos mute'inamos — request'ai nekaba Typesense timeout'uose."""
+    return search_enabled() and time.monotonic() >= _search_down_until
+
+
+def note_search_failure(exc: BaseException) -> None:
+    global _search_down_until
+    now = time.monotonic()
+    if now >= _search_down_until:
+        logger.warning(
+            "Typesense unreachable (%s); search muted for %ds",
+            exc, int(SEARCH_DOWN_SECONDS),
+        )
+    _search_down_until = now + _SEARCH_DOWN_SECONDS
+
+
+def _is_not_found(exc: BaseException) -> bool:
+    from typesense.exceptions import ObjectNotFound
+
+    return isinstance(exc, ObjectNotFound)
 
 SCHEMA = {
     "name": COLLECTION_NAME,
@@ -96,11 +122,11 @@ def search_enabled() -> bool:
 
 
 def get_client():
-    """Lazy Typesense client; None when unconfigured."""
+    """Lazy Typesense client; None when unconfigured or circuit open."""
     global _client
     if _client is not None:
         return _client
-    if not search_enabled():
+    if not search_available():
         return None
     import typesense
 
@@ -158,18 +184,32 @@ def ensure_collection(*, force_recreate: bool = False) -> bool:
                     recreate = True
             else:
                 recreate = wanted != actual
-        except Exception:
-            recreate = False
+        except Exception as exc:
+            if not _is_not_found(exc):
+                # Nepasiekiamas serveris — antras retrieve/create vis tiek
+                # kabotų timeout'uose; mute'inam ir baigiam.
+                note_search_failure(exc)
+                return False
+            recreate = True
     if recreate:
         try:
             client.collections[COLLECTION_NAME].delete()
         except Exception:
             pass
-        client.collections.create(schema)
+        try:
+            client.collections.create(schema)
+        except Exception as exc:
+            if not _is_not_found(exc):
+                note_search_failure(exc)
+                return False
+            raise
         return True
     try:
         client.collections[COLLECTION_NAME].retrieve()
-    except Exception:
+    except Exception as exc:
+        if not _is_not_found(exc):
+            note_search_failure(exc)
+            return False
         client.collections.create(schema)
     return True
 
@@ -357,12 +397,18 @@ def index_products(product_ids: Iterable[int]) -> int:
     for pid in stale_ids:
         try:
             collection.documents[str(pid)].delete()
-        except Exception:
-            pass
+        except Exception as exc:
+            if not _is_not_found(exc):
+                note_search_failure(exc)
+                break
     if not docs:
         return 0
-    result = collection.documents.import_(
-        docs, {"action": "upsert"})
+    try:
+        result = collection.documents.import_(
+            docs, {"action": "upsert"})
+    except Exception as exc:
+        note_search_failure(exc)
+        return 0
     if not isinstance(result, list):
         return 0
     failed = [r for r in result if not r.get("success")]
@@ -382,8 +428,9 @@ def delete_product_document(product_id: int) -> None:
         return
     try:
         client.collections[COLLECTION_NAME].documents[str(product_id)].delete()
-    except Exception:
-        pass
+    except Exception as exc:
+        if not _is_not_found(exc):
+            note_search_failure(exc)
 
 
 def full_reindex() -> dict:
