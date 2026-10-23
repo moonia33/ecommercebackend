@@ -487,6 +487,77 @@ class OrderStatusLabelsTests(TestCase):
         self.assertEqual(o["delivery_status_label"], "Parcel in transit")
         self.assertEqual(o["payment_status_label"], "Pending")
 
+    def test_order_lookup_by_id_requires_auth_and_ownership(self):
+        # Unauthed → rejected.
+        self.client.cookies.pop("access_token", None)
+        res = self.client.get(
+            f"/api/v1/checkout/orders/lookup?order_id={self.order.id}",
+            HTTP_HOST="sl.local")
+        self.assertNotEqual(res.status_code, 200)
+
+        # Authed → own order.
+        self.client.cookies["access_token"] = issue_access_token(user_id=self.user.id)
+        res = self.client.get(
+            f"/api/v1/checkout/orders/lookup?order_id={self.order.id}",
+            HTTP_HOST="sl.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["id"], self.order.id)
+
+        # Other user's order → 404 (not a leak).
+        other = User.objects.create_user(email="o@example.com", password="x")
+        self.client.cookies["access_token"] = issue_access_token(user_id=other.id)
+        res = self.client.get(
+            f"/api/v1/checkout/orders/lookup?order_id={self.order.id}",
+            HTTP_HOST="sl.local")
+        self.assertEqual(res.status_code, 404)
+
+    @override_settings(MONTONIO_SECRET_KEY="test-montonio-secret")
+    def test_order_lookup_by_montonio_token(self):
+        import jwt
+        from payments import montonio as montonio_svc
+
+        # Switch PI to montonio with an external_id (uuid).
+        pi = self.order.payment_intent
+        pi.provider = PaymentIntent.Provider.MONTONIO
+        pi.external_id = "uuid-confirm-1"
+        pi.save(update_fields=["provider", "external_id"])
+
+        token = jwt.encode(
+            {
+                "uuid": "uuid-confirm-1",
+                "accessKey": "ak",
+                "merchantReference": str(self.order.id),
+                "paymentStatus": "PAID",
+                "grandTotal": 12.10,
+                "currency": "EUR",
+            },
+            "test-montonio-secret", algorithm="HS256")
+        del montonio_svc  # silence
+
+        # No auth — token itself is the capability.
+        self.client.cookies.pop("access_token", None)
+        res = self.client.get(
+            f"/api/v1/checkout/orders/lookup?order_token={token}",
+            HTTP_HOST="sl.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["id"], self.order.id)
+        self.assertEqual(res.json()["payment_provider"], "montonio")
+
+        # Garbage token → 404.
+        res = self.client.get(
+            "/api/v1/checkout/orders/lookup?order_token=notajwt",
+            HTTP_HOST="sl.local")
+        self.assertEqual(res.status_code, 404)
+
+        # Token for unknown uuid → 404.
+        other = jwt.encode(
+            {"uuid": "nope", "merchantReference": "99999"},
+            "test-montonio-secret", algorithm="HS256")
+        res = self.client.get(
+            f"/api/v1/checkout/orders/lookup?order_token={other}",
+            HTTP_HOST="sl.local")
+        self.assertEqual(res.status_code, 404)
+
 
 @override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
 class OpsShipmentsAndOrderManagementTests(TestCase):

@@ -269,6 +269,64 @@ def list_orders(request, limit: int = 20):
     return result
 
 
+@router.get("/orders/lookup", response=OrderOut)
+def lookup_order(request, order_token: str = "", order_id: int = 0):
+    """Order confirmation page lookup.
+
+    - `order_token`: Montonio returnUrl JWT (signature = proof of origin,
+      no session needed — customer returns from the bank without cookies
+      in some flows).
+    - `order_id`: authenticated fallback (bank transfer / Inbank flows).
+    """
+    _ensure_shop_context_if_strict(request)
+    shop_id = _request_shop_id(request)
+
+    order = None
+    if (order_token or "").strip():
+        from checkout.models import PaymentIntent
+        from payments import montonio as montonio_svc
+
+        try:
+            decoded = montonio_svc.decode_order_token(order_token.strip())
+        except Exception:
+            raise HttpError(404, "Order not found")
+        uuid = str(decoded.get("uuid") or "")
+        ref = str(decoded.get("merchantReference") or "")
+        pi = (
+            PaymentIntent.objects.filter(external_id=uuid)
+            .select_related("order")
+            .first()
+        ) if uuid else None
+        if pi is None and ref.isdigit():
+            pi = (
+                PaymentIntent.objects.filter(
+                    order_id=int(ref), provider=PaymentIntent.Provider.MONTONIO)
+                .select_related("order")
+                .first()
+            )
+        order = pi.order if pi else None
+        if order is not None and shop_id is not None and order.shop_id != shop_id:
+            order = None
+    elif order_id:
+        user = _user_from_cookie_if_present(request)
+        if not user:
+            raise HttpError(401, "Unauthorized")
+        qs = Order.objects.filter(user=user, id=order_id)
+        qs = qs.filter(shop_id=shop_id) if shop_id is not None else qs.filter(shop__isnull=True)
+        order = qs.first()
+
+    if order is None:
+        raise HttpError(404, "Order not found")
+
+    o = (
+        Order.objects.filter(id=order.id)
+        .select_related("payment_intent")
+        .prefetch_related("lines", "fees", "discounts")
+        .first()
+    )
+    return _build_order_detail(o, get_request_language_code(request))
+
+
 @router.get("/orders/{order_id}", response=OrderOut, auth=_auth)
 def get_order(request, order_id: int):
     _ensure_shop_context_if_strict(request)
