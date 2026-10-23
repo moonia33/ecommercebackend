@@ -199,6 +199,7 @@ def process_product_image_task(product_image_id: int):
 
         instance.image.open()
         img = Image.open(instance.image)
+        instance.width, instance.height = img.size
         if img.mode in ("P", "RGBA"):
             img = img.convert("RGB")
         elif img.mode != "RGB":
@@ -255,6 +256,8 @@ def process_product_image_task(product_image_id: int):
                 "listing_webp",
                 "listing_avif_2x",
                 "listing_webp_2x",
+                "width",
+                "height",
             ]
         )
     except Exception:

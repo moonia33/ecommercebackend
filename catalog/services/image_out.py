@@ -70,4 +70,6 @@ def image_out(img: ProductImage, *, context: str = "listing") -> dict | None:
         "avif_srcset": avif_srcset,
         "webp_srcset": webp_srcset,
         "full_url": img.original_url or None,
+        "full_width": int(img.width or 0),
+        "full_height": int(img.height or 0),
     }

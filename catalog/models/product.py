@@ -173,9 +173,15 @@ class ProductImage(models.Model):
         Product, on_delete=models.CASCADE, related_name="images")
     image = models.ImageField(
         upload_to="product-images/%Y/%m/",
+        width_field="width",
+        height_field="height",
         null=True,
         blank=True,
     )
+    # Originalo matmenys (lightbox/zoom, SEO). Užpildomi width_field'u naujų
+    # upload'ų metu arba process/backfill task'e esamiems.
+    width = models.PositiveIntegerField(null=True, blank=True, editable=False)
+    height = models.PositiveIntegerField(null=True, blank=True, editable=False)
 
     # Derived renditions for fast front-end usage (listing): medium AVIF + WEBP fallback.
     image_avif = models.ImageField(

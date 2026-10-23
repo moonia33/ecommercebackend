@@ -84,6 +84,10 @@ class ProductImageOut(Schema):
     webp_srcset: list[ImageSourceOut] = []
     # Originalas (zoom/lightbox PDP'je).
     full_url: str | None = None
+    # Originalo matmenys — PhotoSwipe/lightbox reikalauja tikslių w/h.
+    # 0 = nežinoma (seni įrašai arba external-only šaltiniai).
+    full_width: int = 0
+    full_height: int = 0
 
 
 class VariantOptionOut(Schema):
