@@ -262,6 +262,22 @@ def process_product_image_task(product_image_id: int):
 
 
 @shared_task
+def ingest_pending_images_task():
+    """Cron job: nuotraukų ingest backlog'as (post-import)."""
+    from django.core.management import call_command
+
+    call_command("ingest_pending_images", workers=8)
+
+
+@shared_task
+def regenerate_image_renditions_task():
+    """Cron job: dogeneruoti trūkstamas image rendition'as."""
+    from django.core.management import call_command
+
+    call_command("regenerate_image_renditions", only_missing=True, workers=8)
+
+
+@shared_task
 def notify_back_in_stock_task(inventory_item_id: int):
     from .models import BackInStockSubscription, InventoryItem
     from notifications.services import send_templated_email

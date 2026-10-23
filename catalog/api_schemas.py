@@ -25,6 +25,8 @@ class BrandOut(Schema):
     name: str
     description: str = ""
     logo_url: str | None = None
+    # 256px webp thumb (jei sugeneruotas; kitaip fallback i logo_url).
+    logo_thumb_url: str | None = None
     logo_alt: str = ""
     seo_title: str = ""
     seo_description: str = ""
@@ -37,6 +39,9 @@ class BrandRefOut(Schema):
     id: int
     slug: str
     name: str
+    # Lengvas ref'as; logo naudojama PDP brand sekcijoje.
+    logo_url: str | None = None
+    logo_thumb_url: str | None = None
 
 
 class CategoryOut(Schema):

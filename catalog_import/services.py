@@ -360,9 +360,23 @@ def _apply_product(run: ImportRun, item: ImportProductIn, seen_ids: set[int], ro
     _sync_translations(product, item)
     _sync_taxonomy(product, item)
     _sync_features(product, item)
-    _sync_images(product, item)
+    img_keep_ids = _sync_images(product, item)
     _sync_videos(product, item)
-    variants = _sync_variants(product, item, run.source)
+    variants, img_keep_ids = _sync_variants(
+        product, item, run.source, img_keep_ids
+    )
+    # Feed'as — tiesa nuotrauku sudetiui: pasenusias eilutes (nepatekusias i
+    # feed'a) triname kartu su failais. Kai feed'as visai neduoda nuotrauku,
+    # nieko netriname — saugiklis nuo tuscio/gadingo feed'o.
+    if img_keep_ids:
+        from catalog.services.image_cleanup import bulk_delete_product_images
+
+        stale = (
+            ProductImage.objects.filter(product=product)
+            .exclude(id__in=img_keep_ids)
+            .values_list("id", flat=True)
+        )
+        bulk_delete_product_images(list(stale))
     _sync_stock(product, variants, item)
 
     row.product_id = product.id
@@ -631,7 +645,8 @@ def _dispatch_image_ingest(obj: ProductImage) -> None:
     transaction.on_commit(_dispatch)
 
 
-def _sync_images(product: Product, item: ImportProductIn) -> None:
+def _sync_images(product: Product, item: ImportProductIn) -> list[int]:
+    keep_ids: list[int] = []
     for img in item.images:
         if not img.url:
             continue
@@ -648,7 +663,9 @@ def _sync_images(product: Product, item: ImportProductIn) -> None:
             changed = True
         if changed:
             obj.save(update_fields=["alt_text", "sort_order"])
+        keep_ids.append(obj.id)
         _dispatch_image_ingest(obj)
+    return keep_ids
 
 
 def _sync_videos(product: Product, item: ImportProductIn) -> None:
@@ -682,7 +699,13 @@ def _sync_videos(product: Product, item: ImportProductIn) -> None:
     ProductVideo.objects.filter(product=product).exclude(id__in=keep_ids).delete()
 
 
-def _sync_variants(product: Product, item: ImportProductIn, source: str) -> list[Variant]:
+def _sync_variants(
+    product: Product,
+    item: ImportProductIn,
+    source: str,
+    img_keep_ids: list[int] | None = None,
+) -> tuple[list[Variant], list[int]]:
+    img_keep_ids = img_keep_ids if img_keep_ids is not None else []
     specs = item.variants
     if not specs:
         specs = [
@@ -749,7 +772,7 @@ def _sync_variants(product: Product, item: ImportProductIn, source: str) -> list
             item.option_value_meta,
         )
         _sync_variant_features(variant, spec)
-        _sync_variant_images(product, variant, spec)
+        img_keep_ids.extend(_sync_variant_images(product, variant, spec))
         out.append(variant)
     # ProductOptionType eilutės tik tiems tipams, kuriuos dar naudoja
     # bent vienas variantas (options n -> 0 atveju tipai pranyksta).
@@ -759,10 +782,11 @@ def _sync_variants(product: Product, item: ImportProductIn, source: str) -> list
     ProductOptionType.objects.filter(product=product).exclude(
         option_type_id__in=used_type_ids
     ).delete()
-    return out
+    return out, img_keep_ids
 
 
-def _sync_variant_images(product: Product, variant: Variant, spec: ImportVariantIn) -> None:
+def _sync_variant_images(product: Product, variant: Variant, spec: ImportVariantIn) -> list[int]:
+    keep_ids: list[int] = []
     for img in spec.images:
         if not img.url:
             continue
@@ -772,7 +796,16 @@ def _sync_variant_images(product: Product, variant: Variant, spec: ImportVariant
         )
         if not obj.variants.filter(pk=variant.pk).exists():
             obj.variants.add(variant)
+        keep_ids.append(obj.id)
         _dispatch_image_ingest(obj)
+    # Feed'as — tiesa ir varianto image ryšiams: atjungiame pasenusias
+    # (pvz. Fox galerijos kopijas ant visų variantų). Tuščias spec.images
+    # nekeičia ryšių — tas pats saugiklis kaip ir produkto lygmenyje.
+    if keep_ids or spec.images:
+        stale_links = variant.variant_images.exclude(id__in=keep_ids)
+        if stale_links.exists():
+            variant.variant_images.remove(*stale_links)
+    return keep_ids
 
 
 def _match_variant(product: Product, spec: ImportVariantIn, source: str) -> Variant | None:

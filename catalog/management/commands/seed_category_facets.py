@@ -134,6 +134,12 @@ class Command(BaseCommand):
             default=CAP,
             help="Max facets proposed per category (default: 8).",
         )
+        parser.add_argument(
+            "--roots-only",
+            action="store_true",
+            help="Seed only root categories — leaves inherit via MPTT "
+            "ancestor lookup (recommended with facet inheritance).",
+        )
 
     def handle(self, *args, **options):
         apply_ = bool(options["apply"])
@@ -141,6 +147,8 @@ class Command(BaseCommand):
         slug = (options["category"] or "").strip()
 
         cats = Category.objects.filter(is_active=True).order_by("tree_id", "lft")
+        if options.get("roots_only"):
+            cats = cats.filter(parent__isnull=True)
         if slug:
             cats = cats.filter(slug=slug)
             if not cats.exists():

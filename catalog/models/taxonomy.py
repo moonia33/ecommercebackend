@@ -219,6 +219,12 @@ class Brand(models.Model):
     )
     logo_url = models.URLField(blank=True, default="")
     logo_alt = models.CharField(max_length=255, blank=True)
+    # Generuojamas post_save signale (256px webp) — mažiems UI kontekstams.
+    logo_thumb = models.ImageField(
+        upload_to="brand-logos/thumbs/%Y/%m/",
+        null=True,
+        blank=True,
+    )
 
     # SEO
     seo_title = models.CharField(max_length=255, blank=True)
@@ -240,6 +246,15 @@ class Brand(models.Model):
             except Exception:
                 return ""
         return self.logo_url
+
+    @property
+    def logo_thumb_url_resolved(self) -> str:
+        if self.logo_thumb:
+            try:
+                return self.logo_thumb.url
+            except Exception:
+                pass
+        return self.logo_url_resolved
 
 
 class BrandTranslation(models.Model):

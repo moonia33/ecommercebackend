@@ -265,7 +265,7 @@ def build_product_detail_payload(
         "seo_title": product_loc["seo_title"],
         "seo_description": product_loc["seo_description"],
         "seo_keywords": product_loc["seo_keywords"],
-        "brand": {"id": product.brand.id, "slug": brand_loc["slug"], "name": brand_loc["name"]} if product.brand and brand_loc else None,
+        "brand": {"id": product.brand.id, "slug": brand_loc["slug"], "name": brand_loc["name"], "logo_url": (product.brand.logo_url_resolved or None), "logo_thumb_url": (product.brand.logo_thumb_url_resolved or None)} if product.brand and brand_loc else None,
         "category": {"id": product.category.id, "slug": category_loc["slug"], "name": category_loc["name"]} if product.category and category_loc else None,
         "images": [
             o
