@@ -132,8 +132,11 @@ def payment_options(request, country_code: str = "LT",
         opt_payload: dict = {"payment_method": str(m.code)}
         prov = str(m.provider or m.code or "").strip().lower()
         if prov == "inbank":
-            # Frontend renders the installment calculator via
-            # GET /api/v1/payments/inbank/calculation?amount=&period=
+            expanded = _inbank_options(m)
+            if expanded:
+                options.extend(expanded)
+                continue
+            # Fallback — vienas generinis metodas su kalkuliatoriumi.
             opt_payload["calculator_url"] = (
                 "/api/v1/payments/inbank/calculation")
         if prov == "montonio":
@@ -257,6 +260,52 @@ def _montonio_options(pay_method, *, country_code: str) -> list[PaymentOptionOut
             payload={**base_payload, "montonio_method": mkey},
         ))
 
+    return out
+
+
+def _inbank_options(pay_method) -> list[PaymentOptionOut]:
+    """Išskleidžia 'inbank' metodą į finansavimo produktus.
+
+    [] kai Inbank nesukonfigūruotas/API nepasiekiamas — caller palieka
+    bendrą opciją su calculator_url.
+    """
+    from payments import inbank as inbank_svc
+
+    products = inbank_svc.get_products_cached()
+    if not products:
+        return []
+
+    out: list[PaymentOptionOut] = []
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+        code = str(p.get("productCode") or p.get("code") or "").strip()
+        if not code:
+            continue
+        title = str(
+            p.get("name") or p.get("displayName") or p.get("description")
+            or "Išsimokėtinai")
+        payload = {
+            "payment_method": str(pay_method.code),
+            "inbank_product_code": code,
+            "calculator_url": "/api/v1/payments/inbank/calculation",
+        }
+        # Suma/periodo ribos FE'ui (kalkuliatorius + validacija)
+        for k_src, k_dst in (
+            ("minAmount", "min_amount"), ("maxAmount", "max_amount"),
+            ("minPeriod", "min_period"), ("maxPeriod", "max_period"),
+            ("allowedPeriods", "allowed_periods"),
+        ):
+            if p.get(k_src) is not None:
+                payload[k_dst] = p[k_src]
+        out.append(PaymentOptionOut(
+            id=f"inbank:{code}",
+            kind="method",
+            title=title,
+            provider="inbank",
+            logo_url=str(p.get("logoUrl") or ""),
+            payload=payload,
+        ))
     return out
 
 

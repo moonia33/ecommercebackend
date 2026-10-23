@@ -158,6 +158,8 @@ class CheckoutConfirmIn(Schema):
     payment_provider: str | None = None
     # Montonio method: paymentInitiation|cardPayments|applePay|...
     montonio_method: str | None = None
+    # Inbank: produkto kodas (keli finansavimo produktai vienoje parduotuvėje)
+    inbank_product_code: str | None = None
     channel: str = "normal"
     coupon_code: str | None = None
     consents: list[OrderConsentIn]

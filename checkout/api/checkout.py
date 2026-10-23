@@ -742,6 +742,8 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             session = inbank_svc.create_pos_session(
                 order=order,
                 locale=f"{get_request_language_code(request) or 'lt'}-LT",
+                product_code_override=(
+                    (payload.inbank_product_code or "").strip() or None),
             )
         except inbank_svc.InbankError as exc:
             pi.status = PaymentIntent.Status.FAILED

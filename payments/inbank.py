@@ -21,12 +21,15 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
 from urllib.parse import urljoin
 
 import requests
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 class InbankError(Exception):
@@ -98,7 +101,8 @@ class PosSession:
     raw: dict
 
 
-def create_pos_session(*, order, locale: str = "lt-LT") -> PosSession:
+def create_pos_session(*, order, locale: str = "lt-LT",
+                       product_code_override: str | None = None) -> PosSession:
     """POST /shops/{uuid}/pos-sessions -> customer redirect to e-POS."""
     site = (getattr(settings, "INBANK_MERCHANT_DOMAIN", "") or "").strip()
     if not site:
@@ -130,7 +134,8 @@ def create_pos_session(*, order, locale: str = "lt-LT") -> PosSession:
 
     payload = {
         "general": {
-            "productCode": product_code(),
+            "productCode": (
+                (product_code_override or "").strip() or product_code()),
             "totalAmount": float(order.total_gross),
             "currency": (order.currency or "EUR").upper(),
             "locale": (getattr(settings, "INBANK_LOCALE", "") or locale
@@ -191,6 +196,25 @@ def get_products() -> list:
     """GET /shops/{uuid}/products — product setup incl. amount bounds."""
     body = _get(f"shops/{shop_uuid()}/products")
     return body if isinstance(body, list) else body.get("products", [])
+
+
+def get_products_cached(*, ttl: int = 300) -> list:
+    """Cached + failure-tolerant get_products for checkout rendering."""
+    if not is_configured():
+        return []
+    from django.core.cache import cache
+
+    key = f"inbank:products:{shop_uuid()}:{api_url()}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    try:
+        products = get_products()
+    except InbankError as exc:
+        logger.warning("Inbank products fetch failed: %s", exc)
+        return []
+    cache.set(key, products, ttl)
+    return products
 
 
 def verify_callback(*, timestamp: str, message: str, hmac_value: str) -> bool:
