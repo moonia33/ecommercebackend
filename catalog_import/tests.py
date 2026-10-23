@@ -86,6 +86,30 @@ class CatalogImportTestCase(TestCase):
             InventoryItem.objects.get(variant=variants["xxxx-M"]).qty_on_hand, 5
         )
 
+    def test_import_skips_unsupported_translation_language(self):
+        run = self._run([
+            {
+                "code": "xxlang",
+                "product_group_code": "xxlang",
+                "category": "cat-a",
+                "tax_class": "standard",
+                "price_net": "5.00",
+                "translations": {
+                    "lt": {"name": "Preke"},
+                    "fr": {"name": "Produit"},
+                },
+                "variants": [
+                    {"code": "xxlang-1", "product_group_code": "xxlang",
+                     "price_net": "5.00", "stock": {"main": 1}},
+                ],
+            }
+        ])
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        product = Product.objects.get(sku="xxlang")
+        self.assertFalse(
+            product.translations.filter(language_code="fr").exists()
+        )
+
     def test_variant_pack_fields_are_imported(self):
         run = self._run([
             {

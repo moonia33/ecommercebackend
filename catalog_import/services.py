@@ -429,8 +429,18 @@ def _unique_slug(model, base: str) -> str:
 
 
 def _sync_translations(product: Product, item: ImportProductIn) -> None:
+    from api.i18n import get_supported_language_codes
+
+    supported = set(get_supported_language_codes())
     for lang, tr in item.translations.items():
         if lang == "lt":
+            continue
+        if lang not in supported:
+            logger.warning(
+                "Skipping translation for unsupported language %r (product %s)",
+                lang,
+                product.pk,
+            )
             continue
         if not tr.name.strip():
             continue
