@@ -136,6 +136,11 @@ def payment_options(request, country_code: str = "LT",
             # GET /api/v1/payments/inbank/calculation?amount=&period=
             opt_payload["calculator_url"] = (
                 "/api/v1/payments/inbank/calculation")
+        if prov == "montonio":
+            expanded = _montonio_options(m, country_code=country_code)
+            if expanded:
+                options.extend(expanded)
+                continue
         options.append(
             PaymentOptionOut(
                 id=str(m.code),
@@ -180,6 +185,79 @@ def payment_options(request, country_code: str = "LT",
 
     options.sort(key=_option_sort_key)
     return options
+
+
+# Montonio metodų pavadinimai UI'ui (bankams naudojami jų vardai)
+_MONTONIO_METHOD_LABELS = {
+    "cardPayments": "Banko kortelė",
+    "applePay": "Apple Pay",
+    "googlePay": "Google Pay",
+    "mobilePay": "MobilePay",
+    "blik": "BLIK",
+    "bnpl": "Pirkti dabar, mokėti vėliau",
+    "hirePurchase": "Išsimokėtinai",
+}
+
+
+def _montonio_options(pay_method, *, country_code: str) -> list[PaymentOptionOut]:
+    """Išskleidžia 'montonio' metodą į konkrečius bankus + kitus metodus.
+
+    Grąžina [] kai API nepasiekiamas — caller tada palieka bendrą opciją.
+    """
+    from payments import montonio as montonio_svc
+
+    data = montonio_svc.get_payment_methods()
+    methods = data.get("paymentMethods") if isinstance(data, dict) else None
+    if not isinstance(methods, dict):
+        return []
+
+    out: list[PaymentOptionOut] = []
+    base_payload = {"payment_method": str(pay_method.code)}
+
+    # 1) Bankai (paymentInitiation) — regiono sąrašas pagal country_code
+    setup = ((methods.get("paymentInitiation") or {}).get("setup") or {})
+    banks: list[dict] = []
+    region = setup.get(country_code)
+    if not region and country_code != "LT":
+        region = setup.get("LT")
+    if not region and setup:
+        region = next(iter(setup.values()))
+    if region:
+        banks = sorted(
+            region.get("paymentMethods") or [],
+            key=lambda b: int(b.get("uiPosition") or 999),
+        )
+    for bank in banks:
+        code = str(bank.get("code") or "").strip()
+        if not code:
+            continue
+        out.append(PaymentOptionOut(
+            id=f"montonio:{code}",
+            kind="method",
+            title=str(bank.get("name") or code),
+            provider="montonio",
+            logo_url=str(bank.get("logoUrl") or ""),
+            payload={
+                **base_payload,
+                "montonio_method": "paymentInitiation",
+                "preferred_provider": code,
+            },
+        ))
+
+    # 2) Kiti įjungti metodai (kortelės, Apple Pay, ...)
+    for mkey, minfo in methods.items():
+        if mkey == "paymentInitiation" or not isinstance(minfo, dict):
+            continue
+        out.append(PaymentOptionOut(
+            id=f"montonio:{mkey}",
+            kind="method",
+            title=_MONTONIO_METHOD_LABELS.get(mkey, mkey),
+            provider="montonio",
+            logo_url=str(minfo.get("logoUrl") or ""),
+            payload={**base_payload, "montonio_method": mkey},
+        ))
+
+    return out
 
 
 @router.get("/shipping-methods", response=list[ShippingMethodOut], auth=_auth)

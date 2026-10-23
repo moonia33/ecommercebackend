@@ -3,7 +3,7 @@ from __future__ import annotations
 from .shared import *
 
 
-@router.post("/checkout/apply-pickup-point", response=ApplyPickupPointOut, auth=_auth)
+@router.post("/apply-pickup-point", response=ApplyPickupPointOut, auth=_auth)
 def apply_pickup_point(request, payload: ApplyPickupPointIn):
     _ensure_shop_context_if_strict(request)
     user = _require_user(request)
@@ -128,7 +128,7 @@ def apply_pickup_point(request, payload: ApplyPickupPointIn):
     return {"shipping_address_id": int(addr.id)}
 
 
-@router.post("/checkout/preview", response=CheckoutPreviewOut, auth=_auth)
+@router.post("/preview", response=CheckoutPreviewOut, auth=_auth)
 def checkout_preview(request, payload: CheckoutPreviewIn):
     _ensure_shop_context_if_strict(request)
     user = _require_user(request)
@@ -366,7 +366,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
     )
 
 
-@router.post("/checkout/confirm", response=CheckoutConfirmOut, auth=_auth)
+@router.post("/confirm", response=CheckoutConfirmOut, auth=_auth)
 def checkout_confirm(request, payload: CheckoutConfirmIn):
     _ensure_shop_context_if_strict(request)
     user = _require_user(request)
@@ -396,6 +396,13 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         from payments import montonio as montonio_svc
         if not montonio_svc.is_configured():
             raise HttpError(400, "Payment method not available")
+        _montonio_methods = {
+            "paymentInitiation", "cardPayments", "applePay", "googlePay",
+            "mobilePay", "blik", "bnpl", "hirePurchase",
+        }
+        if (payload.montonio_method or "").strip() and \
+                payload.montonio_method.strip() not in _montonio_methods:
+            raise HttpError(400, "Invalid payment method option")
     elif provider == PaymentIntent.Provider.INBANK:
         from payments import inbank as inbank_svc
         if not inbank_svc.is_configured():
@@ -711,7 +718,13 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         try:
             from api.i18n import get_request_language_code
             res = montonio_svc.create_order_payment(
-                order=order, language_code=get_request_language_code(request)
+                order=order,
+                language_code=get_request_language_code(request),
+                preferred_provider=(
+                    (payload.payment_provider or "").strip() or None),
+                method=(
+                    (payload.montonio_method or "").strip()
+                    or "paymentInitiation"),
             )
         except montonio_svc.MontonioError as exc:
             pi.status = PaymentIntent.Status.FAILED

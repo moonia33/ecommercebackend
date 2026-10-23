@@ -27,6 +27,43 @@ def _order_token(**overrides) -> str:
 
 
 @override_settings(MONTONIO_SECRET_KEY=TEST_SECRET, MONTONIO_ACCESS_KEY="ak")
+class MontonioOrderPayloadTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="p@example.com", password="x")
+        self.order = Order.objects.create(
+            user=self.user,
+            status=Order.Status.PENDING_PAYMENT,
+            total_gross="24.20",
+            currency="EUR",
+            country_code="LT",
+        )
+
+    def test_preferred_provider_lands_in_method_options(self):
+        from payments import montonio
+
+        payload = montonio.build_order_payload(
+            order=self.order,
+            preferred_provider="HABALT22",
+        )
+        opts = payload["payment"]["methodOptions"]
+        self.assertEqual(opts["preferredProvider"], "HABALT22")
+        self.assertEqual(payload["payment"]["method"], "paymentInitiation")
+
+    def test_no_preferred_provider_key_when_unset(self):
+        from payments import montonio
+
+        payload = montonio.build_order_payload(order=self.order)
+        self.assertNotIn("preferredProvider", payload["payment"]["methodOptions"])
+
+    def test_method_override(self):
+        from payments import montonio
+
+        payload = montonio.build_order_payload(
+            order=self.order, method="cardPayments")
+        self.assertEqual(payload["payment"]["method"], "cardPayments")
+
+
+@override_settings(MONTONIO_SECRET_KEY=TEST_SECRET, MONTONIO_ACCESS_KEY="ak")
 class MontonioWebhookTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(email="m@example.com", password="x")

@@ -2253,7 +2253,7 @@ class CheckoutProviderConfirmTests(TestCase):
     def _confirm(self, payment_method: str, shipping_method="store_pickup"):
         import json
         return self.client.post(
-            "/api/v1/checkout/checkout/confirm",
+            "/api/v1/checkout/confirm",
             data=json.dumps({
                 "shipping_address_id": self.addr.id,
                 "shipping_method": shipping_method,

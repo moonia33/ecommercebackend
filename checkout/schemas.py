@@ -154,6 +154,10 @@ class CheckoutConfirmIn(Schema):
     shipping_method: str = "unisend_pickup"
     pickup_point_id: str | None = None
     payment_method: str = "bank_transfer"
+    # Montonio: banko kodas (preferredProvider, pvz. "HABALT22")
+    payment_provider: str | None = None
+    # Montonio method: paymentInitiation|cardPayments|applePay|...
+    montonio_method: str | None = None
     channel: str = "normal"
     coupon_code: str | None = None
     consents: list[OrderConsentIn]

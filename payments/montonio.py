@@ -71,10 +71,54 @@ def _address_payload(order) -> dict:
     }
 
 
+def _auth_token() -> str:
+    """Bearer JWT for GET endpoints ({accessKey, exp})."""
+    import time
+
+    token = jwt.encode(
+        {"accessKey": access_key(), "exp": int(time.time()) + 600},
+        secret_key(), algorithm="HS256")
+    return token.decode("utf-8") if isinstance(token, bytes) else token
+
+
+def get_payment_methods(*, timeout: int = 10) -> dict:
+    """GET /stores/payment-methods — enabled methods + bank lists per region.
+
+    Cached for 5 min (Django cache); bank lists change rarely and this is
+    called on every checkout payment-step render.
+    """
+    if not is_configured():
+        return {}
+    from django.core.cache import cache
+
+    cache_key = f"montonio:payment-methods:{access_key()[:8]}:{api_url()}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    req = urllib.request.Request(
+        f"{api_url()}/stores/payment-methods",
+        headers={"Authorization": f"Bearer {_auth_token()}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        logger.warning("Montonio payment-methods fetch failed: %s", exc)
+        return {}
+    if not isinstance(body, dict):
+        return {}
+    cache.set(cache_key, body, 300)
+    return body
+
+
 def build_order_payload(*, order, language_code: str | None = None,
                         amount_override: Decimal | None = None,
                         merchant_reference: str | None = None,
-                        description: str | None = None) -> dict:
+                        description: str | None = None,
+                        preferred_provider: str | None = None,
+                        method: str = "paymentInitiation") -> dict:
     """Montonio Stargate order payload (JWT claims)."""
     grand_total = Decimal(
         amount_override if amount_override is not None else order.total_gross
@@ -122,12 +166,14 @@ def build_order_payload(*, order, language_code: str | None = None,
         "shippingAddress": _address_payload(order),
         "lineItems": line_items,
         "payment": {
-            "method": "paymentInitiation",
+            "method": method or "paymentInitiation",
             "methodDisplay": "Pay with your bank",
             "methodOptions": {
                 "paymentDescription": description or f"Order {merchant_reference}",
                 "preferredCountry": (order.country_code or "LT"),
                 "preferredLocale": locale,
+                **({"preferredProvider": preferred_provider}
+                   if preferred_provider else {}),
             },
             "amount": float(grand_total),
             "currency": order.currency or "EUR",
@@ -139,6 +185,8 @@ def create_order_payment(*, order, language_code: str | None = None,
                          amount_override: Decimal | None = None,
                          merchant_reference: str | None = None,
                          description: str | None = None,
+                         preferred_provider: str | None = None,
+                         method: str = "paymentInitiation",
                          timeout: int = 20) -> MontonioOrderResult:
     """Create a Montonio Stargate order and return the redirect URL."""
     if not is_configured():
@@ -150,6 +198,8 @@ def create_order_payment(*, order, language_code: str | None = None,
         amount_override=amount_override,
         merchant_reference=merchant_reference,
         description=description,
+        preferred_provider=preferred_provider,
+        method=method,
     )
     token = jwt.encode(payload, secret_key(), algorithm="HS256")
     # PyJWT may return bytes on old versions
