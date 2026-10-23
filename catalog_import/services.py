@@ -238,6 +238,18 @@ def _process_catalog(run: ImportRun, data: dict, *, dry_run: bool) -> set[int]:
             continue
         _apply_one(run, row, lambda: _apply_product(run, item, seen_product_ids, row), dry_run)
 
+    if not dry_run and run.source:
+        # Regrouped šeimos: perkelti variantai palieka tuščius produktus
+        # (import'o valdomi "husk'ai" – PDP be perkamų variantų). Jie
+        # deaktyvuojami nepriklausomai nuo mode (upsert ir full_sync).
+        emptied = Product.objects.filter(
+            import_source=run.source, variants__isnull=True
+        ).exclude(is_active=False)
+        emptied_ids = set(emptied.values_list("id", flat=True))
+        if emptied_ids:
+            emptied.update(is_active=False)
+            seen_product_ids |= emptied_ids
+
     if run.mode == ImportRun.Mode.FULL_SYNC and not dry_run:
         # Deactivated products also need reindexing (doc removal).
         seen_product_ids |= _deactivate_absent(run, seen_product_ids)
@@ -813,9 +825,11 @@ def _match_variant(product: Product, spec: ImportVariantIn, source: str) -> Vari
         import_source=source, import_code=spec.code
     ).first()
     if variant and variant.product_id != product.id:
-        raise _ItemError(
-            f"variant code '{spec.code}' belongs to product '{variant.product.sku}'"
-        )
+        # Tas pats importo šaltinis valdo abu produktus – feed'as
+        # pergrupavo variantus (pvz. Korda kabliukų dydžių sujungimas).
+        # Leidžiame perkėlimą: varianto id išlieka, order history ir
+        # inventoriaus eilutės nesidaro.
+        variant.product = product
     if variant:
         return variant
     variant = Variant.objects.filter(sku=spec.code).first()

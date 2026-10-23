@@ -301,6 +301,48 @@ class CatalogImportTestCase(TestCase):
         self.assertEqual(Product.objects.filter(sku="upd").count(), 1)
         self.assertEqual(Variant.objects.filter(sku="upd").count(), 1)
 
+    def test_variant_reparents_on_regroup_and_emptied_product_deactivates(self):
+        """Tie pats source: variantas gali persikelti į kitą produktą
+        (supplier feed pergrupavimas); produktas be variantų – husk'as –
+        deaktyvuojamas. Variant ID išlieka (order history saugus)."""
+        self._run([
+            {
+                "code": "fam-a", "product_group_code": "fam-a",
+                "category": "cat-a", "tax_class": "standard",
+                "price_net": "1.00",
+                "translations": {"lt": {"name": "Šeima A"}},
+                "variants": [{"code": "fam-a-v1", "ean": "v1"}],
+            },
+            {
+                "code": "fam-b", "product_group_code": "fam-b",
+                "category": "cat-a", "tax_class": "standard",
+                "price_net": "1.00",
+                "translations": {"lt": {"name": "Šeima B"}},
+                "variants": [{"code": "fam-b-v1", "ean": "v2"}],
+            },
+        ])
+        # feed pergrupuoja: fam-b variantas persikelia į fam-a
+        run = self._run([
+            {
+                "code": "fam-a", "product_group_code": "fam-a",
+                "category": "cat-a", "tax_class": "standard",
+                "price_net": "1.00",
+                "translations": {"lt": {"name": "Šeima A"}},
+                "variants": [
+                    {"code": "fam-a-v1", "ean": "v1"},
+                    {"code": "fam-b-v1", "ean": "v2"},
+                ],
+            },
+        ])
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        fam_a = Product.objects.get(sku="fam-a")
+        self.assertEqual(
+            set(fam_a.variants.values_list("sku", flat=True)),
+            {"fam-a-v1", "fam-b-v1"},
+        )
+        fam_b = Product.objects.get(sku="fam-b")
+        self.assertFalse(fam_b.is_active)
+
     def test_same_file_returns_existing_run(self):
         payload = _catalog_doc([])
         r1 = create_run(kind=ImportRun.Kind.CATALOG, payload_bytes=payload)
