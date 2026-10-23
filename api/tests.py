@@ -558,6 +558,21 @@ class OrderStatusLabelsTests(TestCase):
             HTTP_HOST="sl.local")
         self.assertEqual(res.status_code, 404)
 
+    def test_order_lookup_jwt_wins_over_admin_session(self):
+        # Browser carries sessionid (admin login, different user) AND the
+        # storefront JWT (order owner). JWT must win — cookies are
+        # domain-scoped and leak across ports.
+        admin = User.objects.create_user(
+            email="admin-x@example.com", password="x", is_staff=True)
+        self.client.force_login(admin)
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=self.user.id)
+        res = self.client.get(
+            f"/api/v1/checkout/orders/lookup?order_id={self.order.id}",
+            HTTP_HOST="sl.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["id"], self.order.id)
+
     def test_order_lookup_by_inbank_session_uuid(self):
         pi = self.order.payment_intent
         pi.provider = PaymentIntent.Provider.INBANK

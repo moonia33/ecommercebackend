@@ -325,10 +325,32 @@ def lookup_order(request, order_token: str = "", order_id: int = 0,
         if order is not None and shop_id is not None and order.shop_id != shop_id:
             order = None
     elif order_id:
-        user = _user_from_cookie_if_present(request)
-        if not user:
+        # Browser may carry BOTH a storefront JWT and a Django session
+        # (e.g. an admin login on another port — cookies are domain-scoped,
+        # not port-scoped). Accept the order if ANY identity owns it.
+        user_ids: set[int] = set()
+        u = getattr(request, "user", None)
+        if u is not None and getattr(u, "is_authenticated", False):
+            user_ids.add(int(u.id))
+        try:
+            from accounts.jwt_utils import decode_token
+            from django.contrib.auth import get_user_model
+            from django.conf import settings
+
+            cookie_name = getattr(settings, "AUTH_COOKIE_ACCESS_NAME", "access_token")
+            token = (request.COOKIES.get(cookie_name) or "").strip()
+            if token:
+                payload = decode_token(token)
+                if payload.get("type") == "access" and payload.get("sub"):
+                    jwt_user = get_user_model().objects.filter(
+                        id=int(payload["sub"]), is_active=True).first()
+                    if jwt_user is not None:
+                        user_ids.add(int(jwt_user.id))
+        except Exception:
+            pass
+        if not user_ids:
             raise HttpError(401, "Unauthorized")
-        qs = Order.objects.filter(user=user, id=order_id)
+        qs = Order.objects.filter(user_id__in=user_ids, id=order_id)
         qs = qs.filter(shop_id=shop_id) if shop_id is not None else qs.filter(shop__isnull=True)
         order = qs.first()
 

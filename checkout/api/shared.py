@@ -269,14 +269,10 @@ def _require_user(request):
 def _user_from_cookie_if_present(request):
     # Cart endpoints must work without auth; but if access cookie is present, use it.
 
-    # Allow normal Django session auth if present
-    try:
-        u = getattr(request, "user", None)
-        if u is not None and getattr(u, "is_authenticated", False):
-            return u
-    except Exception:
-        pass
-
+    # Storefront identity = JWT cookie. It must win over the Django session:
+    # cookies are domain-scoped (not port-scoped), so a browser logged into
+    # admin on another port sends `sessionid` here too — a different user
+    # would hijack the cart/favorites identity.
     try:
         from accounts.jwt_utils import decode_token
         from django.contrib.auth import get_user_model
@@ -284,19 +280,25 @@ def _user_from_cookie_if_present(request):
 
         cookie_name = getattr(settings, "AUTH_COOKIE_ACCESS_NAME", "access_token")
         token = (request.COOKIES.get(cookie_name) or "").strip()
-        if not token:
-            return None
-
-        payload = decode_token(token)
-        if payload.get("type") != "access":
-            return None
-        user_id = payload.get("sub")
-        if not user_id:
-            return None
-        User = get_user_model()
-        return User.objects.get(id=int(user_id), is_active=True)
+        if token:
+            payload = decode_token(token)
+            if payload.get("type") == "access" and payload.get("sub"):
+                User = get_user_model()
+                u = User.objects.filter(id=int(payload["sub"]), is_active=True).first()
+                if u is not None:
+                    return u
     except Exception:
-        return None
+        pass
+
+    # Allow normal Django session auth as fallback
+    try:
+        u = getattr(request, "user", None)
+        if u is not None and getattr(u, "is_authenticated", False):
+            return u
+    except Exception:
+        pass
+
+    return None
 
 
 def _get_cart_for_request(request, *, create: bool) -> Cart | None:
