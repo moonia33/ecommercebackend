@@ -88,7 +88,15 @@ class BrandTranslationInline(admin.StackedInline):
     model = BrandTranslation
     extra = 0
     show_change_link = True
-    fields = ("language_code", "name", "slug")
+    fields = (
+        "language_code",
+        "name",
+        "slug",
+        "description",
+        "seo_title",
+        "seo_description",
+        "seo_keywords",
+    )
 
     class Form(forms.ModelForm):
         language_code = forms.ChoiceField(choices=())
@@ -159,6 +167,25 @@ class BrandAdmin(admin.ModelAdmin):
     search_fields = ("name", "slug", "import_code")
     prepopulated_fields = {"slug": ("name",)}
     inlines = (BrandTranslationInline,)
+
+    class Form(forms.ModelForm):
+        description = forms.CharField(
+            required=False,
+            widget=ToastUIMarkdownWidget(mode="wysiwyg", height="320px"),
+        )
+
+        class Meta:
+            model = Brand
+            fields = "__all__"
+
+    form = Form
+
+    fieldsets = (
+        (None, {"fields": ("import_source", "import_code", "name", "slug", "is_active")}),
+        ("Turinys", {"fields": ("description",)}),
+        ("Media", {"fields": ("logo", "logo_url", "logo_alt")}),
+        ("SEO", {"fields": ("seo_title", "seo_description", "seo_keywords")}),
+    )
 
 
 class ProductTranslationInline(admin.StackedInline):

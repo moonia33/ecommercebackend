@@ -74,10 +74,21 @@ def localize_category(category: Category, *, language_code: str | None) -> dict[
 def localize_brand(brand: Brand, *, language_code: str | None) -> dict[str, str]:
     translation = _best_translation(brand.translations.all(), language_code=language_code)
     if translation is None:
-        return {"name": brand.name, "slug": brand.slug}
+        return {
+            "name": brand.name,
+            "slug": brand.slug,
+            "description": brand.description or "",
+            "seo_title": brand.seo_title or "",
+            "seo_description": brand.seo_description or "",
+            "seo_keywords": brand.seo_keywords or "",
+        }
     return {
         "name": (translation.name or brand.name),
         "slug": (translation.slug or brand.slug),
+        "description": (translation.description or brand.description or ""),
+        "seo_title": (translation.seo_title or brand.seo_title or ""),
+        "seo_description": (translation.seo_description or brand.seo_description or ""),
+        "seo_keywords": (translation.seo_keywords or brand.seo_keywords or ""),
     }
 
 

@@ -208,6 +208,22 @@ class Brand(models.Model):
     )
     name = models.CharField(max_length=200)
     slug = models.SlugField(max_length=200, unique=True)
+    description = models.TextField(
+        blank=True, help_text="Markdown (rekomenduojama).")
+
+    # Media: upload arba išorinis URL
+    logo = models.ImageField(
+        upload_to="brand-logos/%Y/%m/",
+        null=True,
+        blank=True,
+    )
+    logo_url = models.URLField(blank=True, default="")
+    logo_alt = models.CharField(max_length=255, blank=True)
+
+    # SEO
+    seo_title = models.CharField(max_length=255, blank=True)
+    seo_description = models.CharField(max_length=320, blank=True)
+    seo_keywords = models.CharField(max_length=255, blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -215,6 +231,15 @@ class Brand(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    @property
+    def logo_url_resolved(self) -> str:
+        if self.logo:
+            try:
+                return self.logo.url
+            except Exception:
+                return ""
+        return self.logo_url
 
 
 class BrandTranslation(models.Model):
@@ -227,6 +252,11 @@ class BrandTranslation(models.Model):
 
     name = models.CharField(max_length=200, blank=True, default="")
     slug = models.SlugField(max_length=200, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+
+    seo_title = models.CharField(max_length=255, blank=True, default="")
+    seo_description = models.CharField(max_length=320, blank=True, default="")
+    seo_keywords = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         constraints = [

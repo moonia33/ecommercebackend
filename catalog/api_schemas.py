@@ -17,6 +17,12 @@ class BrandOut(Schema):
     id: int
     slug: str
     name: str
+    description: str = ""
+    logo_url: str | None = None
+    logo_alt: str = ""
+    seo_title: str = ""
+    seo_description: str = ""
+    seo_keywords: str = ""
 
 
 class BrandRefOut(Schema):

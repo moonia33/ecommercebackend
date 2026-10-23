@@ -100,7 +100,19 @@ def brands(request):
     out = []
     for b in qs:
         loc = localize_brand(b, language_code=language_code)
-        out.append({"id": b.id, "slug": loc["slug"], "name": loc["name"]})
+        out.append(
+            {
+                "id": b.id,
+                "slug": loc["slug"],
+                "name": loc["name"],
+                "description": loc["description"],
+                "logo_url": (b.logo_url_resolved or None),
+                "logo_alt": b.logo_alt or "",
+                "seo_title": loc["seo_title"],
+                "seo_description": loc["seo_description"],
+                "seo_keywords": loc["seo_keywords"],
+            }
+        )
     return out
 
 
@@ -114,7 +126,17 @@ def brand_detail(request, slug: str, language_code: str | None = None):
     if not b:
         raise HttpError(404, "Brand not found")
     loc = localize_brand(b, language_code=language_code)
-    return {"id": b.id, "slug": loc["slug"], "name": loc["name"]}
+    return {
+        "id": b.id,
+        "slug": loc["slug"],
+        "name": loc["name"],
+        "description": loc["description"],
+        "logo_url": (b.logo_url_resolved or None),
+        "logo_alt": b.logo_alt or "",
+        "seo_title": loc["seo_title"],
+        "seo_description": loc["seo_description"],
+        "seo_keywords": loc["seo_keywords"],
+    }
 
 
 @router.get("/product-groups", response=list[ProductGroupOut])

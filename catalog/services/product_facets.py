@@ -314,7 +314,14 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
     brands_out = []
     for b in brands_qs:
         brand_loc = localize_brand(b, language_code=language_code)
-        brands_out.append({"id": b.id, "slug": brand_loc["slug"], "name": brand_loc["name"]})
+        brands_out.append(
+            {
+                "id": b.id,
+                "slug": brand_loc["slug"],
+                "name": brand_loc["name"],
+                "logo_url": (b.logo_url_resolved or None),
+            }
+        )
 
     return {
         "categories": categories_out,
