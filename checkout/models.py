@@ -101,6 +101,55 @@ class CartItem(models.Model):
         return f"cart:{self.cart_id} variant:{self.variant_id} x{self.qty}"
 
 
+class Favorite(models.Model):
+    """Mėgstamos prekės (wishlist): user arba svečio Django session,
+    tas pats merge-on-login pattern'as kaip Cart."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="favorites",
+    )
+    session_key = models.CharField(max_length=40, blank=True, default="")
+    shop = models.ForeignKey(
+        "api.Shop",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="favorites",
+    )
+    variant = models.ForeignKey(
+        "catalog.Variant", on_delete=models.CASCADE, related_name="favorites"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                check=(~models.Q(user=None) | ~models.Q(session_key="")),
+                name="chk_favorite_user_or_session",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "shop", "variant"],
+                condition=models.Q(user__isnull=False),
+                name="uniq_favorite_user_shop_variant",
+            ),
+            models.UniqueConstraint(
+                fields=["session_key", "shop", "variant"],
+                condition=(models.Q(user__isnull=True) & ~models.Q(session_key="")),
+                name="uniq_favorite_session_shop_variant",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        who = f"user:{self.user_id}" if self.user_id else f"session:{self.session_key}"
+        return f"fav:{who} variant:{self.variant_id}"
+
+
 class Order(models.Model):
     class Status(models.TextChoices):
         PENDING_PAYMENT = "pending_payment", "Pending payment"

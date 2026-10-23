@@ -2314,3 +2314,105 @@ class CheckoutProviderConfirmTests(TestCase):
     def test_inbank_rejected_when_unconfigured(self):
         res = self._confirm("inbank")
         self.assertEqual(res.status_code, 400)
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class FavoritesTests(TestCase):
+    """Wishlist: guest session + user, merge on login, idempotent add."""
+
+    def setUp(self):
+        self.shop = Shop.objects.create(
+            code="s", name="S", primary_domain="ops.local",
+            default_language_code="lt", default_country_code="LT",
+            currency="EUR", is_active=True)
+        ShopLanguage.objects.create(
+            shop=self.shop, language_code="lt", is_active=True,
+            is_default=True, sort_order=0)
+        tax, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"})
+        import datetime
+        from catalog.models import TaxRate
+        TaxRate.objects.create(
+            tax_class=tax, country_code="LT", rate="0.21",
+            valid_from=datetime.date(2020, 1, 1), is_active=True)
+        cat = Category.objects.create(name="C", slug="c-fav", is_active=True)
+        brand = Brand.objects.create(name="B", slug="b-fav", is_active=True)
+        self.product = Product.objects.create(
+            sku="P-F", name="Fav prekė", slug="fav-preke",
+            tax_class=tax, brand=brand, category=cat, is_active=True)
+        self.variant = Variant.objects.create(
+            product=self.product, sku="SKU-F", name="Vnt",
+            price_eur="10.00", is_active=True)
+        wh = Warehouse.objects.create(
+            code="fav_wh", name="WH", kind="local", country_code="LT",
+            is_active=True)
+        InventoryItem.objects.create(
+            variant=self.variant, warehouse=wh,
+            qty_on_hand=5, qty_reserved=0)
+
+    def _post(self, client=None):
+        import json
+        c = client or self.client
+        return c.post(
+            "/api/v1/checkout/favorites",
+            data=json.dumps({"variant_id": self.variant.id}),
+            content_type="application/json",
+            HTTP_HOST="ops.local")
+
+    def test_guest_add_list_remove(self):
+        res = self._post()
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        out = res.json()
+        self.assertEqual(out["count"], 1)
+        self.assertEqual(out["variant_ids"], [self.variant.id])
+        item = out["items"][0]
+        self.assertEqual(item["variant_id"], self.variant.id)
+        self.assertEqual(item["product"]["slug"], "fav-preke")
+        self.assertTrue(item["variants"][0]["in_stock"])
+
+        # Idempotentus pridėjimas — count lieka 1.
+        res = self._post()
+        self.assertEqual(res.json()["count"], 1)
+
+        res = self.client.delete(
+            f"/api/v1/checkout/favorites/{self.variant.id}",
+            HTTP_HOST="ops.local")
+        self.assertEqual(res.json()["count"], 0)
+
+    def test_guest_favorites_merge_into_user_on_login(self):
+        from checkout.models import Favorite
+
+        res = self._post()
+        self.assertEqual(res.json()["count"], 1)
+
+        user = User.objects.create_user(email="fav@example.com", password="x")
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=user.id)
+
+        res = self.client.get("/api/v1/checkout/favorites",
+                              HTTP_HOST="ops.local")
+        out = res.json()
+        self.assertEqual(out["count"], 1)
+        self.assertEqual(out["variant_ids"], [self.variant.id])
+        self.assertTrue(
+            Favorite.objects.filter(user=user, variant=self.variant).exists())
+        self.assertFalse(
+            Favorite.objects.filter(user=None, variant=self.variant).exists())
+
+    def test_user_favorites_are_private(self):
+        user = User.objects.create_user(email="fav2@example.com", password="x")
+        c2 = Client()
+        c2.cookies["access_token"] = issue_access_token(user_id=user.id)
+        res = self._post(client=c2)
+        self.assertEqual(res.json()["count"], 1)
+
+        # Svečias mato tik savo (tuščią) sąrašą.
+        res = Client().get("/api/v1/checkout/favorites", HTTP_HOST="ops.local")
+        self.assertEqual(res.json()["count"], 0)
+
+        # Kitas user'is irgi — nieko bendro.
+        other = User.objects.create_user(email="other@example.com", password="x")
+        c3 = Client()
+        c3.cookies["access_token"] = issue_access_token(user_id=other.id)
+        res = c3.get("/api/v1/checkout/favorites", HTTP_HOST="ops.local")
+        self.assertEqual(res.json()["count"], 0)

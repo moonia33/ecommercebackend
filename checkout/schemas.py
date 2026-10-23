@@ -4,6 +4,8 @@ from decimal import Decimal
 
 from ninja import Schema
 
+from catalog.api_schemas import ProductListOut
+
 
 class MoneyOut(Schema):
     currency: str = "EUR"
@@ -62,6 +64,32 @@ class ShippingMethodOut(Schema):
     image_url: str = ""
     pickup_points_url: str = ""
     price: MoneyOut
+
+
+class FavoriteAddIn(Schema):
+    variant_id: int | None = None
+    # Kortelės heart'as — variantas sprendžiamas serveryje (pirmas aktyvus).
+    product_id: int | None = None
+
+
+class FavoriteVariantOut(Schema):
+    id: int
+    label: str
+    sku: str
+    in_stock: bool
+
+
+class FavoriteItemOut(Schema):
+    favorite_id: int
+    variant_id: int
+    product: "ProductListOut"
+    variants: list[FavoriteVariantOut]
+
+
+class FavoritesOut(Schema):
+    items: list[FavoriteItemOut]
+    variant_ids: list[int]
+    count: int
 
 
 class CheckoutPreviewIn(Schema):
