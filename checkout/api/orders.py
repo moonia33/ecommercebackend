@@ -270,13 +270,16 @@ def list_orders(request, limit: int = 20):
 
 
 @router.get("/orders/lookup", response=OrderOut)
-def lookup_order(request, order_token: str = "", order_id: int = 0):
+def lookup_order(request, order_token: str = "", order_id: int = 0,
+                 session_uuid: str = ""):
     """Order confirmation page lookup.
 
     - `order_token`: Montonio returnUrl JWT (signature = proof of origin,
       no session needed — customer returns from the bank without cookies
       in some flows).
-    - `order_id`: authenticated fallback (bank transfer / Inbank flows).
+    - `session_uuid`: Inbank e-POS return param (unguessable UUID →
+      PaymentIntent.external_id).
+    - `order_id`: authenticated fallback (bank transfer / direct links).
     """
     _ensure_shop_context_if_strict(request)
     shop_id = _request_shop_id(request)
@@ -304,6 +307,20 @@ def lookup_order(request, order_token: str = "", order_id: int = 0):
                 .select_related("order")
                 .first()
             )
+        order = pi.order if pi else None
+        if order is not None and shop_id is not None and order.shop_id != shop_id:
+            order = None
+    elif (session_uuid or "").strip():
+        from checkout.models import PaymentIntent
+
+        pi = (
+            PaymentIntent.objects.filter(
+                external_id=session_uuid.strip(),
+                provider=PaymentIntent.Provider.INBANK,
+            )
+            .select_related("order")
+            .first()
+        )
         order = pi.order if pi else None
         if order is not None and shop_id is not None and order.shop_id != shop_id:
             order = None

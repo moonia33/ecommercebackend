@@ -558,6 +558,25 @@ class OrderStatusLabelsTests(TestCase):
             HTTP_HOST="sl.local")
         self.assertEqual(res.status_code, 404)
 
+    def test_order_lookup_by_inbank_session_uuid(self):
+        pi = self.order.payment_intent
+        pi.provider = PaymentIntent.Provider.INBANK
+        pi.external_id = "a1b2c3d4-1111-2222-3333-444455556666"
+        pi.save(update_fields=["provider", "external_id"])
+
+        self.client.cookies.pop("access_token", None)
+        res = self.client.get(
+            "/api/v1/checkout/orders/lookup"
+            "?session_uuid=a1b2c3d4-1111-2222-3333-444455556666",
+            HTTP_HOST="sl.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["id"], self.order.id)
+
+        res = self.client.get(
+            "/api/v1/checkout/orders/lookup?session_uuid=deadbeef-0000",
+            HTTP_HOST="sl.local")
+        self.assertEqual(res.status_code, 404)
+
 
 @override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
 class OpsShipmentsAndOrderManagementTests(TestCase):
