@@ -235,6 +235,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         channel=channel,
         customer_group_id=customer_group_id,
         shop_id=_request_shop_id(request),
+        language_code=get_request_language_code(request),
     )
 
     if coupon:

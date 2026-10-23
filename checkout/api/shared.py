@@ -21,13 +21,17 @@ from promotions.services import apply_promo_to_unit_net
 from shipping.services import estimate_delivery_window
 
 from analytics.services import track_event
+from api.i18n import get_request_language_code
 from api.shop_context import get_request_shop, shop_context_enabled, shop_context_strict
 
 from checkout.models import Cart, CartItem, Order, OrderConsent, OrderDiscount, OrderFee, OrderLine, PaymentIntent
+from catalog.localization import localize_option_type, localize_option_value
+from catalog.services.image_out import image_out
 from catalog.shop_pricing import resolve_shop_variant_price
 from catalog.shop_scope import apply_shop_product_scope
 from checkout.schemas import (
     CartItemAddIn,
+    CartItemOptionOut,
     CartItemOut,
     CartItemUpdateIn,
     CartOut,
@@ -619,8 +623,18 @@ def _serialize_cart_items(
     channel: str = "normal",
     customer_group_id: int | None = None,
     shop_id: int | None = None,
+    language_code: str | None = None,
 ) -> tuple[list[CartItemOut], MoneyOut, dict | None]:
     out_items: list[CartItemOut] = []
+
+    # Vienas prefetch visoms eilutėms — options, varianto/produkto nuotraukos.
+    models.prefetch_related_objects(
+        items,
+        "variant__option_values__option_type",
+        "variant__option_values__option_value",
+        "variant__variant_images",
+        "variant__product__images",
+    )
 
     agg_min = None
     agg_max = None
@@ -649,6 +663,30 @@ def _serialize_cart_items(
         total_vat += line_total.vat
         total_gross += line_total.gross
 
+        option_rows = sorted(
+            v.option_values.all(),
+            key=lambda r: (r.option_type.sort_order, r.option_type.code),
+        )
+        options_out = [
+            CartItemOptionOut(
+                option_type_code=r.option_type.code,
+                option_type_name=localize_option_type(
+                    r.option_type, language_code=language_code
+                ),
+                option_value_code=r.option_value.code,
+                option_value_label=localize_option_value(
+                    r.option_value, language_code=language_code
+                ),
+            )
+            for r in option_rows
+        ]
+        variant_name = v.name or " / ".join(o.option_value_label for o in options_out)
+
+        v_imgs = sorted(v.variant_images.all(), key=lambda i: (i.sort_order, i.id))
+        p_imgs = [] if not v.product_id else list(v.product.images.all()[:1])
+        img = v_imgs[0] if v_imgs else (p_imgs[0] if p_imgs else None)
+        image = image_out(img, context="listing") if img else None
+
         out_items.append(
             CartItemOut(
                 id=it.id,
@@ -656,6 +694,10 @@ def _serialize_cart_items(
                 offer_id=(int(it.offer_id) if it.offer_id else None),
                 sku=v.sku,
                 name=(v.product.name if v.product_id else v.sku),
+                product_slug=(v.product.slug if v.product_id else ""),
+                variant_name=variant_name,
+                options=options_out,
+                image=image,
                 qty=it.qty,
                 stock_available=int(stock_available),
                 unit_price=unit_price,

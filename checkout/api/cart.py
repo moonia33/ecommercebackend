@@ -55,6 +55,7 @@ def get_cart(request, country_code: str = "LT", channel: str = "normal"):
         country_code=country_code,
         channel=channel,
         shop_id=_request_shop_id(request),
+        language_code=get_request_language_code(request),
     )
     return CartOut(
         country_code=country_code,

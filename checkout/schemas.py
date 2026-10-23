@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from ninja import Schema
 
-from catalog.api_schemas import ProductListOut
+from catalog.api_schemas import ProductImageOut, ProductListOut
 
 
 class MoneyOut(Schema):
@@ -23,12 +23,24 @@ class DeliveryWindowOut(Schema):
     source: str = ""
 
 
+class CartItemOptionOut(Schema):
+    option_type_code: str
+    option_type_name: str
+    option_value_code: str
+    option_value_label: str
+
+
 class CartItemOut(Schema):
     id: int
     variant_id: int
     offer_id: int | None = None
     sku: str
     name: str
+    product_slug: str = ""
+    # Varianto vardas/options — kad būtų aišku ką užsakė (ne tik produktas).
+    variant_name: str = ""
+    options: list[CartItemOptionOut] = []
+    image: ProductImageOut | None = None
     qty: int
     stock_available: int
     unit_price: MoneyOut
