@@ -3052,6 +3052,66 @@ class GiftCardPurchaseTests(CheckoutProviderConfirmTests):
         self.assertEqual(res.status_code, 400)
         self.assertFalse(Order.objects.filter(user=self.user).exists())
 
+    def test_admin_form_keeps_digital_shipping_method(self):
+        """Order admin form must keep 'digital' as a choice — otherwise the
+        select silently posts the FIRST ShippingMethod (dpd_locker) and
+        clean() demands a pickup locker / rewrites the method."""
+        self._digital_cart()
+        res = self._confirm_digital("bank_transfer")
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        order = Order.objects.get(id=res.json()["order_id"])
+
+        from checkout.admin import OrderAdmin
+        form = OrderAdmin.Form(instance=order)
+        codes = [c for c, _ in form.fields["shipping_method"].choices]
+        self.assertIn("digital", codes)
+
+        form.cleaned_data = {
+            "shipping_method": "digital",
+            "carrier_code": "dpd",
+            "pickup_locker": None,
+            "unisend_terminal": None,
+            "pickup_point_id": "LOCKER-1",
+            "pickup_point_name": "Locker",
+            "pickup_point_raw": {"a": 1},
+        }
+        cleaned = form.clean()
+        self.assertEqual(cleaned["carrier_code"], "")
+        self.assertIsNone(cleaned["pickup_locker"])
+        self.assertEqual(cleaned["pickup_point_id"], "")
+        self.assertEqual(cleaned["pickup_point_name"], "")
+        self.assertEqual(cleaned["pickup_point_raw"], {})
+
+    def test_admin_mark_paid_finalizes_digital_order(self):
+        """Admin save_model PAID transition runs finalize_paid_order:
+        PI succeeded for offline providers, gift cards issued, digital
+        order marked delivered."""
+        self._digital_cart()
+        res = self._confirm_digital("bank_transfer")
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        order = Order.objects.get(id=res.json()["order_id"])
+        self.assertEqual(order.status, Order.Status.PENDING_PAYMENT)
+
+        from django.contrib import admin as dj_admin
+        from django.test import RequestFactory
+        from checkout.admin import OrderAdmin
+        from checkout.models import PaymentIntent
+
+        staff = User.objects.create(
+            email="admin@example.com", is_staff=True, is_superuser=True)
+        req = RequestFactory().post("/admin/")
+        req.user = staff
+
+        order.status = Order.Status.PAID
+        OrderAdmin(Order, dj_admin.site).save_model(
+            req, order, form=None, change=True)
+
+        order.refresh_from_db()
+        self.assertEqual(order.delivery_status, Order.DeliveryStatus.DELIVERED)
+        self.assertEqual(order.issued_gift_cards.count(), 2)
+        self.assertEqual(
+            order.payment_intent.status, PaymentIntent.Status.SUCCEEDED)
+
 
 @override_settings(ALLOWED_HOSTS=["*"])
 class NewsletterTests(TestCase):

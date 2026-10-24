@@ -282,6 +282,14 @@ class OrderAdmin(admin.ModelAdmin):
                 is_active=True).order_by("sort_order", "code")]
             if not choices:
                 choices = [("unisend_pickup", "Unisend pickup (unisend_pickup)")]
+
+            # "digital" ir legacy kodai nėra ShippingMethod lentelėje — be
+            # atitinkamo choice'o select'as submit'tintų PIRMĄ opciją
+            # (pvz. dpd_locker) ir order'io metodas tyliai persirašytų.
+            current = str(getattr(self.instance, "shipping_method", "") or "").strip()
+            if current and current not in {c for c, _ in choices}:
+                label = "Skaitmeninis pristatymas (digital)" if current == "digital" else f"{current} (custom)"
+                choices.insert(0, (current, label))
             self.fields["shipping_method"].choices = choices
 
             # Populate Unisend terminal selector (active only). If order has pickup_point_id,
@@ -308,6 +316,15 @@ class OrderAdmin(admin.ModelAdmin):
             code = (cleaned.get("shipping_method") or "").strip()
             if code:
                 m = ShippingMethod.objects.filter(code=code).first()
+                if code == "digital" and m is None:
+                    # Skaitmeninis pristatymas — jokio carrier/pickup handlingo.
+                    cleaned["carrier_code"] = ""
+                    cleaned["pickup_locker"] = None
+                    cleaned["unisend_terminal"] = None
+                    cleaned["pickup_point_id"] = ""
+                    cleaned["pickup_point_name"] = ""
+                    cleaned["pickup_point_raw"] = {}
+                    return cleaned
                 if m and not cleaned.get("carrier_code"):
                     cleaned["carrier_code"] = m.carrier_code or ""
 
@@ -445,34 +462,6 @@ class OrderAdmin(admin.ModelAdmin):
 
         self.message_user(request, f"Atnaujinta užsakymų: {updated}")
 
-    def save_model(self, request: HttpRequest, obj: Order, form, change: bool) -> None:
-        from promotions.services import redeem_coupon_for_paid_order, release_coupon_for_order
-
-        prev_status = None
-        if change and obj.pk:
-            prev_status = (
-                Order.objects.filter(pk=obj.pk)
-                .values_list("status", flat=True)
-                .first()
-            )
-
-        super().save_model(request, obj, form, change)
-
-        # If admin manually marks order as PAID, record coupon redemption.
-        if prev_status != Order.Status.PAID and obj.status == Order.Status.PAID:
-            try:
-                redeem_coupon_for_paid_order(order_id=int(obj.id))
-            except Exception:
-                # Keep admin save resilient; payment/coupon finalization errors should not block edits.
-                pass
-
-        # If admin manually cancels an order, release coupon reservation.
-        if prev_status != Order.Status.CANCELLED and obj.status == Order.Status.CANCELLED:
-            try:
-                release_coupon_for_order(order_id=int(obj.id))
-            except Exception:
-                pass
-
     @admin.display(description="Fulfillment")
     def fulfillment_badge(self, obj: Order) -> str:
         mode = (getattr(obj, "fulfillment_mode", "") or "").strip()
@@ -545,8 +534,7 @@ class OrderAdmin(admin.ModelAdmin):
     @admin.action(description="Pažymėti kaip apmokėtą (capture inventory) – bank_transfer")
     def mark_paid_capture_inventory(self, request: HttpRequest, queryset):
         from checkout.models import PaymentIntent
-        from checkout.services import capture_inventory_for_order
-        from promotions.services import redeem_coupon_for_paid_order
+        from checkout.services import finalize_paid_order
 
         changed = 0
         for o in queryset.select_related("payment_intent").all():
@@ -568,8 +556,7 @@ class OrderAdmin(admin.ModelAdmin):
                 o.save(update_fields=["status", "updated_at"])
                 pi.status = PaymentIntent.Status.SUCCEEDED
                 pi.save(update_fields=["status", "updated_at"])
-                capture_inventory_for_order(order_id=o.id)
-                redeem_coupon_for_paid_order(order_id=o.id)
+                finalize_paid_order(order_id=o.id)
 
             try:
                 OrderEvent.objects.create(
@@ -603,6 +590,11 @@ class OrderAdmin(admin.ModelAdmin):
                     continue
 
                 release_inventory_for_order(order_id=o.id)
+                try:
+                    from giftcards.services import restore_card_debits_for_order
+                    restore_card_debits_for_order(order=o)
+                except Exception:
+                    pass
 
                 o.status = Order.Status.CANCELLED
                 o.save(update_fields=["status", "updated_at"])
@@ -839,6 +831,9 @@ class OrderAdmin(admin.ModelAdmin):
         )
 
     def save_model(self, request, obj, form, change):
+        from checkout.models import PaymentIntent
+        from promotions.services import release_coupon_for_order
+
         # Ensure pickup snapshot stays in sync with selected locker
         try:
             from shipping.models import ShippingMethod
@@ -858,7 +853,50 @@ class OrderAdmin(admin.ModelAdmin):
             # but never keep a DPD locker FK.
             obj.pickup_locker = None
 
+        prev_status = None
+        if change and obj.pk:
+            prev_status = (
+                Order.objects.filter(pk=obj.pk)
+                .values_list("status", flat=True)
+                .first()
+            )
+
         super().save_model(request, obj, form, change)
+
+        # Admin rankiniu būdu pažymi PAID (pvz. atėjo pavedimas) — pilnas
+        # finalize: capture inventory + coupon + dovanų kortelių išleidimas
+        # + digital order'iams delivered. Be to kortelės niekada
+        # neišleistos.
+        if prev_status != Order.Status.PAID and obj.status == Order.Status.PAID:
+            try:
+                pi = getattr(obj, "payment_intent", None)
+                if (
+                    pi
+                    and pi.status != PaymentIntent.Status.SUCCEEDED
+                    and pi.provider
+                    in {
+                        PaymentIntent.Provider.BANK_TRANSFER,
+                        PaymentIntent.Provider.COD,
+                        PaymentIntent.Provider.GIFT_CARD,
+                    }
+                ):
+                    pi.status = PaymentIntent.Status.SUCCEEDED
+                    pi.save(update_fields=["status", "updated_at"])
+            except Exception:
+                pass
+            try:
+                from checkout.services import finalize_paid_order
+                finalize_paid_order(order_id=int(obj.id))
+            except Exception:
+                # Keep admin save resilient; payment/coupon finalization errors should not block edits.
+                pass
+
+        # If admin manually cancels an order, release coupon reservation.
+        if prev_status != Order.Status.CANCELLED and obj.status == Order.Status.CANCELLED:
+            try:
+                release_coupon_for_order(order_id=int(obj.id))
+            except Exception:
+                pass
 
 
 @admin.register(FeeRule)
