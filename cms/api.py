@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 from ninja import Router
 from ninja.errors import HttpError
@@ -58,7 +58,11 @@ def cms_page_detail(request, slug: str, language_code: str | None = None):
 
     page_qs = CmsPage.objects.filter(slug=slug, is_active=True)
     if shop is not None:
-        page_qs = page_qs.filter(shop_id=shop.id)
+        # Shop-specific page wins; global (shop=None) is the fallback so
+        # every storefront gets the seeded info pages unless overridden.
+        page_qs = page_qs.filter(
+            Q(shop_id=shop.id) | Q(shop__isnull=True)
+        ).order_by(F("shop_id").desc(nulls_last=True))
     else:
         page_qs = page_qs.filter(shop__isnull=True)
 

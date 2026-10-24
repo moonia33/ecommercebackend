@@ -3285,6 +3285,23 @@ class NavigationTests(TestCase):
         self.assertEqual(labels["Nuolaidos"]["badge"], "Akcija")
         self.assertEqual(labels["Nuolaidos"]["icon"], "percent")
 
+    def test_seeded_info_pages_and_dropdown(self):
+        # 0011 seed: cms pages exist per shop + "Puslapiai" dropdown.
+        res = self.client.get("/api/v1/cms/navigation",
+                              HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        parent = next(
+            i for i in res.json()["items"] if i["label"] == "Puslapiai")
+        urls = [c["url"] for c in parent["children"]]
+        for slug in ("pristatymas", "grazinimas", "duk", "kontaktai"):
+            self.assertIn(f"/info/{slug}", urls)
+
+        page = self.client.get("/api/v1/cms/pages/pristatymas",
+                               HTTP_HOST="ops.local")
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.json()["title"], "Pristatymas")
+        self.assertTrue(page.json()["content_blocks"])
+
     def test_nested_children_and_category_item(self):
         from catalog.models import Category
         from cms.models import Menu, MenuItem, MenuItemTranslation

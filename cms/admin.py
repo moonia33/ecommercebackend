@@ -49,7 +49,8 @@ class CmsPageTranslationInline(admin.StackedInline):
 class CmsPageAdmin(admin.ModelAdmin):
     list_display = ("slug", "shop", "category", "sort_order", "is_active", "updated_at")
     list_filter = ("shop", "category", "is_active")
-    search_fields = ("slug", "shop__code", "shop__name")
+    search_fields = ("slug", "shop__code", "shop__name",
+                     "translations__title")
     autocomplete_fields = ("shop",)
     list_editable = ("sort_order", "is_active")
     inlines = [CmsPageTranslationInline]
