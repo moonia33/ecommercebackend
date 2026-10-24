@@ -646,6 +646,7 @@ class PaymentIntent(models.Model):
         MONTONIO = "montonio", "Montonio"
         COD = "cod", "Pay on delivery / pickup"
         INBANK = "inbank", "Inbank hire purchase"
+        GIFT_CARD = "gift_card", "Gift card"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

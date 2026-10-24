@@ -7,5 +7,6 @@ from . import checkout  # noqa: F401
 from . import favorites  # noqa: F401
 from . import orders  # noqa: F401
 from . import payment_options  # noqa: F401
+from . import returns  # noqa: F401
 
 __all__ = [n for n in dir() if not n.startswith("__")]

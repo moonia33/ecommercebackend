@@ -407,6 +407,9 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         from payments import inbank as inbank_svc
         if not inbank_svc.is_configured():
             raise HttpError(400, "Payment method not available")
+    elif provider == PaymentIntent.Provider.GIFT_CARD:
+        if not (payload.gift_card_code or "").strip():
+            raise HttpError(400, "gift_card_code is required")
 
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
 
@@ -685,10 +688,26 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             "total_gross",
         ])
 
+        # Gift card = stored-value payment, debited atomically with the
+        # order inside this transaction. Insufficient balance rolls back
+        # the whole order.
+        if provider == PaymentIntent.Provider.GIFT_CARD:
+            from giftcards.services import debit_card
+            debit_card(
+                code=payload.gift_card_code,
+                order=order,
+                amount=order.total_gross,
+                user=user,
+            )
+
         pi = PaymentIntent.objects.create(
             order=order,
             provider=provider,
-            status=PaymentIntent.Status.PENDING,
+            status=(
+                PaymentIntent.Status.SUCCEEDED
+                if provider == PaymentIntent.Provider.GIFT_CARD
+                else PaymentIntent.Status.PENDING
+            ),
             currency="EUR",
             amount_gross=order.total_gross,
             raw_request={
@@ -696,6 +715,9 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 "created_at": timezone.now().isoformat(),
             },
         )
+        if provider == PaymentIntent.Provider.GIFT_CARD:
+            order.status = Order.Status.PAID
+            order.save(update_fields=["status", "updated_at"])
 
         # Clear cart after creating the order.
         CartItem.objects.filter(cart=cart).delete()

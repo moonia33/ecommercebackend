@@ -162,6 +162,7 @@ _PROVIDER_MAP = {
     "montonio": PaymentIntent.Provider.MONTONIO,
     "cod": PaymentIntent.Provider.COD,
     "inbank": PaymentIntent.Provider.INBANK,
+    "gift_card": PaymentIntent.Provider.GIFT_CARD,
 }
 
 

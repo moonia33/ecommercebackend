@@ -160,6 +160,8 @@ class CheckoutConfirmIn(Schema):
     montonio_method: str | None = None
     # Inbank: produkto kodas (keli finansavimo produktai vienoje parduotuvėje)
     inbank_product_code: str | None = None
+    # Gift card: bearer code — debited fully at confirm (stored-value payment).
+    gift_card_code: str | None = None
     channel: str = "normal"
     coupon_code: str | None = None
     consents: list[OrderConsentIn]
@@ -213,6 +215,10 @@ class OrderLineOut(Schema):
     line_total: MoneyOut
     compare_at_line_total: MoneyOut | None = None
     delivery_window: DeliveryWindowOut | None = None
+    # RMA info — FE rodo "Grąžinti" tik grąžinamoms eilutėms.
+    returnable: bool = True
+    return_days: int = 0
+    returned_qty: int = 0
 
 
 class OrderOut(Schema):

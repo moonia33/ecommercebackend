@@ -164,6 +164,38 @@ STATUS_LABELS: dict[str, dict[str, dict[str, str]]] = {
             "pl": "Anulowano",
         },
     },
+    "return_status": {
+        "pending": {
+            "lt": "Laukiama patvirtinimo",
+            "en": "Pending approval",
+            "pl": "Oczekuje na akceptację",
+        },
+        "approved": {
+            "lt": "Patvirtinta, laukiama prekių",
+            "en": "Approved, awaiting goods",
+            "pl": "Zatwierdzone, oczekiwanie na towar",
+        },
+        "rejected": {
+            "lt": "Atmesta",
+            "en": "Rejected",
+            "pl": "Odrzucone",
+        },
+        "received": {
+            "lt": "Prekės gautos",
+            "en": "Goods received",
+            "pl": "Towar odebrany",
+        },
+        "completed": {
+            "lt": "Užbaigta (kreditas išrašytas)",
+            "en": "Completed (credit issued)",
+            "pl": "Zakończone (wystawiono kredyt)",
+        },
+        "cancelled": {
+            "lt": "Atšaukta",
+            "en": "Cancelled",
+            "pl": "Anulowane",
+        },
+    },
     "payment_provider": {
         "bank_transfer": {
             "lt": "Bankinis pavedimas",

@@ -20,3 +20,34 @@ class CmsPageOut(Schema):
     updated_at: datetime
 
     content_blocks: list[ContentBlockOut]
+
+
+class CmsCategoryOut(Schema):
+    slug: str
+    name: str = ""
+    description: str = ""
+    icon: str = ""
+    page_count: int = 0
+
+
+class CmsPageListOut(Schema):
+    slug: str
+    title: str = ""
+    updated_at: datetime
+
+
+class StoreLocationOut(Schema):
+    id: int
+    name: str
+    line1: str
+    city: str
+    postal_code: str = ""
+    country_code: str
+    phone: str = ""
+    email: str = ""
+    latitude: str | None = None
+    longitude: str | None = None
+    opening_hours: dict
+    services: list[str]
+    description: str = ""
+    is_pickup_point: bool = False

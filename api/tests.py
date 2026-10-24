@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import IntegrityError
 from django.test import Client, RequestFactory, TestCase, override_settings
 
@@ -2521,3 +2523,325 @@ class FavoritesTests(TestCase):
         c3.cookies["access_token"] = issue_access_token(user_id=other.id)
         res = c3.get("/api/v1/checkout/favorites", HTTP_HOST="ops.local")
         self.assertEqual(res.json()["count"], 0)
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class CustomerReturnTests(OpsLineEditDiscountTests):
+    """Customer-facing RMA: list/detail/create/cancel scoped to own orders."""
+
+    def _deliver(self, oid, days_ago=1):
+        from django.utils import timezone
+        order = Order.objects.get(id=oid)
+        order.delivered_at = timezone.now() - timezone.timedelta(
+            days=days_ago)
+        order.save(update_fields=["delivered_at"])
+
+    def _cust_auth(self):
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=self.customer.id)
+
+    def test_full_customer_flow(self):
+        self._auth()
+        oid = self._create_order(qty=2)
+        self._deliver(oid)
+        line = self._line(oid)
+        self._cust_auth()
+
+        res = self.client.post(
+            f"/api/v1/checkout/orders/{oid}/returns",
+            data={"lines": [{"order_line_id": line["order_line_id"],
+                             "qty": 1, "reason": "Broke"}],
+                  "note": "Please refund"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        ret = res.json()
+        self.assertEqual(ret["status"], "pending")
+        self.assertEqual(ret["status_label"], "Laukiama patvirtinimo")
+        self.assertTrue(ret["number"].startswith("RMA-"))
+        self.assertEqual(ret["order_id"], oid)
+
+        res = self.client.get("/api/v1/checkout/returns",
+                              HTTP_HOST="ops.local")
+        self.assertEqual(len(res.json()), 1)
+
+        res = self.client.get(f"/api/v1/checkout/returns/{ret['id']}",
+                              HTTP_HOST="ops.local")
+        out = res.json()
+        self.assertEqual(out["lines"][0]["qty"], 1)
+        self.assertEqual(out["lines"][0]["reason"], "Broke")
+
+        res = self.client.post(
+            f"/api/v1/checkout/returns/{ret['id']}/cancel",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.json()["status"], "cancelled")
+
+        # Terminal state — second cancel rejected.
+        res = self.client.post(
+            f"/api/v1/checkout/returns/{ret['id']}/cancel",
+            data={}, content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+    def test_visibility_and_validation(self):
+        self._auth()
+        oid = self._create_order(qty=2)
+        self._deliver(oid)
+        line = self._line(oid)
+
+        # Unauthenticated — 401.
+        anon = Client()
+        res = anon.get("/api/v1/checkout/returns", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 401)
+
+        self._cust_auth()
+
+        # Qty above ordered.
+        res = self.client.post(
+            f"/api/v1/checkout/orders/{oid}/returns",
+            data={"lines": [{"order_line_id": line["order_line_id"], "qty": 3}]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+        # Other customer's order — 404.
+        other = User.objects.create_user(email="oth@example.com", password="x")
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=other.id)
+        res = self.client.post(
+            f"/api/v1/checkout/orders/{oid}/returns",
+            data={"lines": [{"order_line_id": line["order_line_id"], "qty": 1}]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 404)
+        res = self.client.get("/api/v1/checkout/returns", HTTP_HOST="ops.local")
+        self.assertEqual(res.json(), [])
+
+        # Foreign detail is invisible.
+        self._cust_auth()
+        res = self.client.post(
+            f"/api/v1/checkout/orders/{oid}/returns",
+            data={"lines": [{"order_line_id": line["order_line_id"], "qty": 1}]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        rid = res.json()["id"]
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=other.id)
+        res = self.client.get(f"/api/v1/checkout/returns/{rid}",
+                              HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 404)
+
+    def test_expired_window_and_nonreturnable(self):
+        from django.utils import timezone
+        self._auth()
+        oid = self._create_order(qty=1)
+        self._deliver(oid, days_ago=365)
+        line = self._line(oid)
+        self._cust_auth()
+        res = self.client.post(
+            f"/api/v1/checkout/orders/{oid}/returns",
+            data={"lines": [{"order_line_id": line["order_line_id"], "qty": 1}]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+        # Non-returnable product.
+        product = self.variant.product
+        product.returnable = False
+        product.save(update_fields=["returnable"])
+        self._auth()
+        oid2 = self._create_order(qty=1)
+        self._deliver(oid2)
+        line2 = self._line(oid2)
+        self._cust_auth()
+        res = self.client.post(
+            f"/api/v1/checkout/orders/{oid2}/returns",
+            data={"lines": [{"order_line_id": line2["order_line_id"], "qty": 1}]},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+
+class GiftCardCheckoutTests(CheckoutProviderConfirmTests):
+    """Gift card as a stored-value payment method at confirm."""
+
+    def setUp(self):
+        super().setUp()
+        from giftcards.models import GiftCard
+        from payments.models import PaymentMethod
+        PaymentMethod.objects.create(
+            code="gift_card", name="Dovanų kortelė", provider="gift_card",
+            is_active=True)
+        self.card = GiftCard.objects.create(
+            code="TESTCARD1234", initial_amount="100.00", balance="100.00")
+
+    def _confirm_gc(self, code="TESTCARD1234", extra=None):
+        import json
+        payload = {
+            "shipping_address_id": self.addr.id,
+            "shipping_method": "store_pickup",
+            "payment_method": "gift_card",
+            "gift_card_code": code,
+            "consents": [
+                {"kind": "terms", "document_version": "v1"},
+                {"kind": "privacy", "document_version": "v1"},
+            ],
+            **(extra or {}),
+        }
+        return self.client.post(
+            "/api/v1/checkout/confirm", data=json.dumps(payload),
+            content_type="application/json", HTTP_HOST="ops.local")
+
+    def test_paid_with_gift_card(self):
+        res = self._confirm_gc()
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        out = res.json()
+        self.assertEqual(out["payment_provider"], "gift_card")
+        self.assertEqual(out["payment_status"], "succeeded")
+
+        order = Order.objects.get(id=out["order_id"])
+        self.assertEqual(order.status, Order.Status.PAID)
+
+        self.card.refresh_from_db()
+        self.assertEqual(
+            self.card.balance,
+            (Decimal("100.00") - order.total_gross).quantize(Decimal("0.01")))
+        self.assertEqual(self.card.owner_id, self.user.id)
+
+        from giftcards.models import GiftCardTransaction
+        tx = GiftCardTransaction.objects.get(card=self.card)
+        self.assertEqual(tx.kind, "debit")
+        self.assertEqual(tx.order_id, order.id)
+        self.assertEqual(tx.balance_after, self.card.balance)
+
+    def test_insufficient_balance_rolls_back_order(self):
+        self.card.balance = "1.00"
+        self.card.save(update_fields=["balance"])
+        res = self._confirm_gc()
+        self.assertEqual(res.status_code, 400)
+        self.assertFalse(Order.objects.filter(user=self.user).exists())
+        self.assertFalse(
+            PaymentIntent.objects.filter(order__user=self.user).exists())
+
+    def test_unknown_code_and_missing_code(self):
+        res = self._confirm_gc("NOSUCHCODE")
+        self.assertEqual(res.status_code, 400)
+        res = self._confirm_gc("")
+        self.assertEqual(res.status_code, 400)
+
+    def test_mine_redeem_check(self):
+        # Claim via /redeem then list.
+        res = self.client.post(
+            "/api/v1/giftcards/redeem",
+            data={"code": "testcard1234"}, content_type="application/json",
+            HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        self.card.refresh_from_db()
+        self.assertEqual(self.card.owner_id, self.user.id)
+
+        res = self.client.get("/api/v1/giftcards/mine", HTTP_HOST="ops.local")
+        out = res.json()
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["balance"], "100.00")
+
+        # Someone else's card cannot be claimed/checked.
+        other = User.objects.create_user(email="o2@example.com", password="x")
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=other.id)
+        res = self.client.post(
+            "/api/v1/giftcards/check",
+            data={"code": "TESTCARD1234"}, content_type="application/json",
+            HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+
+@override_settings(ALLOWED_HOSTS=["*"])
+class NewsletterTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.user = User.objects.create_user(
+            email="nl@example.com", password="x")
+
+    def test_subscribe_status_toggle(self):
+        res = self.client.post(
+            "/api/v1/newsletter/subscribe",
+            data={"email": "NL@example.com", "source": "footer"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()["subscribed"])
+
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=self.user.id)
+        res = self.client.get("/api/v1/newsletter/status",
+                              HTTP_HOST="ops.local")
+        self.assertTrue(res.json()["subscribed"])
+
+        res = self.client.put(
+            "/api/v1/newsletter/preference",
+            data={"subscribed": False}, content_type="application/json",
+            HTTP_HOST="ops.local")
+        self.assertFalse(res.json()["subscribed"])
+
+        from notifications.models import NewsletterSubscriber
+        sub = NewsletterSubscriber.objects.get(email="nl@example.com")
+        self.assertFalse(sub.is_active)
+        self.assertIsNotNone(sub.unsubscribed_at)
+
+        # Re-subscribe reactivates + links the user.
+        res = self.client.post(
+            "/api/v1/newsletter/subscribe",
+            data={"email": "nl@example.com"}, content_type="application/json",
+            HTTP_HOST="ops.local")
+        self.assertTrue(res.json()["subscribed"])
+        sub.refresh_from_db()
+        self.assertTrue(sub.is_active)
+        self.assertEqual(sub.user_id, self.user.id)
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class CmsHubTests(TestCase):
+    """Help-center categories, category page listings, store locations."""
+
+    def setUp(self):
+        from cms.models import (
+            CmsCategory, CmsCategoryTranslation, StoreLocation)
+        self.shop = Shop.objects.create(
+            code="hub", name="Hub", primary_domain="ops.local",
+            default_language_code="lt", is_active=True)
+        ShopLanguage.objects.create(
+            shop=self.shop, language_code="lt", is_active=True,
+            is_default=True, sort_order=0)
+        self.cat = CmsCategory.objects.create(
+            slug="pristatymas", shop=self.shop, icon="truck")
+        CmsCategoryTranslation.objects.create(
+            category=self.cat, language_code="lt",
+            name="Pristatymas", description="Apie pristatymą")
+        page = CmsPage.objects.create(
+            slug="dpd-kaip", shop=self.shop, category=self.cat)
+        CmsPageTranslation.objects.create(
+            cms_page=page, language_code="lt", title="Kaip siunčiama DPD")
+        StoreLocation.objects.create(
+            shop=self.shop, name="Žvyno parduotuvė", line1="Gatvė 1",
+            city="Kaunas", opening_hours={"mon": "9-18"},
+            is_pickup_point=True)
+
+    def test_categories_and_pages(self):
+        res = self.client.get("/api/v1/cms/categories",
+                              HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        cats = res.json()
+        self.assertEqual(len(cats), 1)
+        self.assertEqual(cats[0]["name"], "Pristatymas")
+        self.assertEqual(cats[0]["page_count"], 1)
+        self.assertEqual(cats[0]["icon"], "truck")
+
+        res = self.client.get("/api/v1/cms/categories/pristatymas/pages",
+                              HTTP_HOST="ops.local")
+        pages = res.json()
+        self.assertEqual(pages[0]["slug"], "dpd-kaip")
+        self.assertEqual(pages[0]["title"], "Kaip siunčiama DPD")
+
+        res = self.client.get("/api/v1/cms/categories/ne/pages",
+                              HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 404)
+
+    def test_stores(self):
+        res = self.client.get("/api/v1/cms/stores", HTTP_HOST="ops.local")
+        stores = res.json()
+        self.assertEqual(len(stores), 1)
+        self.assertEqual(stores[0]["name"], "Žvyno parduotuvė")
+        self.assertTrue(stores[0]["is_pickup_point"])
+        self.assertEqual(stores[0]["opening_hours"], {"mon": "9-18"})

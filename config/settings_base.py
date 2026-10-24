@@ -182,6 +182,7 @@ INSTALLED_APPS = [
     "homebuilder.apps.HomebuilderConfig",
     "shipping",
     "payments",
+    "giftcards",
     "checkout",
     "billing.apps.BillingConfig",
     "recommendations.apps.RecommendationsConfig",

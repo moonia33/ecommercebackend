@@ -1,4 +1,31 @@
+from django.conf import settings
 from django.db import models
+
+
+class NewsletterSubscriber(models.Model):
+    """Newsletter subscription — guest email or linked user.
+
+    Single row per email (case-insensitive via lowercasing at write).
+    `unsubscribed_at` set = opted out; row kept as suppression record so
+    a re-import/re-subscribe can reactivate knowingly.
+    """
+
+    email = models.EmailField(unique=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="newsletter_subscriptions")
+    source = models.CharField(max_length=60, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    subscribed_at = models.DateTimeField(auto_now_add=True)
+    unsubscribed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.email} ({'on' if self.is_active else 'off'})"
 
 
 class EmailTemplate(models.Model):

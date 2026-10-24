@@ -38,6 +38,10 @@ api.add_router("/payments", payments_router)
 api.add_router("/dpd", dpd_router)
 api.add_router("/unisend", unisend_router)
 api.add_router("/cms", cms_router)
+from notifications.api import router as newsletter_router
+api.add_router("/newsletter", newsletter_router)
+from giftcards.api import router as giftcards_router
+api.add_router("/giftcards", giftcards_router)
 api.add_router("/shipping", shipping_router)
 api.add_router("/recommendations", recommendations_router)
 api.add_router("", home_router)

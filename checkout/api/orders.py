@@ -61,7 +61,7 @@ def list_orders(request, limit: int = 20):
     orders = (
         order_qs
         .select_related("payment_intent")
-        .prefetch_related("lines", "fees", "discounts")
+        .prefetch_related("lines__variant__product", "lines", "fees", "discounts")
         .order_by("-created_at")[:limit]
     )
 
@@ -360,7 +360,7 @@ def lookup_order(request, order_token: str = "", order_id: int = 0,
     o = (
         Order.objects.filter(id=order.id)
         .select_related("payment_intent")
-        .prefetch_related("lines", "fees", "discounts")
+        .prefetch_related("lines__variant__product", "lines", "fees", "discounts")
         .first()
     )
     return _build_order_detail(o, get_request_language_code(request))
@@ -381,7 +381,7 @@ def get_order(request, order_id: int):
     o = (
         order_qs
         .select_related("payment_intent")
-        .prefetch_related("lines", "fees", "discounts")
+        .prefetch_related("lines__variant__product", "lines", "fees", "discounts")
         .first()
     )
     if not o:
@@ -422,6 +422,10 @@ def download_order_invoice(request, order_id: int):
 
 
 def _build_order_detail(o, language_code: str):
+    from checkout.returns import (
+        line_is_returnable, line_return_days, returned_qty_map)
+
+    returned_map = returned_qty_map(o)
     lines_out: list[OrderLineOut] = []
     agg_min = None
     agg_max = None
@@ -431,8 +435,14 @@ def _build_order_detail(o, language_code: str):
                         vat_rate=ln.vat_rate, vat=ln.unit_vat, gross=ln.unit_gross)
         total = MoneyOut(currency=o.currency, net=ln.total_net,
                          vat_rate=ln.vat_rate, vat=ln.total_vat, gross=ln.total_gross)
-        lines_out.append(OrderLineOut(id=ln.id, sku=ln.sku, name=ln.name,
-                         qty=ln.qty, unit_price=unit, line_total=total, delivery_window=None))
+        lines_out.append(OrderLineOut(
+            id=ln.id, sku=ln.sku, name=ln.name,
+            qty=ln.qty, unit_price=unit, line_total=total,
+            delivery_window=None,
+            returnable=line_is_returnable(ln),
+            return_days=line_return_days(ln),
+            returned_qty=int(returned_map.get(ln.id, 0)),
+        ))
 
         dw = None
         try:
