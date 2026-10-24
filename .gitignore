@@ -29,3 +29,8 @@ stock_update_zb.txt
 unisen_lpexpress_docs.txt
 unisend_api.md
 importas_zb.txt
+
+# Debug artifacts
+/checkout.html
+/krepselis.html
+/tok.txt
