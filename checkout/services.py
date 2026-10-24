@@ -394,6 +394,54 @@ def finalize_paid_order(*, order_id: int) -> None:
         order.delivery_status = Order.DeliveryStatus.DELIVERED
         order.save(update_fields=["delivery_status", "updated_at"])
 
+    _send_paid_confirmation(order=order, is_digital=not has_physical)
+
+
+def _send_paid_confirmation(*, order, is_digital: bool) -> None:
+    """"Apmokėjimas gautas" laiškas pirkėjui — vieną kartą per order'io
+    gyvavimą (`paid_confirmation_sent_at` guard'as). Best-effort: template
+    klaida / missing — OutboundEmail FAILED eilutė, order'io neblokuoja."""
+    import logging
+    from django.utils import timezone
+
+    from checkout.models import Order
+
+    if order.paid_confirmation_sent_at:
+        return
+    to_email = (getattr(order.user, "email", "") or "").strip()
+    if not to_email:
+        return
+    # Claim the flag atomically BEFORE sending — two concurrent finalize
+    # calls (webhook + admin) can't double-send; only one wins the update.
+    claimed = Order.objects.filter(
+        pk=order.pk, paid_confirmation_sent_at__isnull=True,
+    ).update(paid_confirmation_sent_at=timezone.now())
+    if not claimed:
+        return
+    try:
+        from django.conf import settings as _settings
+        from notifications.services import send_templated_email
+
+        shop_url = (getattr(_settings, "STOREFRONT_URL", "") or "").rstrip("/")
+        shop = getattr(order, "shop", None)
+        send_templated_email(
+            template_key="order_paid",
+            to_email=to_email,
+            language_code=getattr(shop, "default_language_code", "") or "lt",
+            context={
+                "order_id": order.id,
+                "total_gross": order.total_gross,
+                "currency": order.currency,
+                "is_digital": is_digital,
+                "gift_recipient_email": getattr(
+                    order, "gift_recipient_email", "") or "",
+                "order_url": f"{shop_url}/uzsakymas?order={order.id}",
+            },
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "paid confirmation email failed for order %s", order.id)
+
 
 def reserve_inventory_for_line(*, order_line, qty: int | None = None,
                                strict: bool = True) -> int:

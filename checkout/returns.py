@@ -26,12 +26,18 @@ def _default_return_days() -> int:
 def line_return_days(order_line: OrderLine) -> int:
     """Effective return window for a line (product override or default)."""
     product = getattr(getattr(order_line, "variant", None), "product", None)
+    if getattr(product, "is_gift_card", False):
+        return 0
     days = getattr(product, "return_days", None)
     return int(days) if days else _default_return_days()
 
 
 def line_is_returnable(order_line: OrderLine) -> bool:
+    """Digital (is_gift_card) lines are never returnable — the code is
+    consumed the moment it is issued, there is nothing to ship back."""
     product = getattr(getattr(order_line, "variant", None), "product", None)
+    if getattr(product, "is_gift_card", False):
+        return False
     return bool(getattr(product, "returnable", True))
 
 

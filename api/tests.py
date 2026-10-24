@@ -3112,6 +3112,54 @@ class GiftCardPurchaseTests(CheckoutProviderConfirmTests):
         self.assertEqual(
             order.payment_intent.status, PaymentIntent.Status.SUCCEEDED)
 
+    def test_paid_confirmation_email_sent_once(self):
+        """finalize_paid_order queues the order_paid confirmation exactly
+        once — repeat finalize calls (webhook + admin save) don't resend."""
+        self._digital_cart()
+        res = self._confirm_digital("bank_transfer")
+        order = Order.objects.get(id=res.json()["order_id"])
+        order.status = Order.Status.PAID
+        order.save(update_fields=["status"])
+
+        from checkout.services import finalize_paid_order
+        finalize_paid_order(order_id=order.id)
+        finalize_paid_order(order_id=order.id)
+
+        from notifications.models import OutboundEmail
+        sent = OutboundEmail.objects.filter(
+            to_email="buyer@example.com", template_key="order_paid")
+        self.assertEqual(sent.count(), 1)
+
+        order.refresh_from_db()
+        self.assertIsNotNone(order.paid_confirmation_sent_at)
+
+    def test_gift_card_lines_not_returnable(self):
+        """Digital (is_gift_card) lines are non-returnable: order detail
+        marks them returnable=False and RMA creation is rejected."""
+        self._digital_cart()
+        res = self._confirm_digital("bank_transfer")
+        order = Order.objects.get(id=res.json()["order_id"])
+        order.status = Order.Status.PAID
+        order.save(update_fields=["status"])
+        from checkout.services import finalize_paid_order
+        finalize_paid_order(order_id=order.id)
+
+        res = self.client.get(
+            f"/api/v1/checkout/orders/{order.id}", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        for ln in res.json()["items"]:
+            self.assertFalse(ln["returnable"])
+            self.assertEqual(ln["return_days"], 0)
+
+        line_id = res.json()["items"][0]["id"]
+        import json
+        res = self.client.post(
+            f"/api/v1/checkout/orders/{order.id}/returns",
+            data=json.dumps({"lines": [
+                {"order_line_id": line_id, "qty": 1}]}),
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
 
 @override_settings(ALLOWED_HOSTS=["*"])
 class NewsletterTests(TestCase):

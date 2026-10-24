@@ -238,6 +238,11 @@ class Order(models.Model):
     # and sales-invoice trigger.
     delivered_at = models.DateTimeField(null=True, blank=True)
 
+    # Idempotency marker for the "payment received" confirmation email —
+    # finalize_paid_order may legitimately run more than once
+    # (webhook + admin save), the email must go out exactly once.
+    paid_confirmation_sent_at = models.DateTimeField(null=True, blank=True)
+
     # Delivery ETA snapshot (order-level, aggregated)
     delivery_min_date = models.DateField(null=True, blank=True)
     delivery_max_date = models.DateField(null=True, blank=True)

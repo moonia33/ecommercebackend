@@ -18,6 +18,10 @@ Mounted under `/checkout`:
 Rules (reused from `checkout/returns.py`):
 - Cumulative returned qty across open returns never exceeds ordered qty.
 - Non-returnable products (`Product.returnable=False`) hard-block.
+- Digital lines (`Product.is_gift_card=True`) are always non-returnable
+  (`returnable=False`, `return_days=0`) — an issued code cannot be
+  "shipped back". Applies to all current and future digital products
+  flagged `is_gift_card`.
 - Return window: `line_return_days` (product-specific `return_days` or
   default) counted from `order.delivered_at`; customers can NOT pass
   `allow_expired` (ops-only flag).
@@ -126,6 +130,12 @@ order at most once (`reverses` link makes it idempotent). Called from:
   repeated webhooks are safe. One `GiftCard` per unit of qty; email via
   `gift_card_issued` EmailTemplate to the recipient (or purchaser).
   Manual staff issuance in `/admin/giftcards/giftcard/` still works.
+- `order_paid` confirmation email: `finalize_paid_order` also sends the
+  purchaser a "mokėjimas gautas" email (`order_paid` EmailTemplate,
+  lt/en/pl) exactly once — `Order.paid_confirmation_sent_at` is claimed
+  atomically before sending, so webhook + admin double-finalize can't
+  duplicate it. Digital orders get the gift-card wording, physical a
+  "ruošiame siuntą" wording via `{% if is_digital %}`.
 
 ## CMS hub — `cms` additions
 
