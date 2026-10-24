@@ -3,7 +3,26 @@ from __future__ import annotations
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
-from .models import Brand, InventoryItem, ProductImage
+from .models import Brand, Category, InventoryItem, Product, ProductImage
+
+
+def _bump_catalog_categories_cache(**kwargs):
+    """Kategorijų endpoint'o cache versija — naujos kategorijos, rikiavimas
+    arba prekės→kategorija priskyrimas matomas iškart, ne per TTL."""
+    from django.core.cache import cache
+    try:
+        cache.incr("catalog:categories:ver")
+    except ValueError:
+        cache.set("catalog:categories:ver", 2)
+
+
+for _sender in (Category, Product):
+    post_save.connect(
+        _bump_catalog_categories_cache, sender=_sender,
+        dispatch_uid=f"catcache_save_{_sender.__name__}")
+    post_delete.connect(
+        _bump_catalog_categories_cache, sender=_sender,
+        dispatch_uid=f"catcache_del_{_sender.__name__}")
 
 
 @receiver(pre_save, sender=InventoryItem)

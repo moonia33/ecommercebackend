@@ -32,6 +32,23 @@ from ..api_schemas import (
 def categories(request):
     language_code = get_request_language_code(request)
     shop = _shop_or_404_when_strict(request)
+
+    # Kategorijų medis keičiasi retai, o skaitomas kiekviename layout
+    # load'e — TTL cache pagal (shop, kalba).
+    from django.conf import settings as dj_settings
+    from django.core.cache import cache
+
+    ver = cache.get("catalog:categories:ver")
+    if ver is None:
+        cache.set("catalog:categories:ver", 1)
+        ver = 1
+    cache_key = (
+        f"catalog:categories:v{ver}:{shop.id if shop else 'x'}:{language_code}"
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     scoped_ids = apply_shop_product_scope(
         qs=Product.objects.filter(is_active=True),
         shop_id=(int(shop.id) if shop else None),
@@ -67,6 +84,10 @@ def categories(request):
                 "seo_keywords": loc["seo_keywords"],
             }
         )
+    cache.set(
+        cache_key, out,
+        int(getattr(dj_settings, "CATEGORIES_CACHE_SECONDS", 600)),
+    )
     return out
 
 

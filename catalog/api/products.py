@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import Case, Count, IntegerField, Min, Value, When
+from django.db.models import Case, Count, IntegerField, Min, Q, Value, When
 from ninja.errors import HttpError
 
 from .shared import (
@@ -24,8 +24,11 @@ from .shared import (
     track_event,
 )
 from ..models import Product
+from ..localization import localize_brand, localize_product
 from ..services.catalog_core import parse_range_pairs
-from ..api_schemas import CatalogFacetsOut, ProductDetailOut, ProductPageOut
+from ..services.image_out import image_out
+from pricing.services import get_vat_rate
+from ..api_schemas import CatalogFacetsOut, ProductDetailOut, ProductPageOut, SuggestItemOut
 
 
 def _serialize_product_page(
@@ -179,6 +182,104 @@ def products(
     )
 
 
+@router.get("/suggest", response=list[SuggestItemOut])
+def product_suggest(
+    request,
+    q: str,
+    country_code: str = "LT",
+    channel: str = "normal",
+    language_code: str | None = None,
+):
+    """Lengvas autocomplete: Typesense hits + <mark> highlight +
+    minimalus ORM enrichment (brand, thumb, kaina). Pilnas listing
+    serialization per daug sunkus 180ms debounce'ui."""
+    q = (q or "").strip()
+    if len(q) < 2:
+        return []
+    country_code, channel = _validate_country_and_channel(
+        country_code=country_code, channel=channel
+    )
+    if language_code is None:
+        language_code = get_request_language_code(request)
+    shop = _shop_or_404_when_strict(request)
+    shop_id = int(shop.id) if shop else None
+
+    from search.services import search_suggest
+
+    hits = search_suggest(q=q, shop_id=shop_id, channel=channel, limit=8)
+
+    qs_base = (
+        Product.objects.filter(is_active=True)
+        .select_related("brand", "tax_class")
+        .prefetch_related("images", "translations", "brand__translations")
+        .annotate(
+            _min_variant_price=Min(
+                "variants__price_eur", filter=Q(variants__is_active=True)
+            )
+        )
+    )
+    if hits is not None:
+        ids = [h["id"] for h in hits]
+        by_id = {p.id: p for p in qs_base.filter(id__in=ids)}
+        ordered = [by_id[i] for i in ids if i in by_id]
+        html_by_id = {h["id"]: h for h in hits}
+    else:
+        # ORM fallback kai Typesense down — paprastas icontains.
+        ordered = list(
+            apply_shop_product_scope(
+                qs=qs_base.filter(
+                    Q(name__icontains=q) | Q(sku__icontains=q)),
+                shop_id=shop_id,
+            ).order_by("name")[:8]
+        )
+        html_by_id = {}
+
+    vat_cache: dict[int, Decimal] = {}
+
+    def _rate(p: Product) -> Decimal:
+        key = int(p.tax_class_id or 0)
+        if key not in vat_cache:
+            try:
+                vat_cache[key] = get_vat_rate(
+                    country_code=country_code, tax_class=p.tax_class
+                ) if p.tax_class_id else Decimal("0")
+            except Exception:
+                vat_cache[key] = Decimal("0")
+        return vat_cache[key]
+
+    out: list[SuggestItemOut] = []
+    for p in ordered:
+        product_loc = localize_product(p, language_code=language_code)
+        h = html_by_id.get(p.id) or {}
+        first = sorted(
+            list(p.images.all()), key=lambda i: (i.sort_order, i.id))[:1]
+        img = image_out(first[0], context="listing") if first else None
+        price = (
+            _money_out(
+                currency="EUR",
+                unit_net=Decimal(p._min_variant_price),
+                vat_rate=_rate(p),
+            )
+            if p._min_variant_price is not None
+            else None
+        )
+        out.append(SuggestItemOut(
+            id=p.id,
+            slug=product_loc["slug"],
+            name=product_loc["name"],
+            name_html=(h.get("name_html") or product_loc["name"]),
+            sku=(h.get("sku") or p.sku or ""),
+            sku_html=(h.get("sku_html") or ""),
+            brand_name=(
+                localize_brand(p.brand, language_code=language_code)["name"]
+                if p.brand else ""
+            ),
+            image_url=(img or {}).get("url"),
+            price=price,
+        ))
+    return out
+
+
 @router.get("/products/facets", response=CatalogFacetsOut)
 def product_facets(
     request,
@@ -199,14 +300,37 @@ def product_facets(
     if language_code is None:
         language_code = get_request_language_code(request)
 
+    shop = _shop_or_404_when_strict(request)
+    shop_id = int(shop.id) if shop else None
+
+    # Facets skaičiavimas be filtrų brangus (visos feature/option reikšmės
+    # per visą katalogą ~2.7s/300KB) — TTL cache pagal visus parametrus.
+    # Ne real-time jautrus: naujos prekės/facet'ai atsiranda per TTL.
+    import hashlib
+
+    from django.conf import settings as dj_settings
+    from django.core.cache import cache
+
+    params_hash = hashlib.md5(
+        "|".join(str(x) for x in (
+            q, category_slug, brand_slug, group_code,
+            feature, option, range,
+        )).encode()
+    ).hexdigest()
+    cache_key = (
+        f"catalog:facets:v1:{shop_id or 'x'}:{language_code}:"
+        f"{country_code}:{channel}:{params_hash}"
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     visibility = _visibility_for_channel(channel)
     _offer_price_expr, offer_filter = offer_price_exprs(visibility)
 
-    shop = _shop_or_404_when_strict(request)
     qs = Product.objects.filter(is_active=True).annotate(
         _has_offer=Count("id", filter=offer_filter)
     )
-    shop_id = int(shop.id) if shop else None
     qs = apply_shop_product_scope(qs=qs, shop_id=shop_id)
     if channel == "outlet":
         qs = qs.filter(_has_offer__gt=0)
@@ -227,11 +351,16 @@ def product_facets(
         range_filter=range,
     )
 
-    return build_facets_payload(
+    payload = build_facets_payload(
         product_ids=qs.values_list("id", flat=True),
         selected_category=selected_category,
         language_code=language_code,
     )
+    cache.set(
+        cache_key, payload,
+        int(getattr(dj_settings, "FACETS_CACHE_SECONDS", 600)),
+    )
+    return payload
 
 
 @router.get("/categories/{slug}/products", response=ProductPageOut)

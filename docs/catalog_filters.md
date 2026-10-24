@@ -118,6 +118,22 @@ Svarbu: „turi produktų“ reiškia, kad dukterinė kategorija įtraukiama net
 - `features` — tik filterable features, kurios naudojamos šiame scope, su tik tomis value reikšmėmis, kurios realiai pasitaiko
 - `option_types` — option type ašys šiame scope, su tik tomis value reikšmėmis, kurios realiai pasitaiko per variantus
 
+Pastaba apie našumą: facets skaičiavimas be filtrų yra brangiausias
+katalogo endpoint'as (~2.7s/300KB virš viso katalogo), todėl atsakymas
+cache'uojamas (`FACETS_CACHE_SECONDS`, default 600s) pagal visų
+parametrų hash + shop + kalba. Naujos prekės/facet'ai atsiranda per TTL.
+
+### GET `/api/v1/catalog/suggest`
+
+Lengvas autocomplete endpoint'as (`?q=`, min 2 simboliai, grąžina ≤8).
+Search vyksta per Typesense (`infix` fallback, 1 typo, `prefix`), ORM
+`icontains` fallback kai Typesense nepasiekiamas. Lengviau nei pilnas
+products listing — skirtas 180ms debounce'ui.
+
+`SuggestItemOut`: `id`, `slug`, `name`, `name_html` (su `<mark>` žymėmis),
+`sku`, `sku_html`, `brand_name`, `image_url`, `price` (min variant net +
+šalies PVM; be offer/promo kainų — tai pasiūlymas, ne PDP kaina).
+
 Papildomai UI'ui:
 
 - `option_types[].display_type` — rekomenduojamas atvaizdavimo tipas (`select` | `radio` | `swatch`)

@@ -578,6 +578,74 @@ def search_product_ids(
         return None
 
 
+def search_suggest(
+    *,
+    q: str,
+    shop_id: int | None,
+    channel: str,
+    limit: int = 8,
+) -> list[dict] | None:
+    """Lengvi autocomplete pasiūlymai tiesiai iš Typesense — su <mark>
+    highlight'ais. None = search nepasiekiamas (caller → ORM fallback).
+    Grąžina dokumentų laukelius (be ORM enrichment — tai endpoint'o darbas).
+    """
+    client = get_client()
+    if client is None:
+        return None
+
+    filters = [
+        "vis_outlet:=true" if channel == "outlet" else "vis_normal:=true"
+    ]
+    if shop_id:
+        filters.append(f"shop_ids:=[{int(shop_id)}]")
+
+    params = {
+        "q": q.strip(),
+        "query_by": "name,sku,search_text",
+        "query_by_weights": "5,3,1",
+        "filter_by": " && ".join(filters),
+        "per_page": min(20, max(1, limit)),
+        "infix": "fallback",
+        # 1 typo autocomplete'e — greičiau ir tikslesnė nei 2.
+        "num_typos": 1,
+        "prefix": "true,true,true",
+        "highlight_fields": "name,sku",
+        "highlight_start_tag": "<mark>",
+        "highlight_end_tag": "</mark>",
+        "include_fields": "id,slug,name,sku",
+    }
+
+    try:
+        res = client.collections[COLLECTION_NAME].documents.search(params)
+    except Exception as exc:
+        note_search_failure(exc)
+        return None
+
+    out: list[dict] = []
+    for h in res.get("hits", []):
+        doc = h.get("document") or {}
+        pid = doc.get("id")
+        if pid is None:
+            continue
+        name_html = doc.get("name") or ""
+        sku_html = ""
+        for hl in h.get("highlights") or []:
+            snippet = hl.get("snippet") or hl.get("value") or ""
+            if hl.get("field") == "name" and snippet:
+                name_html = snippet
+            elif hl.get("field") == "sku" and snippet:
+                sku_html = snippet
+        out.append({
+            "id": int(pid),
+            "slug": doc.get("slug") or "",
+            "name": doc.get("name") or "",
+            "name_html": name_html,
+            "sku": doc.get("sku") or "",
+            "sku_html": sku_html,
+        })
+    return out
+
+
 def sync_synonyms() -> dict:
     """Push active SearchSynonym rows to Typesense; remove stale managed ones."""
     from .models import SearchSynonym

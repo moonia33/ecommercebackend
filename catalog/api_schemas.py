@@ -280,6 +280,20 @@ class ProductPageOut(Schema):
     count: int
 
 
+class SuggestItemOut(Schema):
+    """Lengvas autocomplete įrašas (Typesense hits + minimalus ORM
+    enrichment). `name_html`/`sku_html` turi <mark> žymes."""
+    id: int
+    slug: str
+    name: str
+    name_html: str = ""
+    sku: str = ""
+    sku_html: str = ""
+    brand_name: str = ""
+    image_url: str | None = None
+    price: MoneyOut | None = None
+
+
 class CatalogFacetsOut(Schema):
     categories: list[CategoryOut] = []
     brands: list[BrandOut] = []
