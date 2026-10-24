@@ -128,8 +128,7 @@ def ops_payment_mark_paid(request, payment_id: int, payload: OpsPaymentActionIn)
         pi.save(update_fields=["status", "updated_at"])
         pi.order.status = Order.Status.PAID
         pi.order.save(update_fields=["status", "updated_at"])
-        capture_inventory_for_order(order_id=pi.order_id)
-        redeem_coupon_for_paid_order(order_id=pi.order_id)
+        finalize_paid_order(order_id=pi.order_id)
 
     _track_order_event(
         order=pi.order,
@@ -162,6 +161,11 @@ def ops_payment_refund(request, payment_id: int, payload: OpsPaymentActionIn):
         pi.order.save(update_fields=["status", "updated_at"])
         release_coupon_for_order(order_id=pi.order_id)
         release_inventory_for_order(order_id=pi.order_id)
+        try:
+            from giftcards.services import restore_card_debits_for_order
+            restore_card_debits_for_order(order=pi.order)
+        except Exception:
+            pass
 
     _track_order_event(
         order=pi.order,

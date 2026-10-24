@@ -2747,6 +2747,301 @@ class GiftCardCheckoutTests(CheckoutProviderConfirmTests):
             HTTP_HOST="ops.local")
         self.assertEqual(res.status_code, 400)
 
+    def _confirm_split(self, *, code, payment_method, extra=None):
+        """Gift card code + a REAL payment method (split tender)."""
+        import json
+        payload = {
+            "shipping_address_id": self.addr.id,
+            "shipping_method": "store_pickup",
+            "payment_method": payment_method,
+            "gift_card_code": code,
+            "consents": [
+                {"kind": "terms", "document_version": "v1"},
+                {"kind": "privacy", "document_version": "v1"},
+            ],
+            **(extra or {}),
+        }
+        return self.client.post(
+            "/api/v1/checkout/confirm", data=json.dumps(payload),
+            content_type="application/json", HTTP_HOST="ops.local")
+
+    def test_partial_cover_split_tender_bank_transfer(self):
+        """Card covers part; remainder goes to bank transfer PI."""
+        self.card.balance = "5.00"
+        self.card.save(update_fields=["balance"])
+        res = self._confirm_split(code="TESTCARD1234",
+                                payment_method="bank_transfer")
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        out = res.json()
+        self.assertEqual(out["payment_provider"], "bank_transfer")
+        self.assertEqual(out["payment_status"], "pending")
+
+        order = Order.objects.get(id=out["order_id"])
+        pi = order.payment_intent
+        self.assertEqual(pi.gift_card_amount, Decimal("5.00"))
+        self.assertEqual(
+            pi.amount_gross,
+            (order.total_gross - Decimal("5.00")).quantize(Decimal("0.01")))
+
+        self.card.refresh_from_db()
+        self.assertEqual(self.card.balance, Decimal("0.00"))
+        self.assertEqual(self.card.status, "depleted")
+
+    def test_balance_exceeds_total_keeps_remainder(self):
+        """Card balance > order total → debits only total, keeps rest."""
+        res = self._confirm_split(code="TESTCARD1234",
+                                  payment_method="bank_transfer")
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        out = res.json()
+        self.assertEqual(out["payment_provider"], "gift_card")
+        self.assertEqual(out["payment_status"], "succeeded")
+
+        order = Order.objects.get(id=out["order_id"])
+        self.assertEqual(order.status, Order.Status.PAID)
+        pi = order.payment_intent
+        self.assertEqual(pi.gift_card_amount, order.total_gross)
+        self.assertEqual(pi.amount_gross, order.total_gross)
+
+        self.card.refresh_from_db()
+        self.assertEqual(
+            self.card.balance,
+            (Decimal("100.00") - order.total_gross).quantize(Decimal("0.01")))
+
+    @override_settings(
+        INBANK_API_KEY="k", INBANK_SHOP_UUID="shop-uuid",
+        INBANK_PRODUCT_CODE="hp-test")
+    def test_inbank_cannot_combine_with_gift_card(self):
+        res = self._confirm_split(code="TESTCARD1234",
+                                  payment_method="inbank")
+        self.assertEqual(res.status_code, 400)
+        self.assertFalse(Order.objects.filter(user=self.user).exists())
+
+    def test_failed_payment_restores_card_balance(self):
+        """Partial debit reversed when order/payment is cancelled."""
+        self.card.balance = "5.00"
+        self.card.save(update_fields=["balance"])
+        res = self._confirm_split(code="TESTCARD1234",
+                                  payment_method="bank_transfer")
+        self.assertEqual(res.status_code, 200)
+        order = Order.objects.get(id=res.json()["order_id"])
+
+        from giftcards.services import restore_card_debits_for_order
+        restored = restore_card_debits_for_order(order=order)
+        self.assertEqual(restored, Decimal("5.00"))
+
+        self.card.refresh_from_db()
+        self.assertEqual(self.card.balance, Decimal("5.00"))
+        self.assertEqual(self.card.status, "active")
+
+        # Idempotent — second restore is a no-op.
+        restored2 = restore_card_debits_for_order(order=order)
+        self.assertEqual(restored2, Decimal("0.00"))
+        self.card.refresh_from_db()
+        self.assertEqual(self.card.balance, Decimal("5.00"))
+
+    def test_expired_pending_order_restores_card(self):
+        from django.utils import timezone
+        from checkout.services import expire_pending_payment_reservations
+        self.card.balance = "5.00"
+        self.card.save(update_fields=["balance"])
+        res = self._confirm_split(code="TESTCARD1234",
+                                  payment_method="bank_transfer")
+        order = Order.objects.get(id=res.json()["order_id"])
+        order.created_at = timezone.now() - timezone.timedelta(days=30)
+        order.save(update_fields=["created_at"])
+
+        n = expire_pending_payment_reservations()
+        self.assertEqual(n, 1)
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.CANCELLED)
+        self.card.refresh_from_db()
+        self.assertEqual(self.card.balance, Decimal("5.00"))
+
+
+class GiftCardPurchaseTests(CheckoutProviderConfirmTests):
+    """Buying a gift card as a catalog product (is_gift_card=True)."""
+
+    def setUp(self):
+        super().setUp()
+        from catalog.models import Product, TaxClass, Variant
+        from checkout.models import CartItem
+        tax, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"})
+        self.gc_product = Product.objects.create(
+            sku="GC-50", name="Dovanų kortelė", slug="dovanu-kortele",
+            tax_class=tax, is_active=True, is_gift_card=True)
+        # 41.32 net × 21% VAT = 50.00 gross face value.
+        self.gc_variant = Variant.objects.create(
+            product=self.gc_product, sku="GC-50-V", name="50 €",
+            price_eur="41.32", is_active=True)
+
+    def _digital_cart(self):
+        """Replace the physical cart contents with only gift-card lines."""
+        from checkout.models import CartItem
+        cart = self.user.carts.get(shop=self.shop)
+        CartItem.objects.filter(cart=cart).delete()
+        CartItem.objects.create(cart=cart, variant=self.gc_variant, qty=2)
+
+    def _confirm_digital(self, payment_method: str, extra=None):
+        import json
+        payload = {
+            "shipping_method": "digital",
+            "payment_method": payment_method,
+            "consents": [
+                {"kind": "terms", "document_version": "v1"},
+                {"kind": "privacy", "document_version": "v1"},
+            ],
+            **(extra or {}),
+        }
+        return self.client.post(
+            "/api/v1/checkout/confirm", data=json.dumps(payload),
+            content_type="application/json", HTTP_HOST="ops.local")
+
+    def test_digital_preview_without_address(self):
+        self._digital_cart()
+        res = self.client.post(
+            "/api/v1/checkout/preview",
+            data={"payment_method": "bank_transfer"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        out = res.json()
+        self.assertTrue(out["is_digital"])
+        self.assertEqual(out["shipping_total"]["gross"], "0.00")
+        self.assertTrue(all(i["is_gift_card"] for i in out["items"]))
+
+    def test_digital_confirm_issues_cards_on_paid(self):
+        self._digital_cart()
+        res = self._confirm_digital("bank_transfer")
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        order = Order.objects.get(id=res.json()["order_id"])
+        self.assertEqual(order.shipping_method, "digital")
+        self.assertEqual(order.shipping_gross, Decimal("0.00"))
+        self.assertEqual(order.status, Order.Status.PENDING_PAYMENT)
+
+        # Payment completes (ops mark-paid path side-effects).
+        from checkout.services import finalize_paid_order
+        order.status = Order.Status.PAID
+        order.save(update_fields=["status"])
+        finalize_paid_order(order_id=order.id)
+
+        order.refresh_from_db()
+        self.assertEqual(order.delivery_status, Order.DeliveryStatus.DELIVERED)
+
+        from giftcards.models import GiftCard, GiftCardTransaction
+        cards = list(order.issued_gift_cards.all())
+        self.assertEqual(len(cards), 2)  # qty=2 → dvi kortelės
+        for c in cards:
+            self.assertEqual(c.initial_amount, Decimal("50.00"))
+            self.assertEqual(c.balance, Decimal("50.00"))
+            self.assertEqual(c.purchaser_id, self.user.id)
+        self.assertEqual(
+            GiftCardTransaction.objects.filter(kind="issue").count(), 2)
+
+        # Card email queued for the purchaser.
+        from notifications.models import OutboundEmail
+        self.assertTrue(
+            OutboundEmail.objects.filter(
+                to_email="buyer@example.com",
+                template_key="gift_card_issued").exists())
+
+        # Idempotent — no double issuance.
+        finalize_paid_order(order_id=order.id)
+        self.assertEqual(order.issued_gift_cards.count(), 2)
+
+        # Issued card is spendable.
+        res = self.client.post(
+            "/api/v1/giftcards/check",
+            data={"code": cards[0].code}, content_type="application/json",
+            HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+
+    def test_digital_mixed_cart_still_requires_shipping(self):
+        from checkout.models import CartItem
+        cart = self.user.carts.get(shop=self.shop)
+        CartItem.objects.create(cart=cart, variant=self.gc_variant, qty=1)
+
+        res = self.client.post(
+            "/api/v1/checkout/preview",
+            data={"payment_method": "bank_transfer"},
+            content_type="application/json", HTTP_HOST="ops.local")
+        # Mixed cart → physical flow: address required.
+        self.assertEqual(res.status_code, 404)
+
+    def test_recipient_email_routes_card_delivery(self):
+        """gift_card_recipient_email → cards issued to the recipient,
+        email sent there instead of the purchaser."""
+        self._digital_cart()
+        res = self._confirm_digital(
+            "bank_transfer",
+            extra={"gift_card_recipient_email": "Dovana@Example.com"})
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        order = Order.objects.get(id=res.json()["order_id"])
+        self.assertEqual(order.gift_recipient_email, "dovana@example.com")
+
+        from checkout.services import finalize_paid_order
+        order.status = Order.Status.PAID
+        order.save(update_fields=["status"])
+        finalize_paid_order(order_id=order.id)
+
+        for c in order.issued_gift_cards.all():
+            self.assertEqual(c.recipient_email, "dovana@example.com")
+            self.assertEqual(c.purchaser_id, self.user.id)
+
+        from notifications.models import OutboundEmail
+        self.assertTrue(
+            OutboundEmail.objects.filter(
+                to_email="dovana@example.com",
+                template_key="gift_card_issued").exists())
+        self.assertFalse(
+            OutboundEmail.objects.filter(
+                to_email="buyer@example.com",
+                template_key="gift_card_issued").exists())
+
+    def test_recipient_email_rejected_without_gc_items(self):
+        import json
+        res = self.client.post(  # physical cart from parent setUp
+            "/api/v1/checkout/confirm",
+            data=json.dumps({
+                "shipping_address_id": self.addr.id,
+                "shipping_method": "store_pickup",
+                "payment_method": "bank_transfer",
+                "gift_card_recipient_email": "x@example.com",
+                "consents": [
+                    {"kind": "terms", "document_version": "v1"},
+                    {"kind": "privacy", "document_version": "v1"},
+                ],
+            }),
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+
+    def test_recipient_email_validated(self):
+        self._digital_cart()
+        res = self._confirm_digital(
+            "bank_transfer",
+            extra={"gift_card_recipient_email": "not-an-email"})
+        self.assertEqual(res.status_code, 400)
+        self.assertFalse(Order.objects.filter(user=self.user).exists())
+
+    def test_cannot_buy_gift_card_with_gift_card(self):
+        import json
+        from giftcards.models import GiftCard
+        GiftCard.objects.create(
+            code="PAYCARD", initial_amount="100.00", balance="100.00")
+        self._digital_cart()
+        res = self.client.post(
+            "/api/v1/checkout/confirm",
+            data=json.dumps({
+                "payment_method": "bank_transfer",
+                "gift_card_code": "PAYCARD",
+                "consents": [
+                    {"kind": "terms", "document_version": "v1"},
+                    {"kind": "privacy", "document_version": "v1"},
+                ],
+            }),
+            content_type="application/json", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 400)
+        self.assertFalse(Order.objects.filter(user=self.user).exists())
+
 
 @override_settings(ALLOWED_HOSTS=["*"])
 class NewsletterTests(TestCase):

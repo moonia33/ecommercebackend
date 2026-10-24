@@ -129,6 +129,11 @@ def payment_options(request, country_code: str = "LT",
 
     for idx, m in enumerate(base):
         _base_rank[str(m.code)] = idx
+        # Dovanų kortelė — ne radio opcija: stored-value instrumentas
+        # pritaikomas kodo laukelyje (split tender), ne pasirenkamas kaip
+        # vienintelis mokėjimo būdas.
+        if str(m.code).strip().lower() == "gift_card":
+            continue
         opt_payload: dict = {"payment_method": str(m.code)}
         prov = str(m.provider or m.code or "").strip().lower()
         if prov == "inbank":

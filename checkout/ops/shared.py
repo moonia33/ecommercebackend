@@ -41,7 +41,8 @@ from checkout.models import (
     Shipment,
     Surcharge,
 )
-from checkout.services import capture_inventory_for_order, release_inventory_for_order
+from checkout.services import (
+    capture_inventory_for_order, finalize_paid_order, release_inventory_for_order)
 from promotions.services import (
     redeem_coupon_for_paid_order,
     release_coupon_for_order,

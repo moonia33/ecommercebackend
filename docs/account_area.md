@@ -55,7 +55,8 @@ Stored-value payment instrument, **not** a discount/coupon:
   spend it — like cash).
 - `GiftCardTransaction` — append-only ledger
   (`issue|debit|credit|adjust`, signed amount, `balance_after`, order
-  link). Never update/delete ledger rows.
+  link, `reverses` self-FK for reversal pairs). Never update/delete
+  ledger rows.
 - `services.debit_card()` / `credit_card()` — `select_for_update`
   row-locked, always inside `transaction.atomic()`.
 
@@ -66,20 +67,65 @@ Customer endpoints (`/giftcards`):
 - `POST /giftcards/redeem {code}` — claims a floating card to the
   account (owner set once; second claim → 400).
 
-Checkout integration (`PaymentIntent.Provider.GIFT_CARD`):
-- Payment method is enabled via `PaymentMethod(code="gift_card",
-  provider="gift_card", is_active=True)` — create it in admin.
-- `confirm` requires `gift_card_code`; inside the same DB transaction
-  the card is row-locked and debited for `order.total_gross`.
-  Insufficient balance / unknown / expired / voided → 400 and the whole
-  order rolls back. On success the PI is `succeeded` and the order `paid`.
-- MVP limitation: the card must cover the **full** total — split payment
-  (card + other method) is planned, not built.
-- Refund path: `credit_card()` exists (order cancel/return → credit
-  back); wiring it into the cancel flow is a TODO.
-- Selling gift cards through the catalog (gift-card product → issue on
-  paid order → email the code) is phase 2. For now staff issues cards
-  in `/admin/giftcards/giftcard/`.
+### Paying WITH a gift card (split tender)
+
+`CheckoutConfirmIn.gift_card_code` — the card is **applied** at
+confirm, inside the same DB transaction as order creation:
+
+- Applied amount = `min(card.balance, order.total_gross)`, recorded on
+  `PaymentIntent.gift_card_amount`; `amount_gross` holds the remainder
+  the external provider must collect. `OrderOut` exposes both as
+  `gift_card_amount` / `provider_amount` (strings).
+- **Balance > total** → only the order total is debited; the rest stays
+  on the card (status stays `active` unless the balance hits 0).
+- **Full cover** → `PaymentIntent.provider = gift_card`, status
+  `succeeded`, order `paid` immediately, `finalize_paid_order` runs.
+- **Partial cover** → `provider` stays the chosen method; Montonio is
+  called with `amount_override = remainder`. Gift card is never offered
+  as a payment-method radio (filtered in `payment_options`) — the FE
+  shows an always-visible "apply code" box instead.
+- **Inbank** + gift card is rejected (400) — installment financing
+  cannot take an amount override.
+- Buying a gift card **with** a gift card is rejected (400) — prevents
+  laundering another card's balance into a fresh card.
+- Using a card claims it to the authenticated user (floating card →
+  owner); cards owned by another account are refused.
+
+### Restoration (never lose balance)
+
+`restore_card_debits_for_order(order)` credits every DEBIT for the
+order at most once (`reverses` link makes it idempotent). Called from:
+
+- Montonio/Inbank order-creation failure (502 path).
+- Payment-failure/cancel webhooks (failed intent, cancelled order).
+- `expire_pending_payment_reservations()` — pending orders that never
+  got paid (row lock uses `select_for_update(of=("self",))` — Postgres
+  forbids locking the nullable `payment_intent` join side).
+- Ops cancel/refund endpoints.
+
+### Selling gift cards (digital product)
+
+- `Product.is_gift_card` — the catalog product. One product, variants
+  = denominations (e.g. 20/50/100 €). Issued face value = the **gross
+  unit price actually paid**, so promo/discounted sales stay correct.
+- Cart is "digital" when every line is a gift card → preview skips
+  shipping (`shipping_total=0`, `is_digital=True`), confirm accepts
+  `shipping_address_id=None` (billing falls back to the user's default
+  address for the invoice) and stores `shipping_method="digital"`.
+- Mixed carts keep the normal physical flow; inventory reservation
+  skips gift-card lines (nothing physical to reserve).
+- `CheckoutConfirmIn.gift_card_recipient_email` — optional; only valid
+  when the cart contains gift-card items, validated as an email, stored
+  on `Order.gift_recipient_email`.
+- `finalize_paid_order(order_id)` — shared by direct gift-card,
+  Montonio webhook, Inbank callback and ops mark-paid. It captures
+  reserved inventory, redeems coupon usage, calls
+  `issue_cards_for_paid_order` and marks digital-only orders
+  `delivery_status=delivered` (digital fulfillment).
+- Issuance is idempotent (`order.issued_gift_cards.exists()` guard) —
+  repeated webhooks are safe. One `GiftCard` per unit of qty; email via
+  `gift_card_issued` EmailTemplate to the recipient (or purchaser).
+  Manual staff issuance in `/admin/giftcards/giftcard/` still works.
 
 ## CMS hub — `cms` additions
 
@@ -118,11 +164,29 @@ Account shell: `/paskyra` + `AccountNav` (layout with sidebar nav).
 - `/grazinimas` — return/exchange policy + CTA
 - Footer newsletter form → real `POST /newsletter/subscribe`.
 
+Checkout (`/checkout`) gift-card UX:
+- Always-visible code field in the payment step → `POST
+  /giftcards/check`, then an applied chip with `−X €`; remainder goes
+  through the normal payment-method radios (Inbank options hidden
+  while a card is applied).
+- `balance > total` → hint that the leftover stays on the card;
+  `remaining = 0` → radios replaced by "visa suma padengta".
+- Digital-only carts (all items `is_gift_card`) → the delivery step
+  becomes "Sąskaitos duomenys" (billing address auto-picked) plus an
+  optional recipient-email input; no shipping method/locker UI.
+- `/uzsakymas` shows the tender split (`gift_card_amount` /
+  `provider_amount`) and renders `shipping_method="digital"` as
+  "El. paštas (skaitmeninis)".
+
 ## TODO / phase 2
 
-- Gift-card product in catalog → issue + email code on paid order.
-- Split tender: gift card partial coverage + second payment method.
-- Auto-credit card on order cancellation / completed return.
+- Inbank + gift card split tender (needs a proper amount override in
+  `create_pos_session` before it can be enabled).
+- Refund allocation on partial-tender refunds: currently the card part
+  is restored by `restore_card_debits_for_order`; per-line refund
+  splitting between card and provider is manual.
+- Sender name / gift message fields on the gift-card product and in the
+  issued-card email.
 - First-class exchange flow (currently: return + new order, marked
   with MissingFeature on `/grazinimas`).
 - Email change flow (marked MissingFeature on personal info page).

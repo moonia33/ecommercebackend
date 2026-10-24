@@ -77,6 +77,11 @@ class Product(models.Model):
     # į 'atsargines-dalys' kategoriją, kuri renderinama list template'u.
     is_part = models.BooleanField(default=False, db_index=True)
 
+    # Skaitmeninė dovanų kortelė: varianto kaina = kortelės nominalas.
+    # Tokios eilutės nereikalauja pristatymo (checkout skip'ina shipping)
+    # ir apmokėjus sukuria GiftCard'us (po vieną per qty vienetą).
+    is_gift_card = models.BooleanField(default=False, db_index=True)
+
     # Returns: non-returnable products (e.g. perishables, custom orders)
     # are excluded from RMA flows. return_days=None -> shop/default window.
     returnable = models.BooleanField(default=True)

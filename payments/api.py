@@ -9,8 +9,7 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from checkout.models import Order, OrderEvent, PaymentIntent
-from checkout.services import capture_inventory_for_order
-from promotions.services import redeem_coupon_for_paid_order
+from checkout.services import finalize_paid_order
 
 from accounts.auth import JWTAuth
 
@@ -19,6 +18,15 @@ from . import montonio
 logger = logging.getLogger(__name__)
 
 router = Router(tags=["payments"])
+
+
+def _restore_gc(order) -> None:
+    """Best-effort gift-card debit reversal — never break a webhook."""
+    try:
+        from giftcards.services import restore_card_debits_for_order
+        restore_card_debits_for_order(order=order)
+    except Exception:
+        logger.exception("gift card restore failed for order %s", order.id)
 
 
 @router.post("/montonio/webhook")
@@ -100,12 +108,16 @@ def montonio_webhook(request):
             if pi.order.status != Order.Status.PAID:
                 pi.order.status = Order.Status.PAID
                 pi.order.save(update_fields=["status", "updated_at"])
-            capture_inventory_for_order(order_id=pi.order_id)
-            redeem_coupon_for_paid_order(order_id=pi.order_id)
+            finalize_paid_order(order_id=pi.order_id)
             result = {"status": "ok", "order_id": order_id, "marked": "paid"}
         elif payment_status in {"VOIDED", "ABANDONED", "FAILED"}:
             pi.status = PaymentIntent.Status.FAILED
             pi.save(update_fields=["status", "raw_response", "external_id", "updated_at"])
+            try:
+                from giftcards.services import restore_card_debits_for_order
+                restore_card_debits_for_order(order=pi.order)
+            except Exception:
+                pass
             result = {"status": "ok", "order_id": order_id, "marked": "failed"}
         else:
             pi.save(update_fields=["raw_response", "external_id", "updated_at"])
@@ -319,18 +331,19 @@ def inbank_callback(request):
             if pi.order.status != Order.Status.PAID:
                 pi.order.status = Order.Status.PAID
                 pi.order.save(update_fields=["status", "updated_at"])
-            capture_inventory_for_order(order_id=pi.order_id)
-            redeem_coupon_for_paid_order(order_id=pi.order_id)
+            finalize_paid_order(order_id=pi.order_id)
             result = {"status": "ok", "order_id": pi.order_id,
                       "marked": "paid"}
         elif session_status == "cancelled":
             pi.status = PaymentIntent.Status.CANCELLED
             pi.save(update_fields=["status"] + update)
+            _restore_gc(pi.order)
             result = {"status": "ok", "order_id": pi.order_id,
                       "marked": "cancelled"}
         elif session_status in {"declined", "failed", "expired"}:
             pi.status = PaymentIntent.Status.FAILED
             pi.save(update_fields=["status"] + update)
+            _restore_gc(pi.order)
             result = {"status": "ok", "order_id": pi.order_id,
                       "marked": "failed"}
         else:

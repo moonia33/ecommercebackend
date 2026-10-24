@@ -1121,6 +1121,11 @@ def ops_merge_orders(request, payload: OpsOrderMergeIn):
             src.surcharges.update(order=primary)
             InventoryAllocation.objects.filter(order=src).update(order=primary)
             PaymentIntent.objects.filter(order=src).update(order=primary)
+            try:
+                from giftcards.models import GiftCardTransaction
+                GiftCardTransaction.objects.filter(order=src).update(order=primary)
+            except Exception:
+                pass
             src.events.update(order=primary)
 
             src.status = Order.Status.CANCELLED

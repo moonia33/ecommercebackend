@@ -48,6 +48,9 @@ class CartItemOut(Schema):
     discount_percent: int | None = None
     line_total: MoneyOut
     delivery_window: DeliveryWindowOut | None = None
+    # Skaitmeninė dovanų kortelė — nereikalauja pristatymo; checkout'e
+    # slėpiamas shipping žingsnis kai VISOS eilutės tokios.
+    is_gift_card: bool = False
 
 
 class CartOut(Schema):
@@ -105,7 +108,9 @@ class FavoritesOut(Schema):
 
 
 class CheckoutPreviewIn(Schema):
-    shipping_address_id: int
+    # Optional: digital-only carts (gift cards) don't ship — backend
+    # falls back to the user's default billing/shipping address.
+    shipping_address_id: int | None = None
     shipping_method: str = "unisend_pickup"
     pickup_point_id: str | None = None
     payment_method: str = "bank_transfer"
@@ -117,6 +122,9 @@ class CheckoutPreviewOut(Schema):
     currency: str = "EUR"
     country_code: str
     shipping_method: str
+    # True kai visas krepšelis skaitmeninis (dovanų kortelės) —
+    # shipping/pickup validacija praleista, pristatymas 0.
+    is_digital: bool = False
 
     items: list[CartItemOut]
 
@@ -150,7 +158,8 @@ class ConsentDefinitionOut(Schema):
 
 
 class CheckoutConfirmIn(Schema):
-    shipping_address_id: int
+    # Optional for digital-only carts; otherwise required.
+    shipping_address_id: int | None = None
     shipping_method: str = "unisend_pickup"
     pickup_point_id: str | None = None
     payment_method: str = "bank_transfer"
@@ -160,8 +169,14 @@ class CheckoutConfirmIn(Schema):
     montonio_method: str | None = None
     # Inbank: produkto kodas (keli finansavimo produktai vienoje parduotuvėje)
     inbank_product_code: str | None = None
-    # Gift card: bearer code — debited fully at confirm (stored-value payment).
+    # Gift card: bearer code — debited at confirm as a stored-value
+    # payment. Covers min(balance, order_total); any remainder goes to
+    # `payment_method` (split tender). Full cover → provider=gift_card.
     gift_card_code: str | None = None
+    # Gift card purchase UX: kam išsiųsti išleistą kortelę.
+    # Tuščia → pirkėjo el. paštas. Tik tada, kai krepšelyje yra
+    # is_gift_card prekių; formatas validuojamas.
+    gift_card_recipient_email: str | None = None
     channel: str = "normal"
     coupon_code: str | None = None
     consents: list[OrderConsentIn]
@@ -247,6 +262,9 @@ class OrderOut(Schema):
     payment_status_label: str = ""
     payment_redirect_url: str = ""
     payment_instructions: str = ""
+    # Split tender: kiek padengta dovanų kortele / kiek liko provider'iui.
+    gift_card_amount: str = "0.00"
+    provider_amount: str = "0.00"
 
     items: list[OrderLineOut]
 

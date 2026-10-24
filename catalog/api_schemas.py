@@ -204,6 +204,7 @@ class ProductDetailOut(Schema):
     name: str
     description: str
     is_active: bool
+    is_gift_card: bool = False
     product_group_code: str = ""
 
     seo_title: str = ""

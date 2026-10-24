@@ -171,9 +171,14 @@ def reserve_inventory_for_order(*, order_id: int) -> None:
 
     lines = list(
         OrderLine.objects.filter(order_id=order_id)
-        .select_related("variant")
+        .select_related("variant", "variant__product")
         .order_by("id")
     )
+    # Skaitmeninės dovanų kortelės neturi inventoriaus — praleidžiamos.
+    lines = [
+        ln for ln in lines
+        if not getattr(getattr(ln.variant, "product", None), "is_gift_card", False)
+    ]
     if not lines:
         return
 
@@ -355,6 +360,41 @@ def release_inventory_for_order(*, order_id: int) -> None:
         InventoryAllocation.objects.bulk_update(alloc_updates, ["status", "updated_at"])
 
 
+def finalize_paid_order(*, order_id: int) -> None:
+    """Shared side-effects every time an order reaches PAID.
+
+    Called from all payment-success paths (Montonio webhook, Inbank
+    callback, gift-card full cover, ops mark-paid): captures reserved
+    stock, redeems the coupon usage, issues purchased gift cards, and for
+    digital-only orders anchors DELIVERED so the billing signal issues
+    the invoice right away.
+    """
+    from checkout.models import Order
+
+    capture_inventory_for_order(order_id=order_id)
+
+    from promotions.services import redeem_coupon_for_paid_order
+    redeem_coupon_for_paid_order(order_id=order_id)
+
+    try:
+        from giftcards.services import issue_cards_for_paid_order
+        order = Order.objects.select_related("user").get(pk=order_id)
+        issue_cards_for_paid_order(order=order)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception(
+            "gift card issuance failed for order %s", order_id)
+
+    # Visas krepšelis skaitmeninis → nieko nepristatoma; DELIVERED
+    # užkerta delivered_at + trigger'ina sąskaitą per billing signal'ą.
+    order = Order.objects.get(pk=order_id)
+    has_physical = order.lines.filter(
+        variant__product__is_gift_card=False).exists()
+    if not has_physical and order.delivery_status != Order.DeliveryStatus.DELIVERED:
+        order.delivery_status = Order.DeliveryStatus.DELIVERED
+        order.save(update_fields=["delivery_status", "updated_at"])
+
+
 def reserve_inventory_for_line(*, order_line, qty: int | None = None,
                                strict: bool = True) -> int:
     """Reserve inventory for a single OrderLine (admin line-add / qty increase).
@@ -367,6 +407,8 @@ def reserve_inventory_for_line(*, order_line, qty: int | None = None,
     line = order_line
     need = int(qty if qty is not None else line.qty)
     if need <= 0 or not line.variant_id:
+        return 0
+    if getattr(getattr(line.variant, "product", None), "is_gift_card", False):
         return 0
 
     items = list(
@@ -518,13 +560,18 @@ def expire_pending_payment_reservations(*, now=None) -> int:
     expired = 0
     with transaction.atomic():
         for oid in expired_ids:
-            o = Order.objects.select_for_update().select_related("payment_intent").filter(id=oid).first()
+            o = Order.objects.select_for_update(of=("self",)).select_related("payment_intent").filter(id=oid).first()
             if not o:
                 continue
             if o.status != Order.Status.PENDING_PAYMENT:
                 continue
 
             release_inventory_for_order(order_id=o.id)
+            try:
+                from giftcards.services import restore_card_debits_for_order
+                restore_card_debits_for_order(order=o)
+            except Exception:
+                pass
             o.status = Order.Status.CANCELLED
             o.save(update_fields=["status", "updated_at"])
 

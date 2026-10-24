@@ -514,7 +514,7 @@ class ProductAdmin(admin.ModelAdmin):
     form = Form
 
     fieldsets = (
-        (None, {"fields": ("import_source", "import_code", "product_group_code", "sku", "name", "slug", "is_active")}),
+        (None, {"fields": ("import_source", "import_code", "product_group_code", "sku", "name", "slug", "is_active", "is_gift_card")}),
         ("Klasifikacija", {
          "fields": ("brand", "category", "group", "tax_class")}),
         ("Turinys", {"fields": ("description",)}),

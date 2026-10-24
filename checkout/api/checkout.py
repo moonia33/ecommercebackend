@@ -128,17 +128,61 @@ def apply_pickup_point(request, payload: ApplyPickupPointIn):
     return {"shipping_address_id": int(addr.id)}
 
 
+def _cart_items_with_products(*, cart) -> list:
+    return list(
+        CartItem.objects.select_related(
+            "variant", "variant__product", "variant__product__tax_class", "offer")
+        .filter(cart=cart)
+        .order_by("id")
+    )
+
+
+def _cart_is_digital(items: list) -> bool:
+    """Visas krepšelis = skaitmeninės dovanų kortelės → pristatymas nereikalingas."""
+    return bool(items) and all(
+        getattr(getattr(it.variant, "product", None), "is_gift_card", False)
+        for it in items
+    )
+
+
+def _billing_address_for_user(user):
+    """Sąskaitos adresas digital order'iui: default billing → default shipping → bet koks."""
+    return (
+        UserAddress.objects.filter(user=user, is_default_billing=True).first()
+        or UserAddress.objects.filter(user=user, is_default_shipping=True).first()
+        or UserAddress.objects.filter(user=user).first()
+    )
+
+
 @router.post("/preview", response=CheckoutPreviewOut, auth=_auth)
 def checkout_preview(request, payload: CheckoutPreviewIn):
     _ensure_shop_context_if_strict(request)
     user = _require_user(request)
 
-    addr = UserAddress.objects.filter(
-        user=user, id=payload.shipping_address_id).first()
-    if not addr:
+    cart = _get_cart_for_request(request, create=False)
+    if cart is None:
+        raise HttpError(400, "Cart is empty")
+    items = _cart_items_with_products(cart=cart)
+    if not items:
+        raise HttpError(400, "Cart is empty")
+
+    is_digital = _cart_is_digital(items)
+
+    addr = None
+    if payload.shipping_address_id:
+        addr = UserAddress.objects.filter(
+            user=user, id=payload.shipping_address_id).first()
+        if not addr:
+            raise HttpError(404, "Shipping address not found")
+    if addr is None and is_digital:
+        addr = _billing_address_for_user(user)
+    if addr is None:
         raise HttpError(404, "Shipping address not found")
 
-    shipping_method = (payload.shipping_method or "").strip() or "unisend_pickup"
+    shipping_method = (
+        "digital" if is_digital
+        else (payload.shipping_method or "").strip() or "unisend_pickup"
+    )
     payment_method = (getattr(payload, "payment_method", "") or "").strip() or "bank_transfer"
     channel = (getattr(payload, "channel", "normal") or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
@@ -148,30 +192,21 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
 
     country_code = _country_code_from_address(addr)
 
-    pickup_point_id = _maybe_fill_pickup_point_id_from_user(
-        user=user,
-        shipping_method=shipping_method,
-        pickup_point_id=getattr(payload, "pickup_point_id", None),
-    )
+    if is_digital:
+        pickup_point_id = None
+    else:
+        pickup_point_id = _maybe_fill_pickup_point_id_from_user(
+            user=user,
+            shipping_method=shipping_method,
+            pickup_point_id=getattr(payload, "pickup_point_id", None),
+        )
 
-    # Validate pickup-point selection early (even though we don't persist anything on preview).
-    _validate_and_resolve_pickup(
-        shipping_method=shipping_method,
-        pickup_point_id=pickup_point_id,
-        country_code=country_code,
-    )
-
-    cart = _get_cart_for_request(request, create=False)
-    if cart is None:
-        raise HttpError(400, "Cart is empty")
-    items = list(
-        CartItem.objects.select_related(
-            "variant", "variant__product", "variant__product__tax_class", "offer")
-        .filter(cart=cart)
-        .order_by("id")
-    )
-    if not items:
-        raise HttpError(400, "Cart is empty")
+        # Validate pickup-point selection early (even though we don't persist anything on preview).
+        _validate_and_resolve_pickup(
+            shipping_method=shipping_method,
+            pickup_point_id=pickup_point_id,
+            country_code=country_code,
+        )
 
     try:
         track_event(
@@ -217,8 +252,10 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
     discount_vat = Decimal("0.00")
     discount_gross = Decimal("0.00")
 
-    # Stock check
+    # Stock check (skaitmeninės dovanų kortelės inventoriaus neturi)
     for it in items:
+        if getattr(getattr(it.variant, "product", None), "is_gift_card", False):
+            continue
         if getattr(it, "offer_id", None):
             available = inventory_available_for_offer(offer_id=it.offer_id)
         else:
@@ -286,10 +323,13 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         if discount_net <= 0 and not coupon.is_free_shipping_for(shipping_method=shipping_method):
             raise HttpError(400, "Coupon is not applicable to cart items")
 
-    try:
-        shipping_net = get_shipping_net(shipping_method=shipping_method, country_code=country_code)
-    except ValueError:
-        raise HttpError(400, "Unsupported shipping_method")
+    if is_digital:
+        shipping_net = Decimal("0.00")
+    else:
+        try:
+            shipping_net = get_shipping_net(shipping_method=shipping_method, country_code=country_code)
+        except ValueError:
+            raise HttpError(400, "Unsupported shipping_method")
 
     if coupon and coupon.is_free_shipping_for(shipping_method=shipping_method):
         shipping_net = Decimal("0.00")
@@ -355,6 +395,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
     return CheckoutPreviewOut(
         country_code=country_code,
         shipping_method=shipping_method,
+        is_digital=is_digital,
         items=out_items,
         delivery_window=delivery_window,
         items_total=items_total,
@@ -371,18 +412,40 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
     _ensure_shop_context_if_strict(request)
     user = _require_user(request)
 
-    addr = UserAddress.objects.filter(
-        user=user, id=payload.shipping_address_id).first()
-    if not addr:
+    cart = _get_cart_for_request(request, create=False)
+    if cart is None:
+        raise HttpError(400, "Cart is empty")
+    items = _cart_items_with_products(cart=cart)
+    if not items:
+        raise HttpError(400, "Cart is empty")
+
+    is_digital = _cart_is_digital(items)
+
+    addr = None
+    if payload.shipping_address_id:
+        addr = UserAddress.objects.filter(
+            user=user, id=payload.shipping_address_id).first()
+        if not addr:
+            raise HttpError(404, "Shipping address not found")
+    if addr is None and is_digital:
+        addr = _billing_address_for_user(user)
+    if addr is None:
         raise HttpError(404, "Shipping address not found")
 
-    shipping_method = (payload.shipping_method or "").strip() or "unisend_pickup"
-    pickup_point_id = _maybe_fill_pickup_point_id_from_user(
-        user=user,
-        shipping_method=shipping_method,
-        pickup_point_id=getattr(payload, "pickup_point_id", None),
+    shipping_method = (
+        "digital" if is_digital
+        else (payload.shipping_method or "").strip() or "unisend_pickup"
+    )
+    pickup_point_id = (
+        None if is_digital
+        else _maybe_fill_pickup_point_id_from_user(
+            user=user,
+            shipping_method=shipping_method,
+            pickup_point_id=getattr(payload, "pickup_point_id", None),
+        )
     )
 
+    gift_card_code = (payload.gift_card_code or "").strip()
     payment_method = (payload.payment_method or "").strip() or "bank_transfer"
     payment_country = (
         getattr(addr, "country_code", "") or getattr(addr, "country", "") or ""
@@ -407,9 +470,37 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         from payments import inbank as inbank_svc
         if not inbank_svc.is_configured():
             raise HttpError(400, "Payment method not available")
+        if gift_card_code:
+            # Išsimokėtinis pirkimas finansuoja pilną order sumą —
+            # dalinio mokėjimo su stored-value kortele nepalaiko.
+            raise HttpError(
+                400, "Dovanų kortelės negalima derinti su išsimokėtiniu pirkimu")
     elif provider == PaymentIntent.Provider.GIFT_CARD:
-        if not (payload.gift_card_code or "").strip():
+        if not gift_card_code:
             raise HttpError(400, "gift_card_code is required")
+
+    # Kortelėmis pirkti kortelių draudžiame — kitaip svetimos kortelės
+    # likutis virsta "švaria" kortele tavo vardu.
+    has_gc_lines = any(
+        getattr(getattr(it.variant, "product", None), "is_gift_card", False)
+        for it in items
+    )
+    if gift_card_code and has_gc_lines:
+        raise HttpError(400, "Gift cards cannot be purchased with a gift card")
+
+    # Gavėjo el. paštas — tik kai perkama dovanų kortelė.
+    gift_recipient_email = (
+        (payload.gift_card_recipient_email or "").strip().lower()
+    )
+    if gift_recipient_email:
+        if not has_gc_lines:
+            raise HttpError(
+                400, "gift_card_recipient_email requires a gift card item")
+        from django.core.validators import validate_email
+        try:
+            validate_email(gift_recipient_email)
+        except Exception:
+            raise HttpError(400, "Invalid gift card recipient email")
 
     idem_key = (request.headers.get("Idempotency-Key") or "").strip()
 
@@ -475,23 +566,16 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         ),
     )
 
-    cart = _get_cart_for_request(request, create=False)
-    if cart is None:
-        raise HttpError(400, "Cart is empty")
-    items = list(
-        CartItem.objects.select_related(
-            "variant", "variant__product", "variant__product__tax_class", "offer")
-        .filter(cart=cart)
-        .order_by("id")
-    )
-
     country_code = preview.country_code
 
-    carrier_code, pickup_locker, pickup_snapshot = _validate_and_resolve_pickup(
-        shipping_method=shipping_method,
-        pickup_point_id=pickup_point_id,
-        country_code=country_code,
-    )
+    if is_digital:
+        carrier_code, pickup_locker, pickup_snapshot = "", None, None
+    else:
+        carrier_code, pickup_locker, pickup_snapshot = _validate_and_resolve_pickup(
+            shipping_method=shipping_method,
+            pickup_point_id=pickup_point_id,
+            country_code=country_code,
+        )
 
     ip_address = request.META.get("REMOTE_ADDR")
     user_agent = (request.META.get("HTTP_USER_AGENT") or "").strip()
@@ -566,13 +650,14 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             total_net=preview.order_total.net,
             total_vat=preview.order_total.vat,
             total_gross=preview.order_total.gross,
-            shipping_full_name=addr.full_name,
-            shipping_company=addr.company,
-            shipping_line1=addr.line1,
-            shipping_city=addr.city,
-            shipping_postal_code=addr.postal_code,
-            shipping_country_code=addr.country_code,
-            shipping_phone=addr.phone,
+            shipping_full_name=(addr.full_name if addr else ""),
+            shipping_company=(addr.company if addr else ""),
+            shipping_line1=(addr.line1 if addr else ""),
+            shipping_city=(addr.city if addr else ""),
+            shipping_postal_code=(addr.postal_code if addr else ""),
+            shipping_country_code=(addr.country_code if addr else country_code),
+            shipping_phone=(addr.phone if addr else ""),
+            gift_recipient_email=gift_recipient_email,
         )
 
         if coupon_code:
@@ -688,17 +773,27 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             "total_gross",
         ])
 
-        # Gift card = stored-value payment, debited atomically with the
-        # order inside this transaction. Insufficient balance rolls back
-        # the whole order.
-        if provider == PaymentIntent.Provider.GIFT_CARD:
-            from giftcards.services import debit_card
+        # Gift card = stored-value payment (split tender). Debituojame
+        # min(balance, total) atomiškai su order'iu — likutis eina į
+        # pasirinktą provider'į; pilnas padengimas → provider=gift_card.
+        gc_amount = Decimal("0.00")
+        if gift_card_code:
+            from giftcards.services import (
+                debit_card, get_spendable_card)
+            card = get_spendable_card(gift_card_code, for_update=True)
+            gc_amount = min(card.balance, order.total_gross)
             debit_card(
-                code=payload.gift_card_code,
+                code=gift_card_code,
                 order=order,
-                amount=order.total_gross,
+                amount=gc_amount,
                 user=user,
             )
+
+        remaining = (order.total_gross - gc_amount).quantize(Decimal("0.01"))
+        if remaining <= 0:
+            provider = PaymentIntent.Provider.GIFT_CARD
+        elif provider == PaymentIntent.Provider.GIFT_CARD:
+            raise HttpError(400, "Insufficient gift card balance")
 
         pi = PaymentIntent.objects.create(
             order=order,
@@ -709,15 +804,23 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 else PaymentIntent.Status.PENDING
             ),
             currency="EUR",
-            amount_gross=order.total_gross,
+            amount_gross=(
+                order.total_gross
+                if provider == PaymentIntent.Provider.GIFT_CARD
+                else remaining
+            ),
+            gift_card_amount=gc_amount,
             raw_request={
                 "provider": provider,
+                "gift_card_applied": bool(gc_amount),
                 "created_at": timezone.now().isoformat(),
             },
         )
         if provider == PaymentIntent.Provider.GIFT_CARD:
             order.status = Order.Status.PAID
             order.save(update_fields=["status", "updated_at"])
+            from checkout.services import finalize_paid_order
+            finalize_paid_order(order_id=order.id)
 
         # Clear cart after creating the order.
         CartItem.objects.filter(cart=cart).delete()
@@ -739,6 +842,8 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         from payments import montonio as montonio_svc
         try:
             from api.i18n import get_request_language_code
+            # Split tender: gateway'ui siunčiame tik likutį po GC debit'o.
+            partial = Decimal(pi.amount_gross) != Decimal(order.total_gross)
             res = montonio_svc.create_order_payment(
                 order=order,
                 language_code=get_request_language_code(request),
@@ -747,10 +852,18 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 method=(
                     (payload.montonio_method or "").strip()
                     or "paymentInitiation"),
+                amount_override=(pi.amount_gross if partial else None),
+                description=(
+                    f"Užsakymo #{order.id} likutis" if partial else None),
             )
         except montonio_svc.MontonioError as exc:
             pi.status = PaymentIntent.Status.FAILED
             pi.save(update_fields=["status", "updated_at"])
+            try:
+                from giftcards.services import restore_card_debits_for_order
+                restore_card_debits_for_order(order=order)
+            except Exception:
+                pass
             raise HttpError(502, "Payment provider error") from exc
         pi.external_id = res.uuid
         pi.redirect_url = res.payment_url
@@ -770,6 +883,11 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
         except inbank_svc.InbankError as exc:
             pi.status = PaymentIntent.Status.FAILED
             pi.save(update_fields=["status", "updated_at"])
+            try:
+                from giftcards.services import restore_card_debits_for_order
+                restore_card_debits_for_order(order=order)
+            except Exception:
+                pass
             raise HttpError(502, "Payment provider error") from exc
         pi.external_id = session.uuid
         pi.redirect_url = session.redirect_url

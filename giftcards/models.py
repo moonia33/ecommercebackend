@@ -6,9 +6,10 @@ Every balance change goes through GiftCardTransaction (ledger rows are
 append-only; card.balance is a cached projection kept in sync inside a
 row lock).
 
-Cards are issued by staff via Django admin today; selling them through
-the catalog is a planned phase-2 (gift-card product → issue on paid
-order). Codes are bearer credentials — treat like cash.
+Cards are issued two ways: staff via Django admin, or automatically when
+a paid order contains a `Product.is_gift_card` line (catalog sale —
+`issue_cards_for_paid_order`). Codes are bearer credentials — treat like
+cash.
 """
 
 from __future__ import annotations
@@ -94,6 +95,11 @@ class GiftCardTransaction(models.Model):
     order = models.ForeignKey(
         "checkout.Order", null=True, blank=True,
         on_delete=models.SET_NULL, related_name="gift_card_transactions")
+    # CREDIT reversal'as, atšaukiantis konkretų DEBIT'ą (payment fail/void).
+    # Leidžia restore'ą daryti idempotentiškai — debit'as atšaukiamas max 1×.
+    reverses = models.ForeignKey(
+        "self", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="reversals")
     note = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 

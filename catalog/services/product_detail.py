@@ -301,6 +301,7 @@ def build_product_detail_payload(
         "name": product_loc["name"],
         "description": product_loc["description"],
         "is_active": bool(product.is_active),
+        "is_gift_card": bool(getattr(product, "is_gift_card", False)),
         "product_group_code": product.product_group_code or "",
         "seo_title": product_loc["seo_title"],
         "seo_description": product_loc["seo_description"],

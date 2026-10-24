@@ -649,6 +649,7 @@ def _serialize_cart_items(
 
     for it in items:
         v = it.variant
+        is_gift_card = bool(getattr(getattr(v, "product", None), "is_gift_card", False))
         unit_price, line_total, compare_at, disc_pct, _vat_rate = _cart_item_money(
             item=it,
             country_code=country_code,
@@ -657,7 +658,9 @@ def _serialize_cart_items(
             shop_id=shop_id,
         )
 
-        if it.offer_id:
+        if is_gift_card:
+            stock_available = 999  # skaitmeninė prekė — be inventoriaus
+        elif it.offer_id:
             stock_available = inventory_available_for_offer(offer_id=it.offer_id)
         else:
             stock_available = inventory_available_for_variant(variant_id=v.id)
@@ -708,25 +711,27 @@ def _serialize_cart_items(
                 discount_percent=disc_pct,
                 line_total=line_total,
                 delivery_window=None,
+                is_gift_card=is_gift_card,
             )
         )
 
         # Per-item delivery window
         dw = None
-        try:
-            product = v.product
-            dw = estimate_delivery_window(
-                now=timezone.now(),
-                country_code=country_code,
-                channel=channel,
-                warehouse_id=int(it.offer.warehouse_id) if getattr(it, "offer_id", None) and it.offer and it.offer.warehouse_id else None,
-                product_id=int(product.id) if product else None,
-                brand_id=int(product.brand_id) if product and product.brand_id else None,
-                category_id=int(product.category_id) if product and product.category_id else None,
-                product_group_id=int(getattr(product, "group_id", None)) if product and getattr(product, "group_id", None) else None,
-            )
-        except Exception:
-            dw = None
+        if not is_gift_card:
+            try:
+                product = v.product
+                dw = estimate_delivery_window(
+                    now=timezone.now(),
+                    country_code=country_code,
+                    channel=channel,
+                    warehouse_id=int(it.offer.warehouse_id) if getattr(it, "offer_id", None) and it.offer and it.offer.warehouse_id else None,
+                    product_id=int(product.id) if product else None,
+                    brand_id=int(product.brand_id) if product and product.brand_id else None,
+                    category_id=int(product.category_id) if product and product.category_id else None,
+                    product_group_id=int(getattr(product, "group_id", None)) if product and getattr(product, "group_id", None) else None,
+                )
+            except Exception:
+                dw = None
 
         if dw is not None:
             dw_out = {

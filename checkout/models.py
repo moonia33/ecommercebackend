@@ -300,6 +300,10 @@ class Order(models.Model):
         max_length=2, blank=True, default="")
     shipping_phone = models.CharField(max_length=32, blank=True, default="")
 
+    # Dovanų kortelės gavėjas: jei pirkėjas nori, kad kodas iškeliautų
+    # tiesiai gavėjui (dovana), kitaip — pirkėjo el. paštas.
+    gift_recipient_email = models.EmailField(blank=True, default="")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -663,7 +667,13 @@ class PaymentIntent(models.Model):
         max_length=20, choices=Status.choices, default=Status.PENDING)
 
     currency = models.CharField(max_length=3, default="EUR")
+    # Sumą, kurią surenka šis provider'is. Split tender atveju
+    # (dovanų kortelė + montonio/bank) čia = LIKUTIS, ne order.total_gross.
     amount_gross = models.DecimalField(max_digits=12, decimal_places=2)
+    # Dalyvis sumos, padengtas dovanų kortele (GiftCardTransaction DEBIT'ai
+    # — source of truth; čia snapshot'as ataskaitoms/ops UI).
+    gift_card_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00"))
 
     external_id = models.CharField(max_length=120, blank=True, default="")
     redirect_url = models.URLField(max_length=2048, blank=True, default="")
