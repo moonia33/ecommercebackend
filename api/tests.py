@@ -3258,3 +3258,100 @@ class CmsHubTests(TestCase):
         self.assertEqual(stores[0]["name"], "Žvyno parduotuvė")
         self.assertTrue(stores[0]["is_pickup_point"])
         self.assertEqual(stores[0]["opening_hours"], {"mon": "9-18"})
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class NavigationTests(TestCase):
+    """BE-driven header nav: /cms/navigation resolved tree + promo."""
+
+    def setUp(self):
+        Shop.objects.create(
+            code="hub", name="Hub", primary_domain="ops.local",
+            default_language_code="lt", is_active=True)
+
+    def test_seeded_header_menu_resolves(self):
+        # 0010 seed migration: header + promo menus exist globally.
+        res = self.client.get("/api/v1/cms/navigation",
+                              HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        out = res.json()
+
+        self.assertIn("Nemokamas pristatymas", out["promo"]["label"])
+        labels = {i["label"]: i for i in out["items"]}
+        self.assertIn("Nuolaidos", labels)
+        self.assertEqual(
+            labels["Nuolaidos"]["url"], "/katalogas?sort=discounted")
+        self.assertTrue(labels["Nuolaidos"]["highlight"])
+        self.assertEqual(labels["Nuolaidos"]["badge"], "Akcija")
+        self.assertEqual(labels["Nuolaidos"]["icon"], "percent")
+
+    def test_nested_children_and_category_item(self):
+        from catalog.models import Category
+        from cms.models import Menu, MenuItem, MenuItemTranslation
+
+        menu = Menu.objects.get(code="header", shop=None)
+        cat = Category.objects.create(
+            name="Žvejybos prekės", slug="zvejybos", is_active=True)
+        parent = MenuItem.objects.create(
+            menu=menu, kind="category", category=cat, icon="layers")
+        child = MenuItem.objects.create(
+            menu=menu, parent=parent, kind="link",
+            link_url="/info/pristatymas")
+        MenuItemTranslation.objects.create(
+            item=child, language_code="lt", title="Pristatymas")
+
+        res = self.client.get("/api/v1/cms/navigation",
+                              HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        items = {i["id"]: i for i in res.json()["items"]}
+        p = items[parent.id]
+        self.assertEqual(p["kind"], "category")
+        self.assertEqual(p["url"], "/k/zvejybos")
+        self.assertEqual(p["label"], "Žvejybos prekės")
+        self.assertEqual(len(p["children"]), 1)
+        self.assertEqual(p["children"][0]["label"], "Pristatymas")
+        self.assertEqual(p["children"][0]["url"], "/info/pristatymas")
+
+    def test_cache_invalidates_on_item_save(self):
+        from cms.models import Menu, MenuItem, MenuItemTranslation
+        res = self.client.get("/api/v1/cms/navigation",
+                              HTTP_HOST="ops.local")
+        self.assertFalse(any(
+            i["label"] == "TESTNAV" for i in res.json()["items"]))
+
+        menu = Menu.objects.get(code="header", shop=None)
+        it = MenuItem.objects.create(
+            menu=menu, kind="link", link_url="/testnav")
+        MenuItemTranslation.objects.create(
+            item=it, language_code="lt", title="TESTNAV")
+
+        res = self.client.get("/api/v1/cms/navigation",
+                              HTTP_HOST="ops.local")
+        self.assertTrue(any(
+            i["label"] == "TESTNAV" for i in res.json()["items"]))
+
+    def test_categories_follow_tree_order_not_alphabet(self):
+        """Admin drag (MPTT tree_id/lft) controls the mega-menu order —
+        not alphabetical. Swap tree order manually and assert the
+        endpoint honours it."""
+        from catalog.models import Category, Product, TaxClass
+        tax, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"})
+        a = Category.objects.create(name="AAA", slug="aaa-t", is_active=True)
+        m = Category.objects.create(name="MMM", slug="mmm-t", is_active=True)
+        z = Category.objects.create(name="ZZZ", slug="zzz-t", is_active=True)
+        # Kategorijos be produktų išfiltruojamos — pririšk po vieną.
+        for i, c in enumerate([a, m, z]):
+            Product.objects.create(
+                sku=f"TP-{i}", name="T", slug=f"t-{i}", category=c,
+                tax_class=tax, is_active=True)
+        # Iškeičiam medžio tvarką: ZZZ pirmiausia (ne abėcėlinė).
+        Category.objects.filter(pk=z.pk).update(tree_id=1)
+        Category.objects.filter(pk=a.pk).update(tree_id=3)
+
+        res = self.client.get("/api/v1/catalog/categories",
+                              HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        names = [c["name"] for c in res.json()
+                 if c["name"] in {"AAA", "ZZZ", "MMM"}]
+        self.assertEqual(names, ["ZZZ", "MMM", "AAA"])

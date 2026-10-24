@@ -51,3 +51,34 @@ class StoreLocationOut(Schema):
     services: list[str]
     description: str = ""
     is_pickup_point: bool = False
+
+
+class NavItemOut(Schema):
+    id: int
+    kind: str
+    label: str = ""
+    url: str = ""
+    icon: str = ""
+    badge: str = ""
+    highlight: bool = False
+    new_tab: bool = False
+    show_in: str = "all"
+    children: list["NavItemOut"] = []
+
+
+NavItemOut.model_rebuild()
+
+
+class MegaMenuFeatureOut(Schema):
+    title: str = ""
+    text: str = ""
+    image_url: str = ""
+    url: str = ""
+    cta_label: str = ""
+
+
+class NavigationOut(Schema):
+    promo: NavItemOut | None = None
+    items: list[NavItemOut]
+    # key: root category id (str) or "default"
+    mega_features: dict[str, MegaMenuFeatureOut] = {}

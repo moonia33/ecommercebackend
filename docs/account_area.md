@@ -156,6 +156,48 @@ Public endpoints:
 - `GET /cms/pages/{slug}` — unchanged, used by `/pagalba/[cat]` links
   (FE renders topics on `/info/[slug]`).
 
+## Storefront navigation — `cms` menus
+
+Named menus drive the storefront header (Shopify-style):
+
+- `Menu(code, name, shop?, is_active)` — `code="header"` = bottom nav
+  strip, `code="promo"` = promo ribbon above the header.
+- `MenuItem` (MPTT tree, `DraggableMPTTAdmin`) with polymorphic target:
+  `kind` ∈ `link | category | cms_page | brand | preset`, plus `icon`
+  (Lucide name), `badge`, `highlight`, `open_new_tab`, `show_in`
+  (`all|desktop|mobile`). `MenuItemTranslation(title, badge)`.
+- `preset` targets resolved FE-side (`discounted → /katalogas?sort=
+  discounted`, `new`, `bestsellers`, `all_categories`, `gift_cards`).
+- `MegaMenuFeature(category?, sort_order, image, link_url)` +
+  translations — promo card rendered inside the catalog mega-menu;
+  `category=None` ("default") is the fallback card.
+- Shop scoping: a shop-specific `Menu(code, shop)` wins; the global
+  (`shop=None`) menu is the fallback for every storefront.
+  `MegaMenuFeature`s merge — shop-specific cards override global ones
+  keyed by `category_id`/"default".
+
+`GET /cms/navigation?language_code=lt` →
+`{promo: NavItemOut|null, items: NavItemOut[](tree), mega_features:
+{key: MegaMenuFeatureOut}}` — one request, resolved labels+urls,
+in-memory tree build, `LocMemCache` 1h keyed by
+`shop/language/version`; `post_save/post_delete` on
+Menu/MenuItem/MenuItemTranslation/MegaMenuFeature bumps a version key
+(`cms.signals`) so edits propagate without TTL waits.
+
+Admin drag ordering: `/catalog/categories` orders by `tree_id, lft`
+(`DraggableMPTTAdmin` drag in `CategoryAdmin` reorders the mega-menu);
+`order_insertion_by=["name"]` still applies to NEW roots.
+
+Seed: `cms/migrations/0010_seed_header_menu.py` creates a global
+`header` menu (Nuolaidos/Naujienos/Populiariausios/Visos kategorijos/
+Visos prekės + "Puslapiai" parent with 4 cms_page children) and a
+`promo` ribbon item.
+
+FE: `+layout.server.ts` fetches `getNavigation` alongside categories
+(→ `null` on error); `Header.svelte` renders the promo ribbon, the
+bottom nav strip (dropdowns for children, badge/highlight/icon), and
+`CatalogMenu` shows `mega_features[activeCategory]` / `default`.
+
 ## Frontend routes (Svelte)
 
 Account shell: `/paskyra` + `AccountNav` (layout with sidebar nav).

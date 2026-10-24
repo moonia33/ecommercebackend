@@ -39,7 +39,14 @@ def categories(request):
     used_category_ids = set(
         scoped_ids.values_list("category_id", flat=True).distinct()
     )
-    qs = Category.objects.filter(is_active=True).prefetch_related("translations").order_by("name")
+    # Medžio tvarka (tree_id, lft) — admin'e vilkimas DraggableMPTTAdmin
+    # valdo mega-meniu rikiavimą; order_insertion_by=["name"] tik numatyta
+    # naujų kategorijų padėtis kol jas perrikiuoja.
+    qs = (
+        Category.objects.filter(is_active=True)
+        .prefetch_related("translations")
+        .order_by("tree_id", "lft")
+    )
     out = []
     for c in qs:
         if used_category_ids and c.id not in used_category_ids:
