@@ -345,6 +345,40 @@ class PromoRuleCondition(models.Model):
         related_name="promo_rule_conditions",
     )
 
+    # kind → privalomas FK laukas. Vertintojas skaito TIK jį — kiti
+    # užpildyti FK tyliai ignoruojami, todėl validuojame.
+    _KIND_FIELD = {
+        "category": "category",
+        "brand": "brand",
+        "product": "product",
+        "variant": "variant",
+        "product_group": "product_group",
+        "feature_value": "feature_value",
+    }
+    _ALL_FIELDS = (
+        "category", "brand", "product", "variant",
+        "product_group", "feature_value",
+    )
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        expected = self._KIND_FIELD.get(str(self.kind))
+        if expected and not getattr(self, f"{expected}_id", None):
+            raise ValidationError(
+                {expected: f"Kind „{self.kind}“ reikalauja užpildyti šį lauką."}
+            )
+        extra = [
+            f for f in self._ALL_FIELDS
+            if f != expected and getattr(self, f"{f}_id", None)
+        ]
+        if extra:
+            raise ValidationError(
+                "Skaitomas tik Kind'ui atitinkantis laukas — kiti ignoruojami. "
+                "AND logikai pridėkite atskirą eilutę TOJE PAČIOJE grupėje "
+                f"(pvz. Category + Brand). Nereikalingi laukai: {', '.join(extra)}."
+            )
+
     class Meta:
         ordering = ["id"]
         indexes = [
