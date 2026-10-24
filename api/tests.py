@@ -3284,17 +3284,24 @@ class NavigationTests(TestCase):
         self.assertTrue(labels["Nuolaidos"]["highlight"])
         self.assertEqual(labels["Nuolaidos"]["badge"], "Akcija")
         self.assertEqual(labels["Nuolaidos"]["icon"], "percent")
+        # 0013 trim: generic catalog entries + Puslapiai removed —
+        # categories live in the catalog menu, pages in the footer.
+        self.assertNotIn("Visos kategorijos", labels)
+        self.assertNotIn("Visos prekės", labels)
+        self.assertNotIn("Puslapiai", labels)
+        self.assertIn("Pagalba", labels)
 
-    def test_seeded_info_pages_and_dropdown(self):
-        # 0011 seed: cms pages exist per shop + "Puslapiai" dropdown.
+    def test_seeded_info_pages_resolve_with_global_fallback(self):
+        # 0011 seed: info pages reachable via global fallback; the
+        # header dropdown was dropped in 0013 (footer links remain).
         res = self.client.get("/api/v1/cms/navigation",
                               HTTP_HOST="ops.local")
         self.assertEqual(res.status_code, 200)
-        parent = next(
-            i for i in res.json()["items"] if i["label"] == "Puslapiai")
-        urls = [c["url"] for c in parent["children"]]
-        for slug in ("pristatymas", "grazinimas", "duk", "kontaktai"):
-            self.assertIn(f"/info/{slug}", urls)
+        footer_urls = [
+            c["url"] for f in res.json()["footers"]
+            for c in f["children"]]
+        self.assertIn("/info/pristatymas", footer_urls)
+        self.assertIn("/info/duk", footer_urls)
 
         page = self.client.get("/api/v1/cms/pages/pristatymas",
                                HTTP_HOST="ops.local")
