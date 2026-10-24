@@ -112,6 +112,14 @@ def seed(apps, schema_editor):
                 MenuItemTranslation.objects.create(
                     item=child, language_code=lang, title=t)
 
+    # Historical models don't fire post_save — bump the nav cache
+    # version manually so storefronts see the new menus immediately.
+    try:
+        from django.core.cache import cache
+        cache.incr("cms:nav:ver")
+    except (ImportError, ValueError):
+        pass
+
 
 def unseed(apps, schema_editor):
     CmsPage = apps.get_model("cms", "CmsPage")

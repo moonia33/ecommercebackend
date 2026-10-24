@@ -177,12 +177,21 @@ Named menus drive the storefront header (Shopify-style):
   keyed by `category_id`/"default".
 
 `GET /cms/navigation?language_code=lt` →
-`{promo: NavItemOut|null, items: NavItemOut[](tree), mega_features:
-{key: MegaMenuFeatureOut}}` — one request, resolved labels+urls,
-in-memory tree build, `LocMemCache` 1h keyed by
+`{promo, items[](tree), footers[](tree), bottom_links[],
+mega_features: {key: MegaMenuFeatureOut}}` — one request, resolved
+labels+urls, in-memory tree build, `LocMemCache` 1h keyed by
 `shop/language/version`; `post_save/post_delete` on
 Menu/MenuItem/MenuItemTranslation/MegaMenuFeature bumps a version key
-(`cms.signals`) so edits propagate without TTL waits.
+(`cms.signals`) so edits propagate without TTL waits. Data-migration
+seeds can't fire signals — they bump `cms:nav:ver` manually.
+
+Menu codes: `header` (bottom nav strip), `promo` (ribbon),
+`footer` (roots = column headers, children = links; tel:/mailto:
+URLs render as links), `footer_bottom` (legal strip). `MenuItem.
+show_in` filters `desktop`/`mobile`/`all` — desktop strip hides
+`mobile` items, the mobile drawer hides `desktop` ones.
+`CmsPage` detail uses the same shop-wins + global-fallback
+semantics as menus.
 
 Admin drag ordering: `/catalog/categories` orders by `tree_id, lft`
 (`DraggableMPTTAdmin` drag in `CategoryAdmin` reorders the mega-menu);
@@ -197,6 +206,11 @@ FE: `+layout.server.ts` fetches `getNavigation` alongside categories
 (→ `null` on error); `Header.svelte` renders the promo ribbon, the
 bottom nav strip (dropdowns for children, badge/highlight/icon), and
 `CatalogMenu` shows `mega_features[activeCategory]` / `default`.
+`Footer.svelte` renders `footers` columns + `bottom_links` strip.
+Mobile (md-): `BottomTabBar` (Pradžia/Katalogas/Krepšelis badge/
+Mėgstamos/Paskyra) + `MobileDrawer` — drill-down levels with back,
+"Visos X" row, ≥48px rows, category thumbnails; the desktop mega
+menu and nav strip are hidden on mobile.
 
 ## Frontend routes (Svelte)
 

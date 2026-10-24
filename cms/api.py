@@ -314,12 +314,13 @@ def cms_navigation(request, language_code: str | None = None):
                 return mine
         return base.filter(shop__isnull=True).first()
 
-    # Header tree — one query for the whole forest, recurse in memory.
-    items_out: list[NavItemOut] = []
-    header = _menu("header")
-    if header is not None:
+    # Header/footer trees — one query per menu, recurse in memory.
+    def _menu_tree(code: str) -> list[NavItemOut]:
+        menu = _menu(code)
+        if menu is None:
+            return []
         all_items = list(
-            header.items.filter(is_active=True)
+            menu.items.filter(is_active=True)
             .select_related("category", "brand", "cms_page")
             .prefetch_related(
                 "translations", "category__translations",
@@ -339,7 +340,11 @@ def cms_navigation(request, language_code: str | None = None):
                 _build(ch) for ch in by_parent.get(item.id, [])]
             return out
 
-        items_out = [_build(r) for r in by_parent.get(None, [])]
+        return [_build(r) for r in by_parent.get(None, [])]
+
+    items_out = _menu_tree("header")
+    footers_out = _menu_tree("footer")
+    bottom_out = _menu_tree("footer_bottom")
 
     # Promo strip — first active root item of the "promo" menu.
     promo_out = None
@@ -381,7 +386,8 @@ def cms_navigation(request, language_code: str | None = None):
         )
 
     out = NavigationOut(
-        promo=promo_out, items=items_out, mega_features=mega_features)
+        promo=promo_out, items=items_out, footers=footers_out,
+        bottom_links=bottom_out, mega_features=mega_features)
     cache.set(cache_key, out, 3600)
     return out
 

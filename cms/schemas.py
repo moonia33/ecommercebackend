@@ -80,5 +80,9 @@ class MegaMenuFeatureOut(Schema):
 class NavigationOut(Schema):
     promo: NavItemOut | None = None
     items: list[NavItemOut]
+    # Footer columns: roots = column headers, children = links.
+    footers: list[NavItemOut] = []
+    # Legal/bottom strip links under the footer columns.
+    bottom_links: list[NavItemOut] = []
     # key: root category id (str) or "default"
     mega_features: dict[str, MegaMenuFeatureOut] = {}

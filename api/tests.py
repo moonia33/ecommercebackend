@@ -3302,6 +3302,22 @@ class NavigationTests(TestCase):
         self.assertEqual(page.json()["title"], "Pristatymas")
         self.assertTrue(page.json()["content_blocks"])
 
+    def test_footer_menus_and_bottom_links(self):
+        res = self.client.get("/api/v1/cms/navigation",
+                              HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200)
+        out = res.json()
+        cols = {c["label"]: c for c in out["footers"]}
+        self.assertIn("Pagalba", cols)
+        self.assertIn("Katalogas", cols)
+        # Stulpelio vaikai turi išrezuol'intus URL'us.
+        help_urls = [c["url"] for c in cols["Pagalba"]["children"]]
+        self.assertIn("/pagalba", help_urls)
+        self.assertIn("/info/duk", help_urls)
+        bottom = {b["label"]: b["url"] for b in out["bottom_links"]}
+        self.assertEqual(bottom.get("Taisyklės"), "/info/taisykles")
+        self.assertEqual(bottom.get("Privatumas"), "/info/privatumas")
+
     def test_nested_children_and_category_item(self):
         from catalog.models import Category
         from cms.models import Menu, MenuItem, MenuItemTranslation
