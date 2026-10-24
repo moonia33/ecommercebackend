@@ -193,6 +193,8 @@ def find_best_promo_rule(
     rules: list | None = None,
     shop_id: int | None = None,
 ):
+    from promotions.models import PromoRule
+
     candidates = rules if rules is not None else load_active_promo_rules(channel=channel, shop_id=shop_id)
 
     if customer_group_id is None:

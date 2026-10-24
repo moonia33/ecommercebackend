@@ -3495,6 +3495,23 @@ class PromoRuleScopeTests(TestCase):
                 variant_id=self.variant.id, customer_group_id=None,
                 shop_id=sid))
 
+    def test_legacy_scope_category_covers_subtree(self):
+        """Taisyklė be condition groups (legacy scope=category) — irgi
+        subtree match, ir neturi mesti NameError."""
+        from promotions.models import PromoRule
+        from promotions.services import find_best_promo_rule
+        PromoRule.objects.create(
+            name="Legacy", is_active=True, priority=5,
+            percent_off="10", scope=PromoRule.Scope.CATEGORY,
+            category=self.parent)
+        rule = find_best_promo_rule(
+            channel="normal", category_id=self.child.id,
+            brand_id=self.brand.id, product_id=self.product.id,
+            variant_id=self.variant.id, customer_group_id=None,
+            shop_id=self.shop.id)
+        self.assertIsNotNone(rule)
+        self.assertEqual(rule.name, "Legacy")
+
     def test_catalog_listing_shows_promo_discount(self):
         """End-to-end per API: katalogo sąraše prekė turi compare_at kainą."""
         self._make_rule()
