@@ -602,6 +602,9 @@ class FeatureTranslationInline(admin.StackedInline):
 class FeatureAdmin(admin.ModelAdmin):
     list_display = ("code", "name", "is_filterable",
                     "allows_multiple", "recommendation_boost", "is_active")
+    # is_filterable perjungimas tiesiai iš sąrašo — spec-only features
+    # (sudėtis, material-fabrics) nereikia atidarinėti po vieną.
+    list_editable = ("is_filterable",)
     list_filter = ("is_filterable", "allows_multiple",
                    "recommendation_boost", "is_active")
     search_fields = ("code", "name")

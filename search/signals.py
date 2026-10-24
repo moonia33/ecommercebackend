@@ -8,6 +8,7 @@ from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
 from catalog.models import (
+    Feature,
     FeatureValue,
     InventoryItem,
     Product,
@@ -122,6 +123,32 @@ def variant_feature_saved(sender, instance: VariantFeatureValue, **kwargs):
 @receiver(post_delete, sender=VariantFeatureValue)
 def variant_feature_deleted(sender, instance: VariantFeatureValue, **kwargs):
     _enqueue(instance.variant.product_id if instance.variant_id else None)
+
+
+@receiver(post_save, sender=Feature)
+def feature_saved(sender, instance: Feature, **kwargs):
+    """is_filterable flips change the facet key set — reindex products
+    carrying this feature (product-level or variant-level)."""
+    if search_sync_suppressed():
+        return
+    product_ids = (
+        set(instance.product_values.values_list("product_id", flat=True)[:2000])
+        | set(
+            instance.variant_values.values_list(
+                "variant__product_id", flat=True)[:2000])
+    )
+    if not product_ids:
+        return
+    from .services import search_available
+    if not search_available():
+        return
+
+    def _dispatch(ids=tuple(product_ids)):
+        from config.celery import safe_delay
+        from .tasks import sync_products_task
+        safe_delay(sync_products_task, list(ids))
+
+    transaction.on_commit(_dispatch)
 
 
 @receiver(post_save, sender=FeatureValue)

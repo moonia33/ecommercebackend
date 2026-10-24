@@ -321,6 +321,79 @@ class ProductFeatureNumericOutTests(TestCase):
         self.assertEqual(f["unit"], "g")
 
 
+class EngineFacetsTests(TestCase):
+    """Typesense facet_by counts kelias: used-set'ai iš indekso vietoj
+    ORM distinct-scan'ų; ne-filterable ir stale kodai atmesti."""
+
+    def setUp(self):
+        self.brand = Brand.objects.create(name="B", slug="b", is_active=True)
+        self.cat = Category.objects.create(name="C", slug="c", is_active=True)
+        self.product = Product.objects.create(
+            sku="E-1", name="E", slug="e-1", is_active=True,
+            brand=self.brand, category=self.cat,
+        )
+        self.feature = Feature.objects.create(
+            code="weight", name="Weight", is_active=True, is_filterable=True,
+        )
+        self.fv = FeatureValue.objects.create(
+            feature=self.feature, value="85-g")
+        ProductFeatureValue.objects.create(
+            product=self.product, feature=self.feature, feature_value=self.fv,
+        )
+        # Spec-only feature — neturi atsirasti facetuose net jei indeksas
+        # jį turi (stale dokumentai).
+        self.spec_feature = Feature.objects.create(
+            code="material-fabric", name="Material", is_active=True,
+            is_filterable=False,
+        )
+        self.spec_fv = FeatureValue.objects.create(
+            feature=self.spec_feature, value="cotton")
+        ProductFeatureValue.objects.create(
+            product=self.product, feature=self.spec_feature,
+            feature_value=self.spec_fv,
+        )
+
+    def _engine_counts(self):
+        return {
+            "brand_id": {str(self.brand.id): 1},
+            "category_ids": {str(self.cat.id): 1},
+            "group_id": {},
+            "feature_facets": {
+                "weight:85-g": 1,
+                "material-fabric:cotton": 1,  # spec-only — atmestas
+                "ghost-code:zz": 1,            # indekse likęs stale kodas
+            },
+        }
+
+    def test_engine_counts_match_orm_payload(self):
+        ids = Product.objects.filter(is_active=True).values_list("id", flat=True)
+        orm = build_facets_payload(
+            product_ids=ids, selected_category=None, language_code="lt")
+        eng = build_facets_payload(
+            product_ids=ids, selected_category=None, language_code="lt",
+            engine_counts=self._engine_counts())
+        self.assertEqual(
+            [f["code"] for f in eng["features"]],
+            [f["code"] for f in orm["features"]],
+        )
+        self.assertEqual(
+            {v["value"] for f in eng["features"] for v in f["values"]},
+            {v["value"] for f in orm["features"] for v in f["values"]},
+        )
+        self.assertEqual(
+            [b["id"] for b in eng["brands"]],
+            [b["id"] for b in orm["brands"]],
+        )
+
+    def test_spec_only_and_stale_codes_dropped(self):
+        ids = Product.objects.filter(is_active=True).values_list("id", flat=True)
+        payload = build_facets_payload(
+            product_ids=ids, selected_category=None, language_code="lt",
+            engine_counts=self._engine_counts())
+        codes = {f["code"] for f in payload["features"]}
+        self.assertEqual(codes, {"weight"})
+
+
 class FacetCodeMergeTests(TestCase):
     """Feature ir OptionType su tuo pačiu code -> vienas facetas."""
 

@@ -406,6 +406,10 @@ API_BASE_PATH = env("API_BASE_PATH", default=env(
 # Ops katalogo importai gali būti kelių MB JSON dokumentai.
 DATA_UPLOAD_MAX_MEMORY_SIZE = env.int(
     "DATA_UPLOAD_MAX_MEMORY_SIZE", default=100 * 1024 * 1024)
+# Feature su šimtais FeatureValue inline eilučių (pvz. materials/fabrics)
+# viršija default 1000 laukų POST'e.
+DATA_UPLOAD_MAX_NUMBER_FIELDS = env.int(
+    "DATA_UPLOAD_MAX_NUMBER_FIELDS", default=10000)
 
 # --- Promotions/Coupons policy ---
 COUPON_ALLOWED_CHANNELS = [c.strip().lower() for c in env.list("COUPON_ALLOWED_CHANNELS", default=["normal"]) if c.strip()]

@@ -35,8 +35,17 @@ def _collect_num_stats(
         st["unit"] = st["unit"] or unit or attr_unit or ""
 
 
-def build_facets_payload(*, product_ids, selected_category: Category | None, language_code: str | None = None):
-    if not product_ids:
+def build_facets_payload(
+    *,
+    product_ids,
+    selected_category: Category | None,
+    language_code: str | None = None,
+    engine_counts: dict[str, dict[str, int]] | None = None,
+):
+    """`engine_counts` = Typesense facet_by counts ({field: {val: count}}).
+    Kai pateikti — brand/category/feature/group used-set'ai imami iš
+    indekso, neskenuojant PFV/VFV lentelių per visą katalogą."""
+    if product_ids is None and not engine_counts:
         return {
             "categories": [],
             "brands": [],
@@ -53,11 +62,16 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
     categories_out = []
     cat_ids = list(cat_qs.values_list("id", flat=True))
     if cat_ids:
-        product_category_ids = set(
-            Product.objects.filter(is_active=True, id__in=product_ids)
-            .exclude(category_id__isnull=True)
-            .values_list("category_id", flat=True)
-        )
+        if engine_counts is not None:
+            product_category_ids = {
+                int(k) for k in engine_counts.get("category_ids", {})
+            }
+        else:
+            product_category_ids = set(
+                Product.objects.filter(is_active=True, id__in=product_ids)
+                .exclude(category_id__isnull=True)
+                .values_list("category_id", flat=True)
+            )
         # One query for the whole tree; walk parents in memory instead of
         # recursive descendant lookups per root category.
         parent_of = dict(
@@ -105,34 +119,59 @@ def build_facets_payload(*, product_ids, selected_category: Category | None, lan
                 }
             )
 
-    brands_qs = Brand.objects.filter(is_active=True, products__id__in=product_ids).prefetch_related("translations").distinct().order_by("name")
-    groups_qs = ProductGroup.objects.filter(is_active=True, products__id__in=product_ids).distinct().order_by("name")
+    if engine_counts is not None:
+        brand_ids = {int(k) for k in engine_counts.get("brand_id", {})}
+        group_ids = {int(k) for k in engine_counts.get("group_id", {})}
+        brands_qs = Brand.objects.filter(is_active=True, id__in=brand_ids).prefetch_related("translations").order_by("name")
+        groups_qs = ProductGroup.objects.filter(is_active=True, id__in=group_ids).order_by("name")
+    else:
+        brands_qs = Brand.objects.filter(is_active=True, products__id__in=product_ids).prefetch_related("translations").distinct().order_by("name")
+        groups_qs = ProductGroup.objects.filter(is_active=True, products__id__in=product_ids).distinct().order_by("name")
 
-    feature_ids = set(
-        ProductFeatureValue.objects.filter(product_id__in=product_ids)
-        .values_list("feature_id", flat=True)
-        .distinct()
-    ) | set(
-        VariantFeatureValue.objects.filter(variant__product_id__in=product_ids)
-        .values_list("feature_id", flat=True)
-        .distinct()
-    )
-    features_qs = Feature.objects.filter(is_active=True, is_filterable=True, id__in=feature_ids).prefetch_related("translations", "values", "values__translations", "values__groups").order_by("sort_order", "code")
-    # Single grouped query for all feature values used by the filtered products —
-    # product-level rows plus variant-level rows (values differ per variant).
-    used_vals_by_feature: dict[int, set[str]] = {}
-    for fid, val in (
-        ProductFeatureValue.objects.filter(product_id__in=product_ids)
-        .values_list("feature_id", "feature_value__value")
-        .distinct()
-    ):
-        used_vals_by_feature.setdefault(int(fid), set()).add(val)
-    for fid, val in (
-        VariantFeatureValue.objects.filter(variant__product_id__in=product_ids)
-        .values_list("feature_id", "feature_value__value")
-        .distinct()
-    ):
-        used_vals_by_feature.setdefault(int(fid), set()).add(val)
+    if engine_counts is not None:
+        # feature_facets = "<code>:<value>" — split'as TIK pirmame ":",
+        # nes value gali turėti dvitaškių (pvz. "ratio: 7.3:1").
+        feature_pairs: dict[str, set[str]] = {}
+        for key in engine_counts.get("feature_facets", {}):
+            code, _, val = key.partition(":")
+            if code:
+                feature_pairs.setdefault(code, set()).add(val)
+        features_qs = Feature.objects.filter(
+            is_active=True, is_filterable=True,
+            code__in=set(feature_pairs),
+        ).prefetch_related(
+            "translations", "values", "values__translations", "values__groups",
+        ).order_by("sort_order", "code")
+        used_vals_by_feature: dict[int, set[str]] = {
+            int(f.id): set(feature_pairs.get(f.code, set()))
+            for f in features_qs
+        }
+    else:
+        feature_ids = set(
+            ProductFeatureValue.objects.filter(product_id__in=product_ids)
+            .values_list("feature_id", flat=True)
+            .distinct()
+        ) | set(
+            VariantFeatureValue.objects.filter(variant__product_id__in=product_ids)
+            .values_list("feature_id", flat=True)
+            .distinct()
+        )
+        features_qs = Feature.objects.filter(is_active=True, is_filterable=True, id__in=feature_ids).prefetch_related("translations", "values", "values__translations", "values__groups").order_by("sort_order", "code")
+        # Single grouped query for all feature values used by the filtered products —
+        # product-level rows plus variant-level rows (values differ per variant).
+        used_vals_by_feature = {}
+        for fid, val in (
+            ProductFeatureValue.objects.filter(product_id__in=product_ids)
+            .values_list("feature_id", "feature_value__value")
+            .distinct()
+        ):
+            used_vals_by_feature.setdefault(int(fid), set()).add(val)
+        for fid, val in (
+            VariantFeatureValue.objects.filter(variant__product_id__in=product_ids)
+            .values_list("feature_id", "feature_value__value")
+            .distinct()
+        ):
+            used_vals_by_feature.setdefault(int(fid), set()).add(val)
     features_out: list[FeatureOut] = []
     # Per canonical code numeric bounds across used values — feeds the
     # 'range' widget facets (CategoryFacet config).

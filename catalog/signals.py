@@ -3,7 +3,22 @@ from __future__ import annotations
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
-from .models import Brand, Category, InventoryItem, Product, ProductImage
+from .models import (
+    Brand,
+    Category,
+    CategoryFacet,
+    Feature,
+    FeatureValue,
+    InventoryItem,
+    OptionType,
+    OptionValue,
+    Product,
+    ProductFeatureValue,
+    ProductGroup,
+    ProductImage,
+    VariantFeatureValue,
+    VariantOptionValue,
+)
 
 
 def _bump_catalog_categories_cache(**kwargs):
@@ -16,6 +31,16 @@ def _bump_catalog_categories_cache(**kwargs):
         cache.set("catalog:categories:ver", 2)
 
 
+def _bump_catalog_facets_cache(**kwargs):
+    """Facets endpoint'o cache versija — feature/option/facet konfigūracijos
+    ir prekių priskyrimų pakeitimai matomi iškart, ne per TTL."""
+    from django.core.cache import cache
+    try:
+        cache.incr("catalog:facets:ver")
+    except ValueError:
+        cache.set("catalog:facets:ver", 2)
+
+
 for _sender in (Category, Product):
     post_save.connect(
         _bump_catalog_categories_cache, sender=_sender,
@@ -23,6 +48,19 @@ for _sender in (Category, Product):
     post_delete.connect(
         _bump_catalog_categories_cache, sender=_sender,
         dispatch_uid=f"catcache_del_{_sender.__name__}")
+
+
+for _sender in (
+    Product, Brand, Category, CategoryFacet, Feature, FeatureValue,
+    ProductFeatureValue, VariantFeatureValue, OptionType, OptionValue,
+    VariantOptionValue, ProductGroup,
+):
+    post_save.connect(
+        _bump_catalog_facets_cache, sender=_sender,
+        dispatch_uid=f"facetcache_save_{_sender.__name__}")
+    post_delete.connect(
+        _bump_catalog_facets_cache, sender=_sender,
+        dispatch_uid=f"facetcache_del_{_sender.__name__}")
 
 
 @receiver(pre_save, sender=InventoryItem)

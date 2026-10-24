@@ -317,44 +317,117 @@ def product_facets(
             feature, option, range,
         )).encode()
     ).hexdigest()
+    facets_ver = cache.get("catalog:facets:ver", 1)
     cache_key = (
         f"catalog:facets:v1:{shop_id or 'x'}:{language_code}:"
-        f"{country_code}:{channel}:{params_hash}"
+        f"{country_code}:{channel}:{params_hash}:v{facets_ver}"
     )
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
-    visibility = _visibility_for_channel(channel)
-    _offer_price_expr, offer_filter = offer_price_exprs(visibility)
+    # Typesense facet_by kelias: kai nėra feature/option/range filtrų,
+    # used-set'ai (brand/category/group/feature values) imami iš indekso —
+    # ORM distinct-scan'ai per visą katalogą praleidžiami.
+    engine_counts = None
+    selected_category = None
+    if not (feature or option or range):
+        from catalog.localization import (
+            resolve_brand_by_slug, resolve_category_by_slug)
+        from catalog.models import ProductGroup
+        from catalog.services.catalog_core import descendant_category_ids
+        from search.services import search_facet_counts
 
-    qs = Product.objects.filter(is_active=True).annotate(
-        _has_offer=Count("id", filter=offer_filter)
-    )
-    qs = apply_shop_product_scope(qs=qs, shop_id=shop_id)
-    if channel == "outlet":
-        qs = qs.filter(_has_offer__gt=0)
+        extra = []
+        if category_slug:
+            selected_category = resolve_category_by_slug(
+                slug=category_slug, language_code=language_code,
+                is_active=True)
+            if not selected_category:
+                raise HttpError(404, "Category not found")
+            ids = descendant_category_ids(root_id=int(selected_category.id))
+            extra.append("category_ids:=[" + ",".join(str(i) for i in ids) + "]")
+        if brand_slug:
+            brand = resolve_brand_by_slug(
+                slug=brand_slug, language_code=language_code, is_active=True)
+            if not brand:
+                raise HttpError(404, "Brand not found")
+            extra.append(f"brand_id:={int(brand.id)}")
+        if group_code:
+            group = ProductGroup.objects.filter(
+                code=group_code, is_active=True).first()
+            if not group:
+                raise HttpError(404, "Product group not found")
+            extra.append(f"group_id:={int(group.id)}")
 
-    qs, q, _engine_ordered = _apply_search_engine(
-        qs, q=q, shop_id=shop_id, channel=channel, sort=None,
-        range_filter=range)
+        engine_counts = search_facet_counts(
+            q=q,
+            shop_id=shop_id,
+            channel=channel,
+            facet_fields=["brand_id", "category_ids", "group_id", "feature_facets"],
+            extra_filters=extra,
+        )
 
-    qs, selected_category = apply_catalog_filters(
-        qs=qs,
-        q=q,
-        category_slug=category_slug,
-        brand_slug=brand_slug,
-        language_code=language_code,
-        group_code=group_code,
-        feature=feature,
-        option=option,
-        range_filter=range,
-    )
+    if engine_counts is not None:
+        # Option type'ų indekse nėra — vienintelė ORM dalis lieka
+        # product_ids subquery VOV skanui (lengva, ~0.1s).
+        visibility = _visibility_for_channel(channel)
+        _offer_price_expr, offer_filter = offer_price_exprs(visibility)
+        qs = Product.objects.filter(is_active=True).annotate(
+            _has_offer=Count("id", filter=offer_filter)
+        )
+        qs = apply_shop_product_scope(qs=qs, shop_id=shop_id)
+        if channel == "outlet":
+            qs = qs.filter(_has_offer__gt=0)
+        qs, q, _engine_ordered = _apply_search_engine(
+            qs, q=q, shop_id=shop_id, channel=channel, sort=None,
+            range_filter=range)
+        qs, _sc = apply_catalog_filters(
+            qs=qs, q=q, category_slug=category_slug,
+            brand_slug=brand_slug, language_code=language_code,
+            group_code=group_code, feature=feature, option=option,
+            range_filter=range)
+        product_ids = qs.values_list("id", flat=True)
+        # Stale-index guard: indeksas gali atsilikti nuo DB — jei ORM turi
+        # prekių, bet counts tušti, facetai eitų tušti (klaidingai).
+        # Tada fallback į ORM skaičiavimą.
+        if not any(engine_counts.get(f) for f in (
+                "brand_id", "category_ids", "group_id", "feature_facets")
+        ) and qs.exists():
+            engine_counts = None
+    else:
+        visibility = _visibility_for_channel(channel)
+        _offer_price_expr, offer_filter = offer_price_exprs(visibility)
+
+        qs = Product.objects.filter(is_active=True).annotate(
+            _has_offer=Count("id", filter=offer_filter)
+        )
+        qs = apply_shop_product_scope(qs=qs, shop_id=shop_id)
+        if channel == "outlet":
+            qs = qs.filter(_has_offer__gt=0)
+
+        qs, q, _engine_ordered = _apply_search_engine(
+            qs, q=q, shop_id=shop_id, channel=channel, sort=None,
+            range_filter=range)
+
+        qs, selected_category = apply_catalog_filters(
+            qs=qs,
+            q=q,
+            category_slug=category_slug,
+            brand_slug=brand_slug,
+            language_code=language_code,
+            group_code=group_code,
+            feature=feature,
+            option=option,
+            range_filter=range,
+        )
+        product_ids = qs.values_list("id", flat=True)
 
     payload = build_facets_payload(
-        product_ids=qs.values_list("id", flat=True),
+        product_ids=product_ids,
         selected_category=selected_category,
         language_code=language_code,
+        engine_counts=engine_counts,
     )
     cache.set(
         cache_key, payload,

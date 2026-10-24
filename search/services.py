@@ -272,10 +272,13 @@ def product_document(product, *, numeric_codes=None) -> dict | None:
     price_normal = _vis_price(InventoryItem.OfferVisibility.NORMAL)
     price_outlet = _vis_price(InventoryItem.OfferVisibility.OUTLET)
 
+    # Only filterable features produce facet keys; spec-only data
+    # (e.g. material/fabric composition) still enters search_text.
     feature_facets = [
         f"{pfv.feature.code}:{pfv.feature_value.value}"
         for pfv in p.feature_values.select_related("feature", "feature_value")
-        if pfv.feature.is_active and pfv.feature_value.is_active
+        if pfv.feature.is_active and pfv.feature.is_filterable
+        and pfv.feature_value.is_active
     ]
     # Variant-level values are facets too (weight/size differ per variant);
     # a product is findable by any of its variants' feature values.
@@ -283,7 +286,8 @@ def product_document(product, *, numeric_codes=None) -> dict | None:
         f"{vfv.feature.code}:{vfv.feature_value.value}"
         for v in variants
         for vfv in v.feature_values.all()
-        if vfv.feature.is_active and vfv.feature_value.is_active
+        if vfv.feature.is_active and vfv.feature.is_filterable
+        and vfv.feature_value.is_active
     ]
 
     search_bits = [
@@ -292,7 +296,8 @@ def product_document(product, *, numeric_codes=None) -> dict | None:
         p.brand.name if p.brand else "",
         p.category.name if p.category else "",
         *(c.name for c in (p.category.get_ancestors() if p.category else [])),
-        *(f.split(":", 1)[1] for f in feature_facets),
+        *(pfv.feature_value.value for pfv in p.feature_values.select_related("feature_value")),
+        *(vfv.feature_value.value for v in variants for vfv in v.feature_values.all()),
         _strip_tags(getattr(p, "description", ""))[:2000],
     ]
     search_text = " ".join(b for b in search_bits if b)
@@ -643,6 +648,54 @@ def search_suggest(
             "sku": doc.get("sku") or "",
             "sku_html": sku_html,
         })
+    return out
+
+
+def search_facet_counts(
+    *,
+    q: str | None,
+    shop_id: int | None,
+    channel: str,
+    facet_fields: list[str],
+    extra_filters: list[str] | None = None,
+) -> dict[str, dict[str, int]] | None:
+    """Typesense `facet_by` counts — {field: {value: count}}.
+
+    Skirtas katalogo facet'ams: pakeičia brangius ORM distinct-scan'us
+    per viso katalogo PFV/VFV eilutes. None = search nepasiekiamas.
+    """
+    client = get_client()
+    if client is None:
+        return None
+
+    filters = [
+        "vis_outlet:=true" if channel == "outlet" else "vis_normal:=true"
+    ]
+    if shop_id:
+        filters.append(f"shop_ids:=[{int(shop_id)}]")
+    filters += extra_filters or []
+
+    params = {
+        "q": (q or "").strip() or "*",
+        "query_by": "name",
+        "filter_by": " && ".join(filters),
+        "per_page": 0,
+        "facet_by": ",".join(facet_fields),
+        "max_facet_values": 5000,
+    }
+
+    try:
+        res = client.collections[COLLECTION_NAME].documents.search(params)
+    except Exception as exc:
+        note_search_failure(exc)
+        return None
+
+    out: dict[str, dict[str, int]] = {}
+    for fc in res.get("facet_counts", []) or []:
+        out[fc.get("field_name") or ""] = {
+            str(v["value"]): int(v.get("count") or 0)
+            for v in fc.get("counts", [])
+        }
     return out
 
 

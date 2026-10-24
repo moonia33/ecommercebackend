@@ -3689,3 +3689,78 @@ class ReverseChargeCheckoutTests(TestCase):
         item = res.json()["items"][0]
         self.assertEqual(Decimal(str(item["line_total"]["vat"])),
                          Decimal("1.90"))
+
+
+class FacetsEngineFallbackTests(TestCase):
+    """Typesense facet counts kelias: tušti counts + ne tuščias ORM -> fallback."""
+
+    def setUp(self):
+        from catalog.models import Feature, FeatureValue, ProductFeatureValue
+        self.product = Product.objects.create(
+            sku="F-1", name="F", slug="f-1", is_active=True,
+        )
+        Variant.objects.create(
+            product=self.product, sku="F-1-A", price_eur="9.99",
+            is_active=True,
+        )
+        self.feature = Feature.objects.create(
+            code="weight", name="Weight", is_active=True, is_filterable=True,
+        )
+        self.fv = FeatureValue.objects.create(feature=self.feature, value="85-g")
+        ProductFeatureValue.objects.create(
+            product=self.product, feature=self.feature, feature_value=self.fv,
+        )
+
+    def _facets(self):
+        return self.client.get("/api/v1/catalog/products/facets")
+
+    def test_empty_engine_counts_fall_back_to_orm(self):
+        """Indeksas atsilikęs/tuščias, bet ORM turi prekių -> ORM facetai."""
+        from unittest.mock import patch
+        from django.core.cache import cache
+        cache.clear()
+        empty = {
+            "brand_id": {}, "category_ids": {},
+            "group_id": {}, "feature_facets": {},
+        }
+        with patch(
+            "search.services.search_facet_counts", return_value=empty
+        ):
+            res = self._facets()
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        codes = {f["code"] for f in res.json()["features"]}
+        self.assertIn("weight", codes)
+
+    def test_engine_counts_drive_features(self):
+        from unittest.mock import patch
+        from django.core.cache import cache
+        cache.clear()
+        counts = {
+            "brand_id": {},
+            "category_ids": {},
+            "group_id": {},
+            "feature_facets": {"weight:85-g": 1, "ghost:zz": 2},
+        }
+        with patch(
+            "search.services.search_facet_counts", return_value=counts
+        ):
+            res = self._facets()
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        features = res.json()["features"]
+        codes = {f["code"] for f in features}
+        self.assertEqual(codes, {"weight"})
+        vals = {v["value"] for f in features for v in f["values"]}
+        self.assertEqual(vals, {"85-g"})
+
+    def test_none_engine_counts_orm_path(self):
+        """Search nepasiekiamas -> ORM facetai kaip anksčiau."""
+        from unittest.mock import patch
+        from django.core.cache import cache
+        cache.clear()
+        with patch(
+            "search.services.search_facet_counts", return_value=None
+        ):
+            res = self._facets()
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        codes = {f["code"] for f in res.json()["features"]}
+        self.assertIn("weight", codes)

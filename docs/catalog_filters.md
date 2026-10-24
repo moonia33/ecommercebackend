@@ -118,10 +118,28 @@ Svarbu: „turi produktų“ reiškia, kad dukterinė kategorija įtraukiama net
 - `features` — tik filterable features, kurios naudojamos šiame scope, su tik tomis value reikšmėmis, kurios realiai pasitaiko
 - `option_types` — option type ašys šiame scope, su tik tomis value reikšmėmis, kurios realiai pasitaiko per variantus
 
+`Feature.is_filterable` skirsto specifikacijų duomenis nuo filtrų: spec-only
+features (pvz. `material-fabric` sudėtis) rodomos PDP specifikacijose, bet
+neateina nei į facets, nei į Typesense `feature_facets` (jų reikšmės vis tiek
+lieka `search_text`, tad paieškai pasiekiamos). Perjungti patogiausiai
+`list_editable` tiesiai `Catalog → Features` sąraše; post_save reindex'uoja
+feature'ą naudojančias prekes.
+
 Pastaba apie našumą: facets skaičiavimas be filtrų yra brangiausias
-katalogo endpoint'as (~2.7s/300KB virš viso katalogo), todėl atsakymas
-cache'uojamas (`FACETS_CACHE_SECONDS`, default 600s) pagal visų
-parametrų hash + shop + kalba. Naujos prekės/facet'ai atsiranda per TTL.
+katalogo endpoint'as (~2.7s/300KB virš viso katalogo ORM keliu), todėl:
+
+- Kai nėra `feature`/`option`/`range` filtrų, used-set'ai (brand, category,
+  group, feature values) imami iš Typesense `facet_by` counts
+  (`search.services.search_facet_counts`) — ~2.3x greičiau ir be PFV/VFV
+  skenavimo. Option types indekse nėra, todėl jų dalis lieka ORM.
+- Jei Typesense nepasiekiamas (`search_facet_counts` → None) arba indeksas
+  atsilikęs (visi counts tušti, bet ORM turi prekių) — fallback į ORM.
+- Su `feature`/`option`/`range` filtrais visada ORM — Typesense `filter_by`
+  negali tiksliai išreikšti group-code ir range semantikos.
+- Atsakymas dar cache'uojamas (`FACETS_CACHE_SECONDS`, default 600s) pagal
+  parametrų hash + shop + kalba + `catalog:facets:ver` versiją (bump'inama
+  Product/Feature/Option/CategoryFacet save/delete signalų — matoma iškart,
+  ne per TTL).
 
 ### GET `/api/v1/catalog/suggest`
 
