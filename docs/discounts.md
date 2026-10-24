@@ -73,8 +73,10 @@ Yra du sluoksniai:
 - **Kategorijos sąlyga apima visas subkategorijas** — match'inama per MPTT
   (`tree_id` + `lft`/`rght`), ne tik tiesioginis `category_id`. Taisyklę
   užtenka priskirti tėvinei kategorijai.
-- Legacy `scope` (`all`/`category`/`brand`/`product`/`variant`) vis dar
-  palaikomas; category scope'ui taip pat galioja subtree match.
+- Legacy `scope` (`all`/`category`/`brand`/`product`/`variant`) palaikomas
+  tik taisyklėms BE condition grupių — jei grupės yra, jos vyraoja, o
+  `scope` (įskaitant default'inį `all`) ignoruojamas. Category match'ui
+  abiem keliais galioja subtree match.
 - `priority` + `id` rikiavimas — pirmoji atitinkanti taisyklė laimi
   (shop-specifinės ir globalios varžosi tame pačiame prioriteto sąraše).
 - Jei offer jau "discounted" — papildoma promo netaikoma, nebent

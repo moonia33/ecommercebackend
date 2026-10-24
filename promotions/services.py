@@ -320,7 +320,13 @@ def find_best_promo_rule(
         return False
 
     for r in candidates:
-        if _condition_groups_match(r) or _legacy_scope_matches(r):
+        # Condition grupės, jei yra, VYRAUOJA — legacy scope tuomet
+        # ignoruojamas (kitaip default'inis scope=ALL panaikintų grupes).
+        has_groups = bool(list(getattr(r, "condition_groups", []).all()))
+        if has_groups:
+            if _condition_groups_match(r):
+                return r
+        elif _legacy_scope_matches(r):
             return r
     return None
 

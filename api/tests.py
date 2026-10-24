@@ -3512,6 +3512,28 @@ class PromoRuleScopeTests(TestCase):
         self.assertIsNotNone(rule)
         self.assertEqual(rule.name, "Legacy")
 
+    def test_condition_groups_override_default_scope_all(self):
+        """Bug: rule su condition groups + default scope=ALL match'ino
+        visas prekes (legacy OR). Grupės turi vyrauti."""
+        from promotions.services import find_best_promo_rule
+        self._make_rule()
+        other_cat = Category.objects.create(
+            name="Kita", slug="kita-p", is_active=True)
+        other_brand = Brand.objects.create(
+            name="KitaB", slug="kitab-p", is_active=True)
+        other_product = Product.objects.create(
+            sku="P-OTH", name="Kita prekė", slug="kita-preke",
+            tax_class=self.tax, brand=other_brand, category=other_cat,
+            is_active=True)
+        other_variant = Variant.objects.create(
+            product=other_product, sku="SKU-OTH", name="Vnt",
+            price_eur="10.00", is_active=True)
+        self.assertIsNone(find_best_promo_rule(
+            channel="normal", category_id=other_cat.id,
+            brand_id=other_brand.id, product_id=other_product.id,
+            variant_id=other_variant.id, customer_group_id=None,
+            shop_id=self.shop.id))
+
     def test_catalog_listing_shows_promo_discount(self):
         """End-to-end per API: katalogo sąraše prekė turi compare_at kainą."""
         self._make_rule()
