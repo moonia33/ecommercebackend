@@ -282,10 +282,15 @@ class VariantInlineFormSet(BaseInlineFormSet):
                 )
 
             if form.instance.pk:
-                existing = (
-                    form.instance.option_values.filter(option_type=option_type)
-                    .select_related("option_value")
-                    .first()
+                # Prefetch cache (VariantInline.get_queryset) — be
+                # papildomos query per kiekvieną variantą/eilutę.
+                existing = next(
+                    (
+                        r
+                        for r in form.instance.option_values.all()
+                        if r.option_type_id == option_type.id
+                    ),
+                    None,
                 )
                 if existing:
                     form.initial[field_name] = existing.option_value_id
@@ -397,11 +402,13 @@ class VariantInlineFormSet(BaseInlineFormSet):
                 option_type_id__in=option_type_ids
             ).delete()
 
+            # Naudojam prefetch cache (get_queryset) vietoj atskiros
+            # query per variantą.
+            _option_type_ids = set(option_type_ids)
             existing = {
                 v.option_type_id: v
-                for v in VariantOptionValue.objects.filter(
-                    variant=variant, option_type_id__in=option_type_ids
-                )
+                for v in variant.option_values.all()
+                if v.option_type_id in _option_type_ids
             }
 
             for option_type, _field_name in self._option_fields:
@@ -432,6 +439,14 @@ class VariantInline(admin.TabularInline):
     extra = 0
     form = VariantInlineForm
     formset = VariantInlineFormSet
+
+    def get_queryset(self, request):
+        # option_values + jų tipai/reikšmės prefetch — formset'as naudoja
+        # cache ir nedaro atskiros query kiekvienam variantui.
+        return super().get_queryset(request).prefetch_related(
+            "option_values__option_type",
+            "option_values__option_value",
+        )
 
     def get_formset(self, request, obj=None, **kwargs):
         # When editing an existing Product, declare dynamic opt_* fields on the form
@@ -489,8 +504,21 @@ class VariantInline(admin.TabularInline):
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = ("sku", "product_group_code", "name", "brand", "category", "group", "is_active")
-    list_filter = ("is_active", "brand", "category", "group", "import_source")
-    search_fields = ("sku", "import_code", "product_group_code", "name", "slug")
+    list_select_related = ("brand", "category", "group")
+    list_filter = ("is_active", "is_gift_card", "import_source", "brand", "category", "group")
+    search_fields = (
+        "sku",
+        "import_code",
+        "product_group_code",
+        "name",
+        "slug",
+        "translations__name",
+        "brand__name",
+        "category__name",
+        "variants__sku",
+        "variants__barcode",
+        "variants__import_code",
+    )
     prepopulated_fields = {"slug": ("name",)}
     autocomplete_fields = ("tax_class", "brand", "category", "group")
     inlines = (
@@ -500,6 +528,9 @@ class ProductAdmin(admin.ModelAdmin):
         ProductOptionTypeInline,
         VariantInline,
     )
+
+    class Media:
+        js = ("catalog/admin/cascade.js",)
 
     class Form(forms.ModelForm):
         description = forms.CharField(
@@ -638,6 +669,14 @@ class FeatureValueAdmin(admin.ModelAdmin):
     autocomplete_fields = ("feature",)
     inlines = (FeatureValueTranslationInline,)
 
+    def get_search_results(self, request, queryset, search_term):
+        # Kaskada iš inline formų: admin_cascade.js perduoda
+        # ?feature_id=N → rodomos tik to feature reikšmės.
+        feature_id = (request.GET.get("feature_id") or "").strip()
+        if feature_id.isdigit():
+            queryset = queryset.filter(feature_id=int(feature_id))
+        return super().get_search_results(request, queryset, search_term)
+
 
 class OptionValueTranslationInline(admin.StackedInline):
     model = OptionValueTranslation
@@ -665,6 +704,13 @@ class OptionValueAdmin(admin.ModelAdmin):
     search_fields = ("code", "label", "option_type__code", "option_type__name")
     autocomplete_fields = ("option_type",)
     inlines = (OptionValueTranslationInline,)
+
+    def get_search_results(self, request, queryset, search_term):
+        # Kaskada iš inline formų (option_type→option_value).
+        option_type_id = (request.GET.get("option_type_id") or "").strip()
+        if option_type_id.isdigit():
+            queryset = queryset.filter(option_type_id=int(option_type_id))
+        return super().get_search_results(request, queryset, search_term)
 
 
 @admin.register(FeatureValueGroup)
@@ -752,11 +798,16 @@ class OptionValueGroupAdmin(admin.ModelAdmin):
 class VariantOptionValueInline(admin.TabularInline):
     model = VariantOptionValue
     extra = 0
+    # Raw <select> čia render'intų ~2k option'ų per eilutę — autocomplete
+    # laiko puslapį lengvą; kaskada option_type→option_value per JS.
+    autocomplete_fields = ("option_type", "option_value")
 
 
 class VariantFeatureValueInline(admin.TabularInline):
     model = VariantFeatureValue
     extra = 0
+    # Tas pats — ~4.7k feature values kiekvienai eilutei be autocomplete.
+    autocomplete_fields = ("feature", "feature_value")
 
 
 class InventoryItemInline(admin.TabularInline):
@@ -778,13 +829,26 @@ class VariantAdmin(admin.ModelAdmin):
         "stock_available",
         "is_active",
     )
-    list_filter = ("is_active", "sold_as_pack", "product")
+    # `product` kaip tiesioginis filtras render'intų ~20k produktų
+    # dropdown'ą — naudojam brand/category; paieška randa ir pagal
+    # product sku/name/import kodą.
+    list_filter = (
+        "is_active",
+        "sold_as_pack",
+        "product__brand",
+        "product__category",
+        "product__is_gift_card",
+    )
     search_fields = (
         "sku",
+        "name",
         "barcode",
         "pack_barcode",
+        "import_code",
         "product__sku",
         "product__name",
+        "product__import_code",
+        "product_group_code",
         "option_values__option_value__label",
         "option_values__option_value__code",
         "option_values__option_type__code",
@@ -792,6 +856,8 @@ class VariantAdmin(admin.ModelAdmin):
     )
     ordering = ("sku",)
     readonly_fields = ("variant_images_display",)
+    # `product` raw select = ~20k <option> per change forma — autocomplete.
+    autocomplete_fields = ("product",)
     fields = (
         "import_source", "import_code", "product_group_code",
         "product", "sku", "barcode", "name", "price_eur", "cost_eur",
@@ -801,6 +867,9 @@ class VariantAdmin(admin.ModelAdmin):
         "variant_images_display",
     )
     inlines = (VariantOptionValueInline, VariantFeatureValueInline, InventoryItemInline)
+
+    class Media:
+        js = ("catalog/admin/cascade.js",)
 
     @admin.display(description="Varianto nuotraukos")
     def variant_images_display(self, obj):
@@ -831,12 +900,9 @@ class VariantAdmin(admin.ModelAdmin):
 
     @admin.display(description="Options")
     def option_values_display(self, obj: Variant) -> str:
-        rows = list(
-            obj.option_values.select_related(
-                "option_type",
-                "option_value",
-            ).all()
-        )
+        # get_queryset jau prefetch'ina option_values__option_type/value —
+        # .all() naudoja cache (select_related čia darytų N+1).
+        rows = list(obj.option_values.all())
         parts = []
         for r in rows:
             parts.append(f"{r.option_type.code}:{r.option_value.label}")
