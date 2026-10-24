@@ -3395,3 +3395,258 @@ class NavigationTests(TestCase):
         names = [c["name"] for c in res.json()
                  if c["name"] in {"AAA", "ZZZ", "MMM"}]
         self.assertEqual(names, ["ZZZ", "MMM", "AAA"])
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class PromoRuleScopeTests(TestCase):
+    """Catalog-level promo rules: MPTT subtree category match + shop scoping."""
+
+    def setUp(self):
+        self.shop = Shop.objects.create(
+            code="s", name="S", primary_domain="ops.local",
+            default_language_code="lt", default_country_code="LT",
+            currency="EUR", is_active=True)
+        ShopLanguage.objects.create(
+            shop=self.shop, language_code="lt", is_active=True,
+            is_default=True, sort_order=0)
+        self.shop2 = Shop.objects.create(
+            code="s2", name="S2", primary_domain="other.local",
+            default_language_code="lt", default_country_code="LT",
+            currency="EUR", is_active=True)
+
+        self.tax, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"})
+        import datetime
+        from catalog.models import TaxRate
+        TaxRate.objects.get_or_create(
+            tax_class=self.tax, country_code="LT",
+            defaults={"rate": "0.21",
+                      "valid_from": datetime.date(2020, 1, 1),
+                      "is_active": True})
+
+        self.parent = Category.objects.create(
+            name="Tėvinė", slug="parent-p", is_active=True)
+        self.child = Category.objects.create(
+            name="Vaikinė", slug="child-p", parent=self.parent,
+            is_active=True)
+        self.brand = Brand.objects.create(
+            name="B", slug="b-promo", is_active=True)
+        self.product = Product.objects.create(
+            sku="P-PR", name="Promo prekė", slug="promo-preke",
+            tax_class=self.tax, brand=self.brand, category=self.child,
+            is_active=True)
+        self.variant = Variant.objects.create(
+            product=self.product, sku="SKU-PR", name="Vnt",
+            price_eur="10.00", is_active=True)
+        wh = Warehouse.objects.create(
+            code="promo_wh", name="WH", kind="local", country_code="LT",
+            is_active=True)
+        InventoryItem.objects.create(
+            variant=self.variant, warehouse=wh,
+            qty_on_hand=5, qty_reserved=0)
+
+    def _make_rule(self, *, shop=None, percent="10"):
+        from promotions.models import (
+            PromoRule, PromoRuleCondition, PromoRuleConditionGroup)
+        rule = PromoRule.objects.create(
+            name="Akcija", is_active=True, priority=5,
+            percent_off=percent, shop=shop)
+        group = PromoRuleConditionGroup.objects.create(
+            promo_rule=rule, name="G", sort_order=0)
+        PromoRuleCondition.objects.create(
+            group=group, kind="category", category=self.parent)
+        return rule
+
+    def test_parent_category_condition_covers_child_products(self):
+        """User bug: taisyklė ant tėvinės kategorijos — prekės vaikinėse
+        be nuolaidų. Dabar MPTT subtree match."""
+        from promotions.services import find_best_promo_rule
+        self._make_rule()
+        rule = find_best_promo_rule(
+            channel="normal", category_id=self.child.id,
+            brand_id=self.brand.id, product_id=self.product.id,
+            variant_id=self.variant.id, customer_group_id=None,
+            shop_id=self.shop.id)
+        self.assertIsNotNone(rule)
+        self.assertEqual(rule.name, "Akcija")
+
+    def test_shop_scoped_rule_only_applies_to_own_shop(self):
+        from promotions.services import find_best_promo_rule
+        self._make_rule(shop=self.shop2)
+        # Kito shop'o taisyklė nematoma:
+        self.assertIsNone(find_best_promo_rule(
+            channel="normal", category_id=self.child.id,
+            brand_id=self.brand.id, product_id=self.product.id,
+            variant_id=self.variant.id, customer_group_id=None,
+            shop_id=self.shop.id))
+        # Savo shop'e — veikia:
+        self.assertIsNotNone(find_best_promo_rule(
+            channel="normal", category_id=self.child.id,
+            brand_id=self.brand.id, product_id=self.product.id,
+            variant_id=self.variant.id, customer_group_id=None,
+            shop_id=self.shop2.id))
+
+    def test_global_rule_applies_to_all_shops(self):
+        from promotions.services import find_best_promo_rule
+        self._make_rule(shop=None)
+        for sid in (self.shop.id, self.shop2.id):
+            self.assertIsNotNone(find_best_promo_rule(
+                channel="normal", category_id=self.child.id,
+                brand_id=self.brand.id, product_id=self.product.id,
+                variant_id=self.variant.id, customer_group_id=None,
+                shop_id=sid))
+
+    def test_catalog_listing_shows_promo_discount(self):
+        """End-to-end per API: katalogo sąraše prekė turi compare_at kainą."""
+        self._make_rule()
+        res = self.client.get("/api/v1/catalog/products",
+                              HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        item = next(
+            i for i in res.json()["items"] if i["slug"] == "promo-preke")
+        self.assertIsNotNone(item.get("compare_at_price"),
+                             msg=str(item)[:400])
+        self.assertLess(
+            Decimal(item["price"]["net"]),
+            Decimal(item["compare_at_price"]["net"]))
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class ReverseChargeCheckoutTests(TestCase):
+    """PVM: pagal šalį visada, išskyrus B2B su PVM kodu ne LT → 0."""
+
+    def setUp(self):
+        from accounts.models import UserAddress
+        from checkout.models import Cart, CartItem
+
+        self.shop = Shop.objects.create(
+            code="s", name="S", primary_domain="ops.local",
+            default_language_code="lt", default_country_code="LT",
+            currency="EUR", is_active=True)
+        ShopLanguage.objects.create(
+            shop=self.shop, language_code="lt", is_active=True,
+            is_default=True, sort_order=0)
+
+        self.user = User.objects.create_user(
+            email="b2b@example.com", password="x")
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=self.user.id)
+
+        self.addr_lt = UserAddress.objects.create(
+            user=self.user, full_name="UAB Lietuva",
+            line1="Gatvė 1", city="Vilnius", postal_code="01100",
+            country_code="LT", company_vat_no="LT123456789")
+        self.addr_de = UserAddress.objects.create(
+            user=self.user, full_name="GmbH",
+            line1="Str 1", city="Berlin", postal_code="10115",
+            country_code="DE", company_vat_no="DE123456789")
+        self.addr_de_b2c = UserAddress.objects.create(
+            user=self.user, full_name="Privatus",
+            line1="Str 2", city="Berlin", postal_code="10115",
+            country_code="DE", company_vat_no="")
+
+        self.tax, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"})
+        import datetime
+        from catalog.models import TaxRate
+        TaxRate.objects.create(
+            tax_class=self.tax, country_code="LT", rate="0.21",
+            valid_from=datetime.date(2020, 1, 1), is_active=True)
+        TaxRate.objects.create(
+            tax_class=self.tax, country_code="DE", rate="0.19",
+            valid_from=datetime.date(2020, 1, 1), is_active=True)
+
+        cat = Category.objects.create(
+            name="C", slug="c-rc", is_active=True)
+        product = Product.objects.create(
+            sku="P-RC", name="Prekė", slug="preke-rc",
+            tax_class=self.tax, category=cat, is_active=True)
+        variant = Variant.objects.create(
+            product=product, sku="SKU-RC", name="Vnt",
+            price_eur="10.00", is_active=True)
+        wh = Warehouse.objects.create(
+            code="rc_wh", name="WH", kind="local", country_code="LT",
+            is_active=True)
+        InventoryItem.objects.create(
+            variant=variant, warehouse=wh,
+            qty_on_hand=10, qty_reserved=0)
+        cart = Cart.objects.create(user=self.user, shop=self.shop)
+        CartItem.objects.create(cart=cart, variant=variant, qty=1)
+
+        from shipping.models import ShippingMethod, ShippingRate
+        method, _ = ShippingMethod.objects.get_or_create(
+            code="store_pickup", defaults={"name": "Store pickup"})
+        for cc in ("LT", "DE"):
+            ShippingRate.objects.get_or_create(
+                method=method, country_code=cc,
+                defaults={"net_eur": "2.00"})
+
+    def _preview(self, addr):
+        import json
+        return self.client.post(
+            "/api/v1/checkout/preview",
+            data=json.dumps({
+                "shipping_address_id": addr.id,
+                "shipping_method": "store_pickup",
+                "payment_method": "bank_transfer",
+            }),
+            content_type="application/json",
+            HTTP_HOST="ops.local")
+
+    def _confirm(self, addr):
+        import json
+        return self.client.post(
+            "/api/v1/checkout/confirm",
+            data=json.dumps({
+                "shipping_address_id": addr.id,
+                "shipping_method": "store_pickup",
+                "payment_method": "bank_transfer",
+                "consents": [
+                    {"kind": "terms", "document_version": "v1"},
+                    {"kind": "privacy", "document_version": "v1"},
+                ],
+            }),
+            content_type="application/json",
+            HTTP_HOST="ops.local")
+
+    def test_b2b_lt_gets_normal_vat(self):
+        res = self._preview(self.addr_lt)
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        item = res.json()["items"][0]
+        self.assertEqual(Decimal(str(item["line_total"]["vat"])),
+                         Decimal("2.10"))
+
+    def test_b2b_foreign_is_reverse_charge(self):
+        """DE + PVM kodas → PVM=0 visur: eilutės, siuntimas, suma."""
+        res = self._preview(self.addr_de)
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        out = res.json()
+        self.assertEqual(Decimal(str(out["items_total"]["vat"])), Decimal("0"))
+        self.assertEqual(Decimal(str(out["shipping_total"]["vat"])), Decimal("0"))
+        self.assertEqual(Decimal(str(out["order_total"]["vat"])), Decimal("0"))
+
+        # Preview jau įrašė begin_checkout event'ą (idempotency key) —
+        # confirm viduje kartoja preview, todėl išvalome prieš confirm.
+        from analytics.models import AnalyticsEvent
+        AnalyticsEvent.objects.all().delete()
+
+        res = self._confirm(self.addr_de)
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        order = Order.objects.get(id=res.json()["order_id"])
+        self.assertTrue(order.reverse_charge)
+        self.assertEqual(order.customer_vat_no, "DE123456789")
+        self.assertEqual(order.total_vat, Decimal("0"))
+        line = order.lines.first()
+        self.assertEqual(line.vat_rate, Decimal("0"))
+
+        # recalculate_totals lieka deterministinis (PVM neatsiranda iš naujo):
+        order.recalculate_totals()
+        self.assertEqual(order.shipping_vat, Decimal("0"))
+        self.assertEqual(order.total_vat, Decimal("0"))
+
+    def test_b2c_foreign_gets_country_vat(self):
+        """DE be PVM kodo → DE 19% tarifas."""
+        res = self._preview(self.addr_de_b2c)
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        item = res.json()["items"][0]
+        self.assertEqual(Decimal(str(item["line_total"]["vat"])),
+                         Decimal("1.90"))

@@ -266,6 +266,13 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
     primary = user.get_primary_customer_group() if user else None
     customer_group_id = int(primary.id) if primary else None
 
+    # B2B eksportas (atvirkštinis apmokestinimas): pirkėjas su įmonės PVM
+    # kodu ir pristatymas NE Lietuvoje → visas PVM = 0.
+    reverse_charge = is_reverse_charge(
+        country_code=country_code,
+        company_vat_no=(getattr(addr, "company_vat_no", "") if addr else ""),
+    )
+
     out_items, items_total, delivery_window = _serialize_cart_items(
         items=items,
         country_code=country_code,
@@ -273,6 +280,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         customer_group_id=customer_group_id,
         shop_id=_request_shop_id(request),
         language_code=get_request_language_code(request),
+        reverse_charge=reverse_charge,
     )
 
     if coupon:
@@ -286,6 +294,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
                 channel=channel,
                 customer_group_id=customer_group_id,
                 shop_id=_request_shop_id(request),
+                reverse_charge=reverse_charge,
             )
 
             if it.offer and bool(getattr(it.offer, "never_discount", False)):
@@ -334,7 +343,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
     if coupon and coupon.is_free_shipping_for(shipping_method=shipping_method):
         shipping_net = Decimal("0.00")
     tax_class = get_shipping_tax_class()
-    if not tax_class:
+    if not tax_class or reverse_charge:
         shipping_vat_rate = Decimal("0")
     else:
         shipping_vat_rate = get_vat_rate(
@@ -347,6 +356,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
         country_code=country_code,
         items_gross=items_total.gross,
         payment_method=payment_method,
+        reverse_charge=reverse_charge,
     )
     fees_out: list[FeeOut] = []
     fees_net = Decimal("0.00")
@@ -568,6 +578,13 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
 
     country_code = preview.country_code
 
+    # Tas pats sprendimas kaip preview — persistuojam order'yje, kad
+    # recalculate_totals()/sąskaitos/RMA liktų deterministiniai.
+    reverse_charge = is_reverse_charge(
+        country_code=country_code,
+        company_vat_no=(getattr(addr, "company_vat_no", "") if addr else ""),
+    )
+
     if is_digital:
         carrier_code, pickup_locker, pickup_snapshot = "", None, None
     else:
@@ -615,6 +632,8 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             idempotency_key=idem_key or "",
             currency="EUR",
             country_code=country_code,
+            reverse_charge=reverse_charge,
+            customer_vat_no=((addr.company_vat_no or "").strip() if addr else ""),
             shipping_method=shipping_method,
             delivery_min_date=dw_min,
             delivery_max_date=dw_max,
@@ -694,6 +713,7 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 channel=channel,
                 customer_group_id=customer_group_id,
                 shop_id=_request_shop_id(request),
+                reverse_charge=reverse_charge,
             )
 
             lines.append(

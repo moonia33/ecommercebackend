@@ -203,6 +203,15 @@ class PromoRule(models.Model):
         help_text="If empty, applies to all customers. If set, applies only to users in these groups.",
     )
 
+    shop = models.ForeignKey(
+        "api.Shop",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="promo_rules",
+        help_text="If empty, applies to all shops/storefronts.",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

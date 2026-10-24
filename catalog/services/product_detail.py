@@ -71,7 +71,7 @@ def build_product_detail_payload(
     variants = []
     delivery_window_out = None
     best_delivery_min = None
-    promo_rules = load_active_promo_rules(channel=channel)
+    promo_rules = load_active_promo_rules(channel=channel, shop_id=shop_id)
     for v in variants_qs:
         inv_all = list(v.inventory_items.all())
         visibility = InventoryItem.OfferVisibility.OUTLET if channel == "outlet" else InventoryItem.OfferVisibility.NORMAL

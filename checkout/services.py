@@ -77,12 +77,39 @@ def get_vat_rate_for(*, country_code: str, tax_class: TaxClass) -> Decimal:
     return get_vat_rate(country_code=country_code, tax_class=tax_class)
 
 
+def is_reverse_charge(*, country_code: str, company_vat_no: str | None) -> bool:
+    """B2B eksportas (atvirkštinis apmokestinimas).
+
+    PVM=0 tik tada, kai pirkėjas turi nurodęs įmonės PVM kodą IR
+    pristatymo šalis nėra home šalis (LT). Visi kiti atvejai —
+    įprastas šalies tarifas.
+    """
+    vat_no = (company_vat_no or "").strip()
+    if not vat_no:
+        return False
+    home = (getattr(settings, "SHOP_HOME_COUNTRY", "LT") or "LT").strip().upper()
+    country = (country_code or "").strip().upper()
+    return bool(country) and country != home
+
+
+def get_effective_vat_rate(
+    *,
+    country_code: str,
+    tax_class: TaxClass,
+    reverse_charge: bool = False,
+) -> Decimal:
+    if reverse_charge:
+        return Decimal("0")
+    return get_vat_rate(country_code=country_code, tax_class=tax_class)
+
+
 def calculate_fee_money(
     *,
     currency: str,
     country_code: str,
     amount_net: Decimal,
     tax_class: TaxClass | None,
+    reverse_charge: bool = False,
 ) -> Money:
     if not tax_class or not amount_net:
         return Money(
@@ -92,7 +119,11 @@ def calculate_fee_money(
             vat=Decimal("0"),
             gross=Decimal(amount_net or 0),
         )
-    vat_rate = get_vat_rate(country_code=country_code, tax_class=tax_class)
+    vat_rate = get_effective_vat_rate(
+        country_code=country_code,
+        tax_class=tax_class,
+        reverse_charge=reverse_charge,
+    )
     return money_from_net(currency=currency, unit_net=amount_net, vat_rate=vat_rate, qty=1)
 
 
@@ -118,6 +149,7 @@ def calculate_fees(
     country_code: str,
     items_gross: Decimal,
     payment_method: str,
+    reverse_charge: bool = False,
 ) -> list[tuple["FeeRule", Money]]:
     rules = select_fee_rules(country_code=country_code, payment_method=payment_method)
     out: list[tuple["FeeRule", Money]] = []
@@ -134,6 +166,7 @@ def calculate_fees(
             country_code=country_code,
             amount_net=Decimal(r.amount_net),
             tax_class=r.tax_class,
+            reverse_charge=reverse_charge,
         )
         out.append((r, m))
 

@@ -144,25 +144,39 @@ def redeem_coupon_for_paid_order(*, order_id: int) -> bool:
         return True
 
 
-def load_active_promo_rules(*, channel: str | None = None) -> list:
-    """Load currently-active promo rules once; reuse for bulk evaluation."""
+def load_active_promo_rules(*, channel: str | None = None, shop_id: int | None = None) -> list:
+    """Load currently-active promo rules once; reuse for bulk evaluation.
+
+    Shop scoping: a rule with shop=None applies to every storefront;
+    a shop-specific rule only to its own shop.
+    """
     from django.utils import timezone
 
-    from promotions.models import PromoRule
+    from promotions.models import PromoRule, PromoRuleCondition
 
     now = timezone.now()
     ch = (channel or "").strip().lower() or "normal"
 
+    cond_qs = PromoRuleCondition.objects.select_related(
+        "category", "brand", "product", "variant",
+        "product_group", "feature_value",
+    )
     qs = (
         PromoRule.objects.filter(is_active=True)
+        .select_related("category", "brand", "product", "variant")
         .prefetch_related(
             "customer_groups",
             "channels",
             "condition_groups",
-            "condition_groups__conditions",
+            dj_models.Prefetch(
+                "condition_groups__conditions", queryset=cond_qs),
         )
         .order_by("-priority", "id")
     )
+    if shop_id is not None:
+        qs = qs.filter(dj_models.Q(shop_id=int(shop_id)) | dj_models.Q(shop__isnull=True))
+    else:
+        qs = qs.filter(shop__isnull=True)
     qs = qs.filter(dj_models.Q(start_at__isnull=True) | dj_models.Q(start_at__lte=now))
     qs = qs.filter(dj_models.Q(end_at__isnull=True) | dj_models.Q(end_at__gte=now))
     return [r for r in qs if r.allows_channel(channel=ch)]
@@ -177,8 +191,9 @@ def find_best_promo_rule(
     variant_id: int | None,
     customer_group_id: int | None,
     rules: list | None = None,
+    shop_id: int | None = None,
 ):
-    candidates = rules if rules is not None else load_active_promo_rules(channel=channel)
+    candidates = rules if rules is not None else load_active_promo_rules(channel=channel, shop_id=shop_id)
 
     if customer_group_id is None:
         candidates = [r for r in candidates if len(list(r.customer_groups.all())) == 0]
@@ -193,11 +208,52 @@ def find_best_promo_rule(
             )
         ]
 
+    # Kategorijos taisyklė galioja ir visoms jos SUBKATEGORIJOMS —
+    # lyginame per MPTT (tree_id + lft/rght), ne tik tiesioginę id.
+    _cat_tree: dict[int | None, tuple[int, int, int] | None] = {}
+
+    def _cat_range(cat_id: int | None):
+        """(tree_id, lft, rght) produkto ar sąlygos kategorijai, cached."""
+        if cat_id is None:
+            return None
+        key = int(cat_id)
+        if key not in _cat_tree:
+            from catalog.models import Category
+
+            row = (
+                Category.objects.filter(id=key)
+                .values_list("tree_id", "lft", "rght")
+                .first()
+            )
+            _cat_tree[key] = tuple(row) if row else None
+        return _cat_tree[key]
+
+    def _category_in_scope(cond_category) -> bool:
+        """cond_category (Category obj su lft/rght) apima produkto kategoriją?"""
+        prod = _cat_range(category_id)
+        if prod is None or cond_category is None:
+            return False
+        try:
+            cond = (
+                int(cond_category.tree_id),
+                int(cond_category.lft),
+                int(cond_category.rght),
+            )
+        except (AttributeError, TypeError, ValueError):
+            cond = _cat_range(int(cond_category.id))
+            if cond is None:
+                return False
+        return (
+            prod[0] == cond[0]
+            and prod[1] >= cond[1]
+            and prod[2] <= cond[2]
+        )
+
     def _legacy_scope_matches(r: PromoRule) -> bool:
         if r.scope == PromoRule.Scope.ALL:
             return True
         if r.scope == PromoRule.Scope.CATEGORY:
-            return bool(r.category_id) and r.category_id == int(category_id or 0)
+            return bool(r.category_id) and _category_in_scope(r.category)
         if r.scope == PromoRule.Scope.BRAND:
             return bool(r.brand_id) and r.brand_id == int(brand_id or 0)
         if r.scope == PromoRule.Scope.PRODUCT:
@@ -239,7 +295,7 @@ def find_best_promo_rule(
         def condition_matches(c) -> bool:
             k = str(c.kind)
             if k == "category":
-                return bool(c.category_id) and ctx["category_id"] == int(c.category_id)
+                return bool(c.category_id) and _category_in_scope(c.category)
             if k == "brand":
                 return bool(c.brand_id) and ctx["brand_id"] == int(c.brand_id)
             if k == "product":
@@ -279,6 +335,7 @@ def apply_promo_to_unit_net(
     allow_additional_promotions: bool,
     is_discounted_offer: bool,
     rules: list | None = None,
+    shop_id: int | None = None,
 ):
     base_unit_net = Decimal(base_unit_net)
     if base_unit_net <= 0:
@@ -295,6 +352,7 @@ def apply_promo_to_unit_net(
         variant_id=variant_id,
         customer_group_id=customer_group_id,
         rules=rules,
+        shop_id=shop_id,
     )
     if not rule:
         return base_unit_net, None

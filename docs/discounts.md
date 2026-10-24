@@ -58,11 +58,41 @@ Papildomai:
 
 ## Promo (akcijos)
 
-Kol kas "promo" realiai egzistuoja kaip offer-level nuolaida per `InventoryItem` (override/percent).
-Ateityje, jei atsiras atskiras promo engine, jis turi laikytis šito kontrakto:
+Yra du sluoksniai:
 
-- promo turi atsispindėti kaip aiškus discount breakdown (ne tik "sale price")
-- useriui visur rodoma pora: **compare_at (list)** + **price (sale)**
+1. **Offer-level nuolaida** per `InventoryItem` (override/percent) — kaip anksčiau.
+2. **`PromoRule`** — katalogo lygio automatinės taisyklės (`promotions` app).
+
+### PromoRule semantika
+
+- `shop` (nullable FK → `api.Shop`): `null` = taisyklė galioja **visoms**
+  parduotuvėms; užpildyta — tik tai parduotuvei. `load_active_promo_rules`
+  filtruoja `shop_id` arba `shop IS NULL`.
+- `condition_groups`: **OR tarp grupių**, **AND grupės viduje**. Sąlygų tipai:
+  `category`, `brand`, `product`, `variant`, `product_group`, `feature_value`.
+- **Kategorijos sąlyga apima visas subkategorijas** — match'inama per MPTT
+  (`tree_id` + `lft`/`rght`), ne tik tiesioginis `category_id`. Taisyklę
+  užtenka priskirti tėvinei kategorijai.
+- Legacy `scope` (`all`/`category`/`brand`/`product`/`variant`) vis dar
+  palaikomas; category scope'ui taip pat galioja subtree match.
+- `priority` + `id` rikiavimas — pirmoji atitinkanti taisyklė laimi
+  (shop-specifinės ir globalios varžosi tame pačiame prioriteto sąraše).
+- Jei offer jau "discounted" — papildoma promo netaikoma, nebent
+  `allow_additional_promotions=True`.
+- `channels` / `customer_groups` / `start_at`/`end_at` — kaip anksčiau.
+
+### PVM / reverse charge
+
+- Visais atvejais PVM = pristatymo šalies tarifas (`TaxRate` pagal
+  `country_code` + `tax_class`, su galiojimo datomis).
+- **Išimtis — B2B eksportas (atvirkštinis apmokestinimas)**: kai
+  `UserAddress.company_vat_no` užpildytas IR šalis ≠ home šalis
+  (`SHOP_HOME_COUNTRY`, default `LT`) → `is_reverse_charge()` → PVM=0
+  eilutėms, siuntimui ir mokesčiams (fees).
+- Sprendimas persistuojamas `Order.reverse_charge` + `Order.customer_vat_no`
+  — `recalculate_totals()` ir sąskaitos lieka deterministiniai.
+- Ne-LT šaliai be PVM kodo taikomas tos šalies tarifas; trūkstant
+  sukonfigūruoto tarifo — aiški klaida (400), ne tylus 0.
 
 ## API kontraktas (UI + Invoice)
 

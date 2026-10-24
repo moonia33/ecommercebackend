@@ -64,6 +64,12 @@ class CouponAdmin(admin.ModelAdmin):
 class PromoRuleConditionInline(admin.TabularInline):
     model = PromoRuleCondition
     extra = 0
+    # FK select'ai su 20k+ produktų/31k variantų buvo pagrindinė
+    # lėto group open/save priežastis.
+    autocomplete_fields = (
+        "category", "brand", "product", "variant",
+        "product_group", "feature_value",
+    )
 
 
 class PromoRuleConditionGroupInline(admin.TabularInline):
@@ -80,13 +86,15 @@ class PromoRuleAdmin(admin.ModelAdmin):
         "priority",
         "percent_off",
         "amount_off_net_eur",
+        "shop",
         "start_at",
         "end_at",
     )
-    list_filter = ("is_active",)
+    list_filter = ("is_active", "shop")
     search_fields = ("name",)
     filter_horizontal = ("customer_groups", "channels")
     readonly_fields = ("created_at", "updated_at")
+    autocomplete_fields = ("category", "brand", "product", "variant", "shop")
     inlines = (PromoRuleConditionGroupInline,)
     fieldsets = (
         (None, {"fields": ("name", "is_active", "priority", "start_at", "end_at")}),
@@ -94,9 +102,17 @@ class PromoRuleAdmin(admin.ModelAdmin):
             "Applies to",
             {
                 "fields": (
+                    "shop",
                     "channels",
                     "customer_groups",
                 )
+            },
+        ),
+        (
+            "Scope (legacy)",
+            {
+                "fields": ("scope", "category", "brand", "product", "variant"),
+                "classes": ("collapse",),
             },
         ),
         ("Discount", {"fields": ("percent_off", "amount_off_net_eur")}),
@@ -107,6 +123,6 @@ class PromoRuleAdmin(admin.ModelAdmin):
 @admin.register(PromoRuleConditionGroup)
 class PromoRuleConditionGroupAdmin(admin.ModelAdmin):
     list_display = ("id", "promo_rule", "name", "sort_order")
-    list_filter = ("promo_rule",)
     search_fields = ("promo_rule__name", "name")
+    autocomplete_fields = ("promo_rule",)
     inlines = (PromoRuleConditionInline,)

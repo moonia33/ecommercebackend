@@ -55,6 +55,7 @@ from checkout.services import (
     calculate_fees,
     get_shipping_net,
     get_shipping_tax_class,
+    is_reverse_charge,
     inventory_available_for_variant,
     inventory_available_for_offer,
     money_from_net,
@@ -550,19 +551,25 @@ def _cart_item_money(
     channel: str = "normal",
     customer_group_id: int | None = None,
     shop_id: int | None = None,
+    promo_rules: list | None = None,
+    reverse_charge: bool = False,
 ) -> tuple[MoneyOut, MoneyOut, MoneyOut | None, int | None, Decimal]:
     v = item.variant
     product = v.product
     if not product or not product.tax_class_id:
         raise HttpError(400, "Product has no tax_class assigned")
 
-    try:
-        vat_rate = get_vat_rate(country_code=country_code,
-                                tax_class=product.tax_class)
-    except LookupError:
-        raise HttpError(400, "VAT rate not configured for country/tax_class")
-    except ValueError as exc:
-        raise HttpError(400, str(exc))
+    if reverse_charge:
+        # B2B eksportas su galiojančiu PVM kodu — reverse charge, PVM=0.
+        vat_rate = Decimal("0")
+    else:
+        try:
+            vat_rate = get_vat_rate(country_code=country_code,
+                                    tax_class=product.tax_class)
+        except LookupError:
+            raise HttpError(400, "VAT rate not configured for country/tax_class")
+        except ValueError as exc:
+            raise HttpError(400, str(exc))
 
     channel_type = "b2b" if customer_group_id else "retail"
     list_unit_net = resolve_shop_variant_price(
@@ -597,6 +604,8 @@ def _cart_item_money(
         customer_group_id=customer_group_id,
         allow_additional_promotions=bool(getattr(item.offer, "allow_additional_promotions", False)) if item.offer_id else False,
         is_discounted_offer=is_discounted_offer,
+        rules=promo_rules,
+        shop_id=shop_id,
     )
 
     unit = money_from_net(currency="EUR", unit_net=unit_net,
@@ -627,7 +636,10 @@ def _serialize_cart_items(
     customer_group_id: int | None = None,
     shop_id: int | None = None,
     language_code: str | None = None,
+    reverse_charge: bool = False,
 ) -> tuple[list[CartItemOut], MoneyOut, dict | None]:
+    from promotions.services import load_active_promo_rules
+
     out_items: list[CartItemOut] = []
 
     # Vienas prefetch visoms eilutėms — options, varianto/produkto nuotraukos.
@@ -643,6 +655,9 @@ def _serialize_cart_items(
     agg_max = None
     agg_meta: dict | None = None
 
+    # Taisykles krauname vieną kartą visoms eilutėms (ne per eilutę).
+    promo_rules = load_active_promo_rules(channel=channel, shop_id=shop_id)
+
     total_net = Decimal("0.00")
     total_vat = Decimal("0.00")
     total_gross = Decimal("0.00")
@@ -656,6 +671,8 @@ def _serialize_cart_items(
             channel=channel,
             customer_group_id=customer_group_id,
             shop_id=shop_id,
+            promo_rules=promo_rules,
+            reverse_charge=reverse_charge,
         )
 
         if is_gift_card:

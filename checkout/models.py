@@ -219,6 +219,14 @@ class Order(models.Model):
     currency = models.CharField(max_length=3, default="EUR")
     country_code = models.CharField(max_length=2, default="LT")
 
+    # VAT snapshot (auditability — sprendimas fiksuojamas order'yje,
+    # kad recalculate_totals() ir sąskaitos liktų deterministinės).
+    reverse_charge = models.BooleanField(
+        default=False,
+        help_text="B2B eksportas su galiojančiu PVM kodu — atvirkštinis apmokestinimas (PVM=0).",
+    )
+    customer_vat_no = models.CharField(max_length=32, blank=True, default="")
+
     # Totals (net/vat/gross)
     items_net = models.DecimalField(
         max_digits=12, decimal_places=2, default=Decimal("0.00"))
@@ -380,6 +388,8 @@ class Order(models.Model):
                 country_code=self.country_code, tax_class=shipping_tax_class
             )
         else:
+            vat_rate = Decimal("0")
+        if self.reverse_charge:
             vat_rate = Decimal("0")
 
         shipping_money = money_from_net(
@@ -588,12 +598,19 @@ class OrderLine(models.Model):
                 and getattr(self.variant.product, "tax_class", None)
             ):
                 try:
-                    self.vat_rate = get_vat_rate(
-                        country_code=order_country_code,
-                        tax_class=self.variant.product.tax_class,
-                    )
-                except Exception:
+                    order_rc = bool(getattr(self.order, "reverse_charge", False))
+                except Order.DoesNotExist:
+                    order_rc = False
+                if order_rc:
                     self.vat_rate = Decimal("0")
+                else:
+                    try:
+                        self.vat_rate = get_vat_rate(
+                            country_code=order_country_code,
+                            tax_class=self.variant.product.tax_class,
+                        )
+                    except Exception:
+                        self.vat_rate = Decimal("0")
 
         if self.vat_rate is None:
             self.vat_rate = Decimal("0")

@@ -73,6 +73,7 @@ def serialize_products_listing(
     qs,
     country_code: str,
     channel: str,
+    shop_id: int | None = None,
     language_code: str | None = None,
 ) -> list[ProductListOut]:
     products = list(qs)
@@ -114,7 +115,7 @@ def serialize_products_listing(
     out: list[ProductListOut] = []
     for p in products:
         if promo_rules is None:
-            promo_rules = load_active_promo_rules(channel=channel)
+            promo_rules = load_active_promo_rules(channel=channel, shop_id=shop_id)
         product_loc = localize_product(p, language_code=language_code)
         brand_loc = localize_brand(p.brand, language_code=language_code) if p.brand else None
         category_loc = localize_category(p.category, language_code=language_code) if p.category else None

@@ -35,6 +35,7 @@ def _serialize_product_page(
     page_size: int,
     country_code: str,
     channel: str,
+    shop_id: int | None = None,
     language_code: str | None,
 ) -> ProductPageOut:
     """Count + slice BEFORE serialization — never serialize the whole table."""
@@ -47,6 +48,7 @@ def _serialize_product_page(
             qs=qs[offset:offset + page_size],
             country_code=country_code,
             channel=channel,
+            shop_id=shop_id,
             language_code=language_code,
         ),
     )
@@ -172,6 +174,7 @@ def products(
         page_size=page_size,
         country_code=country_code,
         channel=channel,
+        shop_id=shop_id,
         language_code=language_code,
     )
 

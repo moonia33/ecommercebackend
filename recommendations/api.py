@@ -45,6 +45,7 @@ def _serialize_ids(request, ids, *, shop_id, country_code, channel):
         qs=qs,
         country_code=country_code,
         channel=channel,
+        shop_id=shop_id,
         language_code=get_request_language_code(request),
     )
 

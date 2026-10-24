@@ -112,6 +112,7 @@ def _serialize_favorites(request, *, country_code: str, channel: str) -> Favorit
             qs=products_qs,
             country_code=country_code,
             channel=channel,
+            shop_id=shop_id,
             language_code=language_code,
         )
     }
