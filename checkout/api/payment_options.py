@@ -45,7 +45,14 @@ def payment_methods(request, country_code: str = "LT",
             .prefetch_related("allowed_shipping_methods")
             .order_by("sort_order", "code")
         )
-        if shipping_method:
+        if shipping_method == "digital":
+            # Skaitmeniniams orderiams nėra fizinio pristatymo — shipping
+            # apribojimai netaikomi. COD iš esmės negalimas (nėra siuntos).
+            methods = [
+                m for m in methods
+                if str(m.provider or m.code or "").strip().lower() != "cod"
+            ]
+        elif shipping_method:
             # Methods restricted to specific shipping methods only apply
             # when the chosen one is allowed (e.g. COD for store pickup).
             methods = [
@@ -132,7 +139,8 @@ def payment_options(request, country_code: str = "LT",
         # Dovanų kortelė — ne radio opcija: stored-value instrumentas
         # pritaikomas kodo laukelyje (split tender), ne pasirenkamas kaip
         # vienintelis mokėjimo būdas.
-        if str(m.code).strip().lower() == "gift_card":
+        prov = str(m.provider or m.code or "").strip().lower()
+        if prov == "gift_card" or str(m.code).strip().lower() == "gift_card":
             continue
         opt_payload: dict = {"payment_method": str(m.code)}
         prov = str(m.provider or m.code or "").strip().lower()

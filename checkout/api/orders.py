@@ -152,30 +152,32 @@ def list_orders(request, limit: int = 20):
                 )
             )
 
-            # Per-line delivery window
+            # Per-line delivery window (skaitmeninėms prekėms — momentinis
+            # pristatymas, ETA neskaičiuojamas)
             dw = None
-            try:
-                v = getattr(ln, "variant", None)
-                p = getattr(v, "product", None) if v is not None else None
-                line_channel = (
-                    "outlet"
-                    if getattr(ln, "offer_id", None)
-                    and ln.offer
-                    and getattr(ln.offer, "offer_visibility", None) == InventoryItem.OfferVisibility.OUTLET
-                    else "normal"
-                )
-                dw = estimate_delivery_window(
-                    now=timezone.now(),
-                    country_code=o.country_code,
-                    channel=line_channel,
-                    warehouse_id=int(ln.offer.warehouse_id) if getattr(ln, "offer_id", None) and ln.offer and ln.offer.warehouse_id else None,
-                    product_id=int(p.id) if p else None,
-                    brand_id=int(p.brand_id) if p and p.brand_id else None,
-                    category_id=int(p.category_id) if p and p.category_id else None,
-                    product_group_id=int(getattr(p, "group_id", None)) if p and getattr(p, "group_id", None) else None,
-                )
-            except Exception:
-                dw = None
+            v = getattr(ln, "variant", None)
+            p = getattr(v, "product", None) if v is not None else None
+            if not (p is not None and getattr(p, "is_gift_card", False)):
+                try:
+                    line_channel = (
+                        "outlet"
+                        if getattr(ln, "offer_id", None)
+                        and ln.offer
+                        and getattr(ln.offer, "offer_visibility", None) == InventoryItem.OfferVisibility.OUTLET
+                        else "normal"
+                    )
+                    dw = estimate_delivery_window(
+                        now=timezone.now(),
+                        country_code=o.country_code,
+                        channel=line_channel,
+                        warehouse_id=int(ln.offer.warehouse_id) if getattr(ln, "offer_id", None) and ln.offer and ln.offer.warehouse_id else None,
+                        product_id=int(p.id) if p else None,
+                        brand_id=int(p.brand_id) if p and p.brand_id else None,
+                        category_id=int(p.category_id) if p and p.category_id else None,
+                        product_group_id=int(getattr(p, "group_id", None)) if p and getattr(p, "group_id", None) else None,
+                    )
+                except Exception:
+                    dw = None
 
             if dw is not None:
                 dw_out = {
@@ -447,28 +449,32 @@ def _build_order_detail(o, language_code: str):
         ))
 
         dw = None
-        try:
-            v = getattr(ln, "variant", None)
-            p = getattr(v, "product", None) if v is not None else None
-            line_channel = (
-                "outlet"
-                if getattr(ln, "offer_id", None)
-                and ln.offer
-                and getattr(ln.offer, "offer_visibility", None) == InventoryItem.OfferVisibility.OUTLET
-                else "normal"
-            )
-            dw = estimate_delivery_window(
-                now=timezone.now(),
-                country_code=o.country_code,
-                channel=line_channel,
-                warehouse_id=int(ln.offer.warehouse_id) if getattr(ln, "offer_id", None) and ln.offer and ln.offer.warehouse_id else None,
-                product_id=int(p.id) if p else None,
-                brand_id=int(p.brand_id) if p and p.brand_id else None,
-                category_id=int(p.category_id) if p and p.category_id else None,
-                product_group_id=int(getattr(p, "group_id", None)) if p and getattr(p, "group_id", None) else None,
-            )
-        except Exception:
-            dw = None
+        v = getattr(ln, "variant", None)
+        p = getattr(v, "product", None) if v is not None else None
+        # Skaitmeninėms prekėms (dovanų kortelės) ETA neturimas — pristatymas
+        # yra momentinis (el. paštas po apmokėjimo).
+        is_gc_line = p is not None and getattr(p, "is_gift_card", False)
+        if not is_gc_line:
+            try:
+                line_channel = (
+                    "outlet"
+                    if getattr(ln, "offer_id", None)
+                    and ln.offer
+                    and getattr(ln.offer, "offer_visibility", None) == InventoryItem.OfferVisibility.OUTLET
+                    else "normal"
+                )
+                dw = estimate_delivery_window(
+                    now=timezone.now(),
+                    country_code=o.country_code,
+                    channel=line_channel,
+                    warehouse_id=int(ln.offer.warehouse_id) if getattr(ln, "offer_id", None) and ln.offer and ln.offer.warehouse_id else None,
+                    product_id=int(p.id) if p else None,
+                    brand_id=int(p.brand_id) if p and p.brand_id else None,
+                    category_id=int(p.category_id) if p and p.category_id else None,
+                    product_group_id=int(getattr(p, "group_id", None)) if p and getattr(p, "group_id", None) else None,
+                )
+            except Exception:
+                dw = None
 
         if dw is not None:
             dw_out = {

@@ -2955,6 +2955,16 @@ class GiftCardPurchaseTests(CheckoutProviderConfirmTests):
             HTTP_HOST="ops.local")
         self.assertEqual(res.status_code, 200)
 
+        # Skaitmeninėms eilutėms ETA neskaičiuojama — nei per-line, nei
+        # order lygmenyje (fiktiška fizinio pristatymo data erzino).
+        res = self.client.get(
+            f"/api/v1/checkout/orders/{order.id}", HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        detail = res.json()
+        self.assertIsNone(detail["delivery_window"])
+        self.assertTrue(all(
+            ln["delivery_window"] is None for ln in detail["items"]))
+
     def test_digital_mixed_cart_still_requires_shipping(self):
         from checkout.models import CartItem
         cart = self.user.carts.get(shop=self.shop)
