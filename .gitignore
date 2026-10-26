@@ -20,6 +20,7 @@ media/
 
 # docs
 .copilot.md
+.devin.md
 API_v2_Guidelines.postman_collection.json
 DPD_API_v2_Guidelines.postman_collection.json
 dpd_api_docs.txt
