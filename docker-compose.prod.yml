@@ -22,13 +22,21 @@ services:
     <<: *app
     command: celery -A config worker -l info -Q celery,default
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME --timeout 10 | grep -q pong"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 60s
 
   beat:
     <<: *app
     command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     healthcheck:
-      disable: true
+      test: ["CMD", "python", "-c", "import sys; sys.exit(b'beat' not in open('/proc/1/cmdline', 'rb').read())"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   media:
