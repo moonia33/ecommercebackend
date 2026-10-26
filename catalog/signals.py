@@ -41,6 +41,86 @@ def _bump_catalog_facets_cache(**kwargs):
         cache.set("catalog:facets:ver", 2)
 
 
+def bump_listing_ver(**kwargs):
+    """`catalog:listing:ver` — produktų sąrašo HTTP cache versija.
+    Struktūriniai pokyčiai invaliduojami iškart; stock/qty drift'ą
+    dengia trumpas TTL (qty bulk_update'ai signalų nešaudo)."""
+    from django.core.cache import cache
+    try:
+        cache.incr("catalog:listing:ver")
+    except ValueError:
+        cache.set("catalog:listing:ver", 2)
+
+
+def _listing_bump_senders():
+    """Modeliai, kurių pokyčiai invaliduoja listing/recs cache."""
+    from promotions.models import (
+        PromoRule,
+        PromoRuleCondition,
+        PromoRuleConditionGroup,
+    )
+    from recommendations.models import ProductRelation
+
+    from .models import (
+        Brand,
+        BrandTranslation,
+        Category,
+        CategoryTranslation,
+        Feature,
+        FeatureValue,
+        FeatureValueGroup,
+        OptionType,
+        OptionValue,
+        OptionValueGroup,
+        ProductFeatureValue,
+        ProductGroup,
+        ProductImage,
+        ProductTranslation,
+        ProductVideo,
+        ShopAssortmentRule,
+        ShopPriceList,
+        ShopPriceRule,
+        TaxClass,
+        TaxRate,
+        Variant,
+        VariantFeatureValue,
+        VariantOptionValue,
+    )
+
+    return (
+        Product, ProductTranslation, ProductImage, ProductVideo,
+        Variant, VariantFeatureValue, VariantOptionValue,
+        Brand, BrandTranslation, Category, CategoryTranslation,
+        ProductGroup, Feature, FeatureValue, FeatureValueGroup,
+        OptionType, OptionValue, OptionValueGroup, ProductFeatureValue,
+        ShopAssortmentRule, ShopPriceList, ShopPriceRule,
+        TaxClass, TaxRate,
+        PromoRule, PromoRuleCondition, PromoRuleConditionGroup,
+        ProductRelation,
+    )
+
+
+for _sender in _listing_bump_senders():
+    post_save.connect(
+        bump_listing_ver, sender=_sender,
+        dispatch_uid=f"listcache_save_{_sender.__name__}")
+    post_delete.connect(
+        bump_listing_ver, sender=_sender,
+        dispatch_uid=f"listcache_del_{_sender.__name__}")
+
+
+@receiver(post_save, sender=InventoryItem)
+def inventory_item_listing_bump(sender, instance, update_fields=None, **kwargs):
+    """InventoryItem: bump tik kai keičiasi offer'io konfigūracija
+    (kaina/visibility/priority). qty_on_hand/qty_reserved churn'as
+    dengiamas listing TTL — kitaip kiekvienas pirkimas griautų cache."""
+    if update_fields is not None and set(update_fields) <= {
+        "qty_on_hand", "qty_reserved", "updated_at",
+    }:
+        return
+    bump_listing_ver()
+
+
 for _sender in (Category, Product):
     post_save.connect(
         _bump_catalog_categories_cache, sender=_sender,

@@ -6,33 +6,15 @@ from django.db.models import Case, DecimalField, ExpressionWrapper, F, IntegerFi
 from django.db.models.functions import Coalesce
 from ninja.errors import HttpError
 
-from pricing.services import compute_vat, get_vat_rate
-from promotions.services import apply_promo_to_unit_net
-
 from .localization import (
-    localize_brand,
-    localize_category,
-    localize_product,
     resolve_brand_by_slug,
     resolve_category_by_slug,
     resolve_product_by_slug,
 )
-from .api_schemas import MoneyOut, ProductListOut
-from .models import Brand, Category, InventoryItem, Product, ProductGroup
+from .api_schemas import ProductListOut
+from .models import InventoryItem, Product, ProductGroup
 from .services.catalog_core import descendant_category_ids, parse_pairs
-from .services.image_out import image_out
-from .services.money import discount_percent as calc_discount_percent
-
-
-def _money_out(*, currency: str, unit_net: Decimal, vat_rate: Decimal) -> MoneyOut:
-    b = compute_vat(unit_net=Decimal(unit_net), vat_rate=Decimal(vat_rate), qty=1)
-    return {
-        "currency": currency,
-        "net": b.unit_net,
-        "vat_rate": b.vat_rate,
-        "vat": b.unit_vat,
-        "gross": b.unit_gross,
-    }
+from .services.product_listing import serialize_products_listing
 
 
 def get_products_by_slugs_for_grid(
@@ -130,103 +112,12 @@ def get_products_by_slugs_for_grid(
 
     qs = qs.order_by("-_has_stock", "name", "id")
 
-    vat_cache: dict[int, Decimal] = {}
-
-    def vat_rate_for(product: Product) -> Decimal:
-        if not product.tax_class_id:
-            raise HttpError(400, "Product has no tax_class assigned")
-        key = int(product.tax_class_id)
-        if key in vat_cache:
-            return vat_cache[key]
-        try:
-            rate = get_vat_rate(country_code=country_code, tax_class=product.tax_class)
-        except LookupError:
-            raise HttpError(400, "VAT rate not configured for country/tax_class")
-        vat_cache[key] = Decimal(rate)
-        return vat_cache[key]
-
-    rendered: list[ProductListOut] = []
-    for p in qs:
-        product_loc = localize_product(p, language_code=language_code)
-        brand_loc = localize_brand(p.brand, language_code=language_code) if p.brand else None
-        category_loc = localize_category(p.category, language_code=language_code) if p.category else None
-
-        list_net = Decimal(p._min_variant_price if getattr(p, "_min_variant_price", None) is not None else 0)
-        if getattr(p, "_min_offer_price", None) is not None:
-            base_net = Decimal(p._min_offer_price)
-        else:
-            base_net = Decimal(list_net)
-        rate = vat_rate_for(p)
-
-        is_discounted_offer = bool(base_net and list_net and base_net < list_net)
-        allow_additional_promotions = not is_discounted_offer
-
-        sale_net, _rule = apply_promo_to_unit_net(
-            base_unit_net=base_net,
-            channel=channel,
-            category_id=p.category_id,
-            brand_id=p.brand_id,
-            product_id=p.id,
-            variant_id=None,
-            customer_group_id=None,
-            allow_additional_promotions=allow_additional_promotions,
-            is_discounted_offer=is_discounted_offer,
-        )
-
-        compare_at_price = None
-        discount_percent = calc_discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
-        if discount_percent is not None:
-            compare_at_price = _money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
-
-        price_to = None
-        max_variant_net = getattr(p, "_max_variant_price", None)
-        if max_variant_net is not None and Decimal(max_variant_net) > list_net:
-            price_to = _money_out(currency="EUR", unit_net=Decimal(max_variant_net), vat_rate=rate)
-
-        imgs = list(p.images.all())
-        imgs.sort(key=lambda i: (i.sort_order, i.id))
-        images_out = []
-        for img in imgs:
-            o = image_out(img, context="listing")
-            if not o:
-                continue
-            images_out.append(o)
-            if len(images_out) >= 2:
-                break
-
-        rendered.append(
-            {
-                "id": p.id,
-                "sku": p.sku,
-                "slug": product_loc["slug"],
-                "name": product_loc["name"],
-                "is_active": bool(p.is_active),
-                "product_group_code": p.product_group_code or "",
-                "brand": (
-                    {
-                        "id": p.brand.id,
-                        "slug": brand_loc["slug"],
-                        "name": brand_loc["name"],
-                    }
-                    if p.brand and brand_loc
-                    else None
-                ),
-                "category": (
-                    {
-                        "id": p.category.id,
-                        "slug": category_loc["slug"],
-                        "name": category_loc["name"],
-                    }
-                    if p.category and category_loc
-                    else None
-                ),
-                "images": images_out,
-                "price": _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
-                "price_to": price_to,
-                "compare_at_price": compare_at_price,
-                "discount_percent": discount_percent,
-            }
-        )
+    rendered = serialize_products_listing(
+        qs=qs,
+        country_code=country_code,
+        channel=channel,
+        language_code=language_code,
+    )
 
     order_index_by_id = {pid: i for i, pid in enumerate(resolved_ids)}
     rendered.sort(key=lambda p: order_index_by_id.get(int(p.get("id") or 0), 10_000))
@@ -294,7 +185,7 @@ def get_products_for_grid(
     )
     min_offer_price_expr = Min(offer_price_expr, filter=offer_filter)
 
-    qs = (
+    base_annotated = (
         Product.objects.filter(is_active=True)
         .select_related("brand", "category", "tax_class")
         .prefetch_related("images", "translations", "brand__translations", "category__translations")
@@ -303,7 +194,44 @@ def get_products_for_grid(
         .annotate(_min_offer_price=min_offer_price_expr)
     )
 
-    qs = qs.annotate(
+    # Pirminis kelias — Typesense browse (vienas indeksas vietoj viso
+    # katalogo agregavimo). Pinned/exclude atmetami čia. None → ORM žemiau.
+    if limit and int(limit) > 0:
+        from catalog.api.products import _engine_browse
+
+        excluded = {int(i) for i in (exclude_product_ids or set())}
+        engine = _engine_browse(
+            q=q,
+            shop_id=None,
+            channel=channel,
+            category_slug=category_slug,
+            brand_slug=brand_slug,
+            group_code=group_code,
+            feature=feature,
+            option=option,
+            range_filter=None,
+            sort=sort,
+            in_stock_only=in_stock_only,
+            page=1,
+            page_size=min(250, int(limit) + len(excluded)),
+            language_code=language_code,
+        )
+        if engine is not None:
+            ids, _found = engine
+            ids = [i for i in ids if i not in excluded][: int(limit)]
+            if ids:
+                from catalog.api.products import _ordered_listing_qs
+
+                qs_page = _ordered_listing_qs(ids=ids, qs_base=base_annotated)
+                return serialize_products_listing(
+                    qs=qs_page,
+                    country_code=country_code,
+                    channel=channel,
+                    language_code=language_code,
+                )
+            return []
+
+    qs = base_annotated.annotate(
         _has_stock=Case(
             When(_min_offer_price__isnull=False, then=Value(1)),
             default=Value(0),
@@ -408,102 +336,9 @@ def get_products_for_grid(
 
     qs = qs[: max(0, int(limit or 0))]
 
-    vat_cache: dict[int, Decimal] = {}
-
-    def vat_rate_for(product: Product) -> Decimal:
-        if not product.tax_class_id:
-            raise HttpError(400, "Product has no tax_class assigned")
-        key = int(product.tax_class_id)
-        if key in vat_cache:
-            return vat_cache[key]
-        try:
-            rate = get_vat_rate(country_code=country_code, tax_class=product.tax_class)
-        except LookupError:
-            raise HttpError(400, "VAT rate not configured for country/tax_class")
-        vat_cache[key] = Decimal(rate)
-        return vat_cache[key]
-
-    out: list[ProductListOut] = []
-    for p in qs:
-        product_loc = localize_product(p, language_code=language_code)
-        brand_loc = localize_brand(p.brand, language_code=language_code) if p.brand else None
-        category_loc = localize_category(p.category, language_code=language_code) if p.category else None
-
-        list_net = Decimal(p._min_variant_price if getattr(p, "_min_variant_price", None) is not None else 0)
-        if getattr(p, "_min_offer_price", None) is not None:
-            base_net = Decimal(p._min_offer_price)
-        else:
-            base_net = Decimal(list_net)
-        rate = vat_rate_for(p)
-
-        is_discounted_offer = bool(base_net and list_net and base_net < list_net)
-        allow_additional_promotions = not is_discounted_offer
-
-        sale_net, _rule = apply_promo_to_unit_net(
-            base_unit_net=base_net,
-            channel=channel,
-            category_id=p.category_id,
-            brand_id=p.brand_id,
-            product_id=p.id,
-            variant_id=None,
-            customer_group_id=None,
-            allow_additional_promotions=allow_additional_promotions,
-            is_discounted_offer=is_discounted_offer,
-        )
-
-        compare_at_price = None
-        discount_percent = calc_discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
-        if discount_percent is not None:
-            compare_at_price = _money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
-
-        price_to = None
-        max_variant_net = getattr(p, "_max_variant_price", None)
-        if max_variant_net is not None and Decimal(max_variant_net) > list_net:
-            price_to = _money_out(currency="EUR", unit_net=Decimal(max_variant_net), vat_rate=rate)
-
-        imgs = list(p.images.all())
-        imgs.sort(key=lambda i: (i.sort_order, i.id))
-        images_out = []
-        for img in imgs:
-            o = image_out(img, context="listing")
-            if not o:
-                continue
-            images_out.append(o)
-            if len(images_out) >= 2:
-                break
-
-        out.append(
-            {
-                "id": p.id,
-                "sku": p.sku,
-                "slug": product_loc["slug"],
-                "name": product_loc["name"],
-                "is_active": bool(p.is_active),
-                "product_group_code": p.product_group_code or "",
-                "brand": (
-                    {
-                        "id": p.brand.id,
-                        "slug": brand_loc["slug"],
-                        "name": brand_loc["name"],
-                    }
-                    if p.brand and brand_loc
-                    else None
-                ),
-                "category": (
-                    {
-                        "id": p.category.id,
-                        "slug": category_loc["slug"],
-                        "name": category_loc["name"],
-                    }
-                    if p.category and category_loc
-                    else None
-                ),
-                "images": images_out,
-                "price": _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
-                "price_to": price_to,
-                "compare_at_price": compare_at_price,
-                "discount_percent": discount_percent,
-            }
-        )
-
-    return out
+    return serialize_products_listing(
+        qs=qs,
+        country_code=country_code,
+        channel=channel,
+        language_code=language_code,
+    )

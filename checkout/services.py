@@ -196,6 +196,33 @@ def inventory_available_for_offer(*, offer_id: int) -> int:
     return max(0, int(inv.qty_on_hand) - int(inv.qty_reserved))
 
 
+def _enqueue_index_sync_for_inventory(items) -> None:
+    """bulk_update() bypasses InventoryItem post_save signals, so the
+    per-row Typesense sync never fires on reservation paths — enqueue one
+    batched reindex post-commit for the touched variants' products."""
+    variant_ids = [int(i.variant_id) for i in items if i.variant_id]
+    if not variant_ids:
+        return
+
+    def _dispatch(variant_ids=variant_ids):
+        try:
+            from catalog.models import Variant
+            from search.tasks import sync_products_task
+            from config.celery import safe_delay
+
+            pids = list(
+                Variant.objects.filter(id__in=variant_ids)
+                .values_list("product_id", flat=True)
+                .distinct()
+            )
+            if pids:
+                safe_delay(sync_products_task, [int(p) for p in pids])
+        except Exception:
+            pass
+
+    transaction.on_commit(_dispatch)
+
+
 def reserve_inventory_for_order(*, order_id: int) -> None:
     from catalog.models import InventoryItem
     from checkout.models import InventoryAllocation, OrderLine
@@ -289,6 +316,7 @@ def reserve_inventory_for_order(*, order_id: int) -> None:
 
     if updates:
         InventoryItem.objects.bulk_update(updates, ["qty_reserved", "updated_at"])
+        _enqueue_index_sync_for_inventory(updates)
     if allocations_to_create:
         InventoryAllocation.objects.bulk_create(allocations_to_create)
         # Backfill line.offer from the first allocated item so admin/UI can
@@ -344,6 +372,7 @@ def capture_inventory_for_order(*, order_id: int) -> None:
 
     if inv_updates:
         InventoryItem.objects.bulk_update(inv_updates, ["qty_on_hand", "qty_reserved", "updated_at"])
+        _enqueue_index_sync_for_inventory(inv_updates)
     if alloc_updates:
         InventoryAllocation.objects.bulk_update(alloc_updates, ["status", "updated_at"])
 
@@ -389,6 +418,7 @@ def release_inventory_for_order(*, order_id: int) -> None:
 
     if inv_updates:
         InventoryItem.objects.bulk_update(inv_updates, ["qty_reserved", "updated_at"])
+        _enqueue_index_sync_for_inventory(inv_updates)
     if alloc_updates:
         InventoryAllocation.objects.bulk_update(alloc_updates, ["status", "updated_at"])
 
@@ -533,6 +563,7 @@ def reserve_inventory_for_line(*, order_line, qty: int | None = None,
 
     if updates:
         InventoryItem.objects.bulk_update(updates, ["qty_reserved", "updated_at"])
+        _enqueue_index_sync_for_inventory(updates)
     if first_inv is not None and not line.offer_id:
         line.offer_id = int(first_inv.id)
         line.save(update_fields=["offer"])

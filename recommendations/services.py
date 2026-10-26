@@ -39,7 +39,12 @@ def _base_product_qs(*, shop_id):
     qs = (
         Product.objects.filter(is_active=True)
         .select_related("brand", "category", "tax_class")
-        .prefetch_related("images")
+        .prefetch_related(
+            "images",
+            "translations",
+            "brand__translations",
+            "category__translations",
+        )
     )
     return apply_shop_product_scope(qs=qs, shop_id=shop_id)
 
@@ -112,46 +117,67 @@ def _fallback_scored_ids(*, seeds, seed_ids, exclude, shop_id, channel, limit) -
     seed_brands = {p.brand_id for p in seeds if p.brand_id}
     seed_groups = {p.group_id for p in seeds if p.group_id}
 
-    qs = (
-        _base_product_qs(shop_id=shop_id)
-        .exclude(id__in=set(exclude))
-    )
-    qs = _annotate_listing(qs, channel=channel).filter(
-        _min_offer_price__isnull=False
-    )
+    base = _base_product_qs(shop_id=shop_id).exclude(id__in=set(exclude))
 
+    # Pool susiaurinamas prieš brangias anotacijas — prekės, kurios
+    # nesutampa nė vienu seed attribut'u, ir taip gautų 0 score'ų.
+    pool_q = Q()
+    if seed_cats:
+        pool_q |= Q(category_id__in=seed_cats)
+    if seed_brands:
+        pool_q |= Q(brand_id__in=seed_brands)
+    if seed_groups:
+        pool_q |= Q(group_id__in=seed_groups)
     if seed_fv_ids:
-        feature_expr = Count(
-            "feature_values",
-            filter=Q(
-                feature_values__feature_value_id__in=seed_fv_ids,
-                feature_values__feature__recommendation_boost=True,
-            ),
-            distinct=True,
-        )
-    else:
-        feature_expr = Value(0, output_field=IntegerField())
+        pool_q |= Q(feature_values__feature_value_id__in=seed_fv_ids)
 
-    qs = qs.annotate(
-        _feature_match=feature_expr,
-        _same_group=Case(
-            When(group_id__in=seed_groups, then=Value(1)),
-            default=Value(0), output_field=IntegerField(),
-        ) if seed_groups else Value(0, output_field=IntegerField()),
-        _same_category=Case(
-            When(category_id__in=seed_cats, then=Value(1)),
-            default=Value(0), output_field=IntegerField(),
-        ) if seed_cats else Value(0, output_field=IntegerField()),
-        _same_brand=Case(
-            When(brand_id__in=seed_brands, then=Value(1)),
-            default=Value(0), output_field=IntegerField(),
-        ) if seed_brands else Value(0, output_field=IntegerField()),
-    )
-    qs = qs.order_by(
-        "-_feature_match", "-_same_group",
-        "-_same_category", "-_same_brand", "name", "id",
-    )
-    return [p.id for p in qs[: limit * 3]]
+    def _ranked(qs) -> list[int]:
+        qs = _annotate_listing(qs, channel=channel).filter(
+            _min_offer_price__isnull=False
+        )
+
+        if seed_fv_ids:
+            feature_expr = Count(
+                "feature_values",
+                filter=Q(
+                    feature_values__feature_value_id__in=seed_fv_ids,
+                    feature_values__feature__recommendation_boost=True,
+                ),
+                distinct=True,
+            )
+        else:
+            feature_expr = Value(0, output_field=IntegerField())
+
+        qs = qs.annotate(
+            _feature_match=feature_expr,
+            _same_group=Case(
+                When(group_id__in=seed_groups, then=Value(1)),
+                default=Value(0), output_field=IntegerField(),
+            ) if seed_groups else Value(0, output_field=IntegerField()),
+            _same_category=Case(
+                When(category_id__in=seed_cats, then=Value(1)),
+                default=Value(0), output_field=IntegerField(),
+            ) if seed_cats else Value(0, output_field=IntegerField()),
+            _same_brand=Case(
+                When(brand_id__in=seed_brands, then=Value(1)),
+                default=Value(0), output_field=IntegerField(),
+            ) if seed_brands else Value(0, output_field=IntegerField()),
+        )
+        qs = qs.order_by(
+            "-_feature_match", "-_same_group",
+            "-_same_category", "-_same_brand", "name", "id",
+        )
+        return [p.id for p in qs[: limit * 3]]
+
+    if pool_q:
+        narrowed = base.filter(pool_q).distinct()
+        ids = _ranked(narrowed)
+        if len(ids) < limit * 3:
+            # Reta atvejais pool'as per mažas — papildome globaliu
+            # in-stock sąrašu (tail'as ir taip turėtų 0 score'ų).
+            ids += _ranked(base.exclude(id__in=ids))[: limit * 3 - len(ids)]
+        return ids[: limit * 3]
+    return _ranked(base)
 
 
 def recommend_product_ids(
@@ -183,15 +209,21 @@ def recommend_product_ids(
     cat_counts: Counter = Counter()
     cat_of: dict[int, int] = {}
 
-    def category_of(pid: int):
-        if pid not in cat_of:
-            cat_of[pid] = (
-                Product.objects.filter(id=pid)
-                .values_list("category_id", flat=True).first()
-            )
-        return cat_of[pid]
+    def _ensure_cat_map(ids) -> None:
+        """Bulk-load category_id visam kandidatų batch'ui — viena
+        užklausa vietoj per-id N+1."""
+        missing = [int(i) for i in ids if int(i) not in cat_of]
+        if not missing:
+            return
+        for pid, cid in Product.objects.filter(id__in=missing).values_list(
+            "id", "category_id"
+        ):
+            cat_of[int(pid)] = cid
 
     def take(ids, *, apply_cap=True):
+        ids = list(ids)
+        if apply_cap and diversify:
+            _ensure_cat_map(ids)
         for pid in ids:
             if len(picked) >= limit:
                 return
@@ -199,7 +231,7 @@ def recommend_product_ids(
             if pid in picked_set:
                 continue
             if apply_cap and diversify:
-                cid = category_of(pid)
+                cid = cat_of.get(pid)
                 if cid and cat_counts[cid] >= per_category_cap:
                     continue
                 cat_counts[cid] += 1
@@ -322,6 +354,15 @@ def rebuild_cooccurrence(*, lookback_days: int | None = None) -> dict:
                 ))
         ProductRelation.objects.bulk_create(
             auto_relations, ignore_conflicts=True)
+
+    # bulk_create/bulk delete apeina signalus — recs listing cache
+    # invaliduojamas rankiniu bump'u.
+    try:
+        from catalog.signals import bump_listing_ver
+
+        bump_listing_ver()
+    except Exception:
+        pass
 
     return {
         "orders_scanned": len(products_per_order),

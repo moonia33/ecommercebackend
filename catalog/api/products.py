@@ -57,6 +57,90 @@ def _serialize_product_page(
     )
 
 
+def _engine_browse(
+    *,
+    q,
+    shop_id,
+    channel,
+    category_slug,
+    brand_slug,
+    group_code,
+    feature,
+    option,
+    range_filter,
+    sort,
+    in_stock_only,
+    page,
+    page_size,
+    language_code,
+):
+    """Pilnas browse/search per Typesense → (ids, total_found).
+
+    Slug'ai rezolvuojami čia — tie patys 404 semantikos kaip
+    apply_catalog_filters. None = engine nepasiekiamas → ORM fallback.
+    """
+    from django.conf import settings as dj_settings
+
+    if getattr(dj_settings, "TESTING", False):
+        return None
+
+    from search.services import browse_products
+    from ..services.catalog_core import parse_pairs, parse_range_pairs
+    from ..models import ProductGroup
+    from ..localization import resolve_brand_by_slug, resolve_category_by_slug
+
+    category_id = None
+    if category_slug:
+        cat = resolve_category_by_slug(
+            slug=category_slug, language_code=language_code, is_active=True
+        )
+        if not cat:
+            raise HttpError(404, "Category not found")
+        category_id = int(cat.id)
+
+    brand_id = None
+    if brand_slug:
+        brand = resolve_brand_by_slug(
+            slug=brand_slug, language_code=language_code, is_active=True
+        )
+        if not brand:
+            raise HttpError(404, "Brand not found")
+        brand_id = int(brand.id)
+
+    group_id = None
+    if group_code:
+        group = ProductGroup.objects.filter(code=group_code, is_active=True).first()
+        if not group:
+            raise HttpError(404, "Product group not found")
+        group_id = int(group.id)
+
+    return browse_products(
+        q=q,
+        shop_id=shop_id,
+        channel=channel,
+        category_id=category_id,
+        brand_id=brand_id,
+        group_id=group_id,
+        feature_pairs=parse_pairs(feature) if feature else None,
+        option_pairs=parse_pairs(option) if option else None,
+        ranges=parse_range_pairs(range_filter) if range_filter else None,
+        sort=sort,
+        in_stock_only=in_stock_only,
+        page=page,
+        page_size=page_size,
+    )
+
+
+def _ordered_listing_qs(*, ids, qs_base):
+    """Base qs (su anotacijomis) sužymėtas paduota id tvarka."""
+    ids = list(dict.fromkeys(int(i) for i in ids))
+    ordering = Case(
+        *[When(id=pid, then=Value(pos)) for pos, pid in enumerate(ids)],
+        output_field=IntegerField(),
+    )
+    return qs_base.filter(id__in=ids).annotate(_rec_pos=ordering).order_by("_rec_pos")
+
+
 def _apply_search_engine(qs, *, q, shop_id, channel, sort, range_filter=None):
     """Resolve q via Typesense when configured.
 
@@ -126,6 +210,87 @@ def products(
     min_offer_price_expr = Min(offer_price_expr, filter=offer_filter)
 
     shop = _shop_or_404_when_strict(request)
+    shop_id = int(shop.id) if shop else None
+    page = max(1, int(page or 1))
+    page_size = max(1, min(int(page_size or 20), 100))
+
+    # Trumpas per-parametrų response cache — tą patį listing'ą mato visi
+    # (promo ctx neper-user); struktūros pokyčiai invaliduojami per
+    # `catalog:listing:ver`, stock drift'as — per TTL.
+    import hashlib
+
+    from django.conf import settings as dj_settings
+    from django.core.cache import cache
+
+    params_hash = hashlib.md5(
+        "|".join(str(x) for x in (
+            q, category_slug, brand_slug, group_code,
+            feature, option, range, sort,
+            bool(in_stock_only), page, page_size,
+        )).encode()
+    ).hexdigest()
+    listing_ver = cache.get("catalog:listing:ver", 1)
+    cache_key = (
+        f"catalog:listing:v1:{shop_id or 'x'}:{language_code}:"
+        f"{country_code}:{channel}:{params_hash}:v{listing_ver}"
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    def _cached(payload):
+        cache.set(
+            cache_key, payload,
+            int(getattr(dj_settings, "LISTING_CACHE_SECONDS", 60)),
+        )
+        return payload
+
+    # Pirminis kelias — Typesense browse: ids+found iš indekso, DB
+    # anotacijos tik 1 puslapio prekėms. ORM fallback žemiau.
+    engine = _engine_browse(
+        q=q,
+        shop_id=shop_id,
+        channel=channel,
+        category_slug=category_slug,
+        brand_slug=brand_slug,
+        group_code=group_code,
+        feature=feature,
+        option=option,
+        range_filter=range,
+        sort=sort,
+        in_stock_only=in_stock_only,
+        page=page,
+        page_size=page_size,
+        language_code=language_code,
+    )
+    if engine is not None:
+        ids, found = engine
+        qs_page = _ordered_listing_qs(
+            ids=ids,
+            qs_base=(
+                Product.objects.filter(is_active=True)
+                .select_related("brand", "category", "tax_class")
+                .prefetch_related(
+                    "images", "translations",
+                    "brand__translations", "category__translations",
+                )
+                .annotate(_min_variant_price=min_price_expr)
+                .annotate(_max_variant_price=max_price_expr)
+                .annotate(_min_offer_price=min_offer_price_expr)
+            ),
+        )
+        return _cached(
+            ProductPageOut(
+                count=found,
+                items=serialize_products_listing(
+                    qs=qs_page,
+                    country_code=country_code,
+                    channel=channel,
+                    shop_id=shop_id,
+                    language_code=language_code,
+                ),
+            )
+        )
 
     qs = (
         Product.objects.filter(is_active=True)
@@ -135,7 +300,6 @@ def products(
         .annotate(_max_variant_price=max_price_expr)
         .annotate(_min_offer_price=min_offer_price_expr)
     )
-    shop_id = int(shop.id) if shop else None
     qs = apply_shop_product_scope(qs=qs, shop_id=shop_id)
 
     qs = qs.annotate(
@@ -171,14 +335,16 @@ def products(
     if channel == "outlet":
         qs = qs.filter(_min_offer_price__isnull=False)
 
-    return _serialize_product_page(
-        qs=qs,
-        page=page,
-        page_size=page_size,
-        country_code=country_code,
-        channel=channel,
-        shop_id=shop_id,
-        language_code=language_code,
+    return _cached(
+        _serialize_product_page(
+            qs=qs,
+            page=page,
+            page_size=page_size,
+            country_code=country_code,
+            channel=channel,
+            shop_id=shop_id,
+            language_code=language_code,
+        )
     )
 
 

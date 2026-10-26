@@ -80,6 +80,26 @@ def product_recommendations(
         request, kind, country_code, channel, limit
     )
 
+    # Atsakymas identiškas visiems — trumpas per-parametrų cache
+    # (invalidacija per `catalog:listing:ver` + TTL stock drift'ui).
+    import hashlib
+
+    from django.conf import settings as dj_settings
+    from django.core.cache import cache
+
+    lang = get_request_language_code(request)
+    params_hash = hashlib.md5(
+        "|".join(str(x) for x in (slug, kind, limit)).encode()
+    ).hexdigest()
+    listing_ver = cache.get("catalog:listing:ver", 1)
+    cache_key = (
+        f"catalog:recs:v1:{shop_id or 'x'}:{lang}:"
+        f"{country_code}:{channel}:{params_hash}:v{listing_ver}"
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     source = (
         apply_shop_product_scope(
             qs=Product.objects.filter(is_active=True), shop_id=shop_id
@@ -97,10 +117,15 @@ def product_recommendations(
         channel=channel,
         limit=limit,
     )
-    return _serialize_ids(
+    payload = _serialize_ids(
         request, ids, shop_id=shop_id,
         country_code=country_code, channel=channel,
     )
+    cache.set(
+        cache_key, payload,
+        int(getattr(dj_settings, "LISTING_CACHE_SECONDS", 60)),
+    )
+    return payload
 
 
 @router.get("/cart", response=list[ProductListOut])

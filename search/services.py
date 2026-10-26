@@ -24,8 +24,24 @@ SORT_MAP = {
     "created_at": "created_ts:asc",
 }
 
+# Browse (q="*") sort'ai — ORM listing'o `apply_products_sorting`
+# atitikmuo. Visada prefiksuojama `stock_<ch>:desc` (in-stock-first).
+_BROWSE_SORTS = {
+    "price": "price_{ch}:asc,name_sort:asc",
+    "-price": "price_{ch}:desc,name_sort:asc",
+    "created": "created_ts:asc,name_sort:asc",
+    "created_at": "created_ts:asc,name_sort:asc",
+    "-created": "created_ts:desc,name_sort:asc",
+    "-created_at": "created_ts:desc,name_sort:asc",
+    "discounted": "disc_{ch}:desc,name_sort:asc",
+    "-discounted": "disc_{ch}:asc,name_sort:asc",
+    "best_selling": "popularity:desc,name_sort:asc",
+    "-best_selling": "popularity:asc,name_sort:asc",
+}
+
 _client = None
 _client_failed = False
+_browse_schema_ok = False
 _search_down_until = 0.0
 SEARCH_DOWN_SECONDS = 60.0
 
@@ -44,7 +60,7 @@ def note_search_failure(exc: BaseException) -> None:
             "Typesense unreachable (%s); search muted for %ds",
             exc, int(SEARCH_DOWN_SECONDS),
         )
-    _search_down_until = now + _SEARCH_DOWN_SECONDS
+    _search_down_until = now + SEARCH_DOWN_SECONDS
 
 
 def _is_not_found(exc: BaseException) -> bool:
@@ -62,6 +78,9 @@ SCHEMA = {
         # (verified on v28/v29). Diacritic folding is covered by the
         # pre-normalized `search_text` field instead.
         {"name": "name", "type": "string", "infix": True},
+        # Diakritikų nulaužtas+lowercase pavadinimas rikiavimui
+        # (artimiausia LT koliacijai byte-sort ribose).
+        {"name": "name_sort", "type": "string", "sort": True, "optional": True},
         {"name": "sku", "type": "string", "infix": True},
         {"name": "search_text", "type": "string", "optional": True, "infix": True},
         {"name": "slug", "type": "string", "index": False},
@@ -69,10 +88,18 @@ SCHEMA = {
         {"name": "brand_id", "type": "int32", "facet": True, "optional": True},
         {"name": "group_id", "type": "int32", "facet": True, "optional": True},
         {"name": "feature_facets", "type": "string[]", "facet": True},
+        {"name": "option_facets", "type": "string[]", "facet": True},
         {"name": "price_normal", "type": "float", "facet": True, "optional": True},
         {"name": "price_outlet", "type": "float", "facet": True, "optional": True},
         {"name": "vis_normal", "type": "bool"},
         {"name": "vis_outlet", "type": "bool"},
+        # int 0/1 kopijos — bool laukų negalima patikimai sort'inti,
+        # o listing'e visada rikiuojama in-stock-first.
+        {"name": "stock_normal", "type": "int32"},
+        {"name": "stock_outlet", "type": "int32"},
+        # offer < list (akcijos/ispardavimas) — "discounted" sort'ui.
+        {"name": "disc_normal", "type": "int32"},
+        {"name": "disc_outlet", "type": "int32"},
         {"name": "created_ts", "type": "int64"},
         {"name": "popularity", "type": "int32"},
     ],
@@ -125,7 +152,9 @@ def get_client():
     """Lazy Typesense client; None when unconfigured or circuit open."""
     global _client
     if _client is not None:
-        return _client
+        # Circuit breaker tikrinamas ir su sukurtu client'u — kitaip
+        # po sukūrimo kiekvienas request'as degintų timeout'ą outage metu.
+        return _client if search_available() else None
     if not search_available():
         return None
     import typesense
@@ -228,6 +257,94 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
+def _shop_scope_context() -> dict:
+    """Visi aktyvūs shop'ai + jų assortment rules + rule kategorijų
+    MPTT ranges — viena per batch'ą, o ne per-produktą-per-shop'ą."""
+    from api.models import Shop
+    from catalog.models import Category, ShopAssortmentRule
+
+    shops = [int(s.id) for s in Shop.objects.filter(is_active=True).only("id")]
+    rules = list(
+        ShopAssortmentRule.objects.filter(
+            shop_id__in=shops, is_active=True
+        ).order_by("-priority", "id")
+    )
+    rules_by_shop: dict[int, list] = {}
+    for r in rules:
+        rules_by_shop.setdefault(int(r.shop_id), []).append(r)
+
+    cat_ranges: dict[int, tuple] = {}
+    needed_cats = {int(r.category_id) for r in rules if r.category_id}
+    if needed_cats:
+        for cid, tree, lft, rght in Category.objects.filter(
+            id__in=needed_cats
+        ).values_list("id", "tree_id", "lft", "rght"):
+            cat_ranges[int(cid)] = (int(tree), int(lft), int(rght))
+
+    return {"shops": shops, "rules_by_shop": rules_by_shop, "cat_ranges": cat_ranges}
+
+
+def _shop_ids_for_product_ctx(product, scope_ctx: dict) -> list[int]:
+    """apply_shop_product_scope() ekvivalentas Python'e: include taisyklė
+    turi pataikyti bent vieną, exclude — nė vieną. Kategorijos lyginamos
+    per MPTT subtree (tree_id + lft/rght)."""
+    from catalog.models import ShopAssortmentRule
+
+    cat = getattr(product, "category", None)
+    p_cat = (
+        (int(cat.tree_id), int(cat.lft), int(cat.rght)) if cat else None
+    )
+    pid = int(product.id)
+    p_brand = int(product.brand_id) if product.brand_id else None
+    p_group = int(product.group_id) if product.group_id else None
+
+    def _rule_matches(r) -> bool:
+        ok = False
+        if r.product_id:
+            if int(r.product_id) != pid:
+                return False
+            ok = True
+        if r.category_id:
+            cond = scope_ctx["cat_ranges"].get(int(r.category_id))
+            if cond is None or p_cat is None:
+                return False
+            if not (
+                p_cat[0] == cond[0] and p_cat[1] >= cond[1] and p_cat[2] <= cond[2]
+            ):
+                return False
+            ok = True
+        if r.brand_id:
+            if int(r.brand_id) != p_brand:
+                return False
+            ok = True
+        if r.product_group_id:
+            if int(r.product_group_id) != p_group:
+                return False
+            ok = True
+        return ok
+
+    out: list[int] = []
+    for shop_id in scope_ctx["shops"]:
+        rules = scope_ctx["rules_by_shop"].get(shop_id) or []
+        if not rules:
+            out.append(shop_id)
+            continue
+        includes = [
+            r for r in rules
+            if r.scope == ShopAssortmentRule.Scope.INCLUDE
+        ]
+        if includes and not any(_rule_matches(r) for r in includes):
+            continue
+        if any(
+            _rule_matches(r)
+            for r in rules
+            if r.scope != ShopAssortmentRule.Scope.INCLUDE
+        ):
+            continue
+        out.append(shop_id)
+    return out
+
+
 def _shop_ids_for_product(product_id: int) -> list[int]:
     from api.models import Shop
     from catalog.models import Product
@@ -242,7 +359,9 @@ def _shop_ids_for_product(product_id: int) -> list[int]:
     return ids
 
 
-def product_document(product, *, numeric_codes=None) -> dict | None:
+def product_document(
+    product, *, numeric_codes=None, popularity: int = 0, shop_scope=None
+) -> dict | None:
     """Build the Typesense document for a product; None if not indexable."""
     from catalog.api.shared import _effective_offer_unit_net
     from catalog.models import InventoryItem
@@ -274,21 +393,35 @@ def product_document(product, *, numeric_codes=None) -> dict | None:
 
     # Only filterable features produce facet keys; spec-only data
     # (e.g. material/fabric composition) still enters search_text.
-    feature_facets = [
-        f"{pfv.feature.code}:{pfv.feature_value.value}"
-        for pfv in p.feature_values.select_related("feature", "feature_value")
-        if pfv.feature.is_active and pfv.feature.is_filterable
-        and pfv.feature_value.is_active
-    ]
+    # Facet keys deduplicated per product (set) — `code:value` IR
+    # `code:group_code` (ORM filtras yra OR(value, groups.code)).
+    feature_facets = set()
+    for pfv in p.feature_values.select_related("feature", "feature_value"):
+        if pfv.feature.is_active and pfv.feature.is_filterable and pfv.feature_value.is_active:
+            feature_facets.add(f"{pfv.feature.code}:{pfv.feature_value.value}")
+            feature_facets.update(
+                f"{pfv.feature.code}:{g.code}" for g in pfv.feature_value.groups.all()
+            )
     # Variant-level values are facets too (weight/size differ per variant);
     # a product is findable by any of its variants' feature values.
-    feature_facets += [
-        f"{vfv.feature.code}:{vfv.feature_value.value}"
-        for v in variants
-        for vfv in v.feature_values.all()
-        if vfv.feature.is_active and vfv.feature.is_filterable
-        and vfv.feature_value.is_active
-    ]
+    for v in variants:
+        for vfv in v.feature_values.all():
+            if vfv.feature.is_active and vfv.feature.is_filterable and vfv.feature_value.is_active:
+                feature_facets.add(f"{vfv.feature.code}:{vfv.feature_value.value}")
+                feature_facets.update(
+                    f"{vfv.feature.code}:{g.code}" for g in vfv.feature_value.groups.all()
+                )
+
+    # Option values atskirame lauke: `option=` filtras atitinka TIK variantų
+    # option values (code + value-group code), `feature=` — abu laukus.
+    option_facets = set()
+    for v in variants:
+        for vov in v.option_values.all():
+            if vov.option_type.is_active and vov.option_value.is_active:
+                option_facets.add(f"{vov.option_type.code}:{vov.option_value.code}")
+                option_facets.update(
+                    f"{vov.option_type.code}:{g.code}" for g in vov.option_value.groups.all()
+                )
 
     search_bits = [
         p.name, p.sku,
@@ -340,23 +473,48 @@ def product_document(product, *, numeric_codes=None) -> dict | None:
             if vov.option_type.is_active and vov.option_value.is_active:
                 _push_num(vov.option_type.code, vov.option_value)
 
+    # "discounted" sort: ar pigiausias offer'as žemiau list kainos.
+    list_prices = [v.price_eur for v in variants if v.price_eur is not None]
+    list_min = min(list_prices) if list_prices else None
+
+    def _disc(offer_price) -> int:
+        if offer_price is None or list_min is None:
+            return 0
+        return 1 if offer_price < list_min else 0
+
+    if shop_scope is not None:
+        shop_ids = _shop_ids_for_product_ctx(p, shop_scope)
+    else:
+        # Fallback: per-shop ORM check (senas kelias), kai ctx nepaduotas
+        # ar jo sukurti nepavyko.
+        try:
+            shop_ids = _shop_ids_for_product_ctx(p, _shop_scope_context())
+        except Exception:
+            shop_ids = _shop_ids_for_product(p.id)
+
     return {
         "id": str(p.id),
-        "shop_ids": _shop_ids_for_product(p.id),
+        "shop_ids": shop_ids,
         "name": p.name or "",
+        "name_sort": _norm(p.name or "")[:255],
         "sku": p.sku or "",
         "search_text": search_text[:6000],
         "slug": p.slug or "",
         "category_ids": category_ids,
         "brand_id": int(p.brand_id) if p.brand_id else None,
         "group_id": int(p.group_id) if p.group_id else None,
-        "feature_facets": feature_facets,
+        "feature_facets": sorted(feature_facets),
+        "option_facets": sorted(option_facets),
         "price_normal": float(price_normal) if price_normal is not None else None,
         "price_outlet": float(price_outlet) if price_outlet is not None else None,
         "vis_normal": price_normal is not None,
         "vis_outlet": price_outlet is not None,
+        "stock_normal": 1 if price_normal is not None else 0,
+        "stock_outlet": 1 if price_outlet is not None else 0,
+        "disc_normal": _disc(price_normal),
+        "disc_outlet": _disc(price_outlet),
         "created_ts": int(p.created_at.timestamp()) if p.created_at else 0,
-        "popularity": 0,
+        "popularity": int(popularity or 0),
         **numeric,
     }
 
@@ -365,10 +523,13 @@ _DOC_QS_SELECT = ("brand", "category")
 _DOC_QS_PREFETCH = ("variants", "variants__inventory_items",
                     "variants__feature_values", "variants__feature_values__feature",
                     "variants__feature_values__feature_value",
+                    "variants__feature_values__feature_value__groups",
                     "variants__option_values", "variants__option_values__option_type",
                     "variants__option_values__option_value",
+                    "variants__option_values__option_value__groups",
                     "feature_values", "feature_values__feature",
-                    "feature_values__feature_value")
+                    "feature_values__feature_value",
+                    "feature_values__feature_value__groups")
 
 
 def index_products(product_ids: Iterable[int]) -> int:
@@ -385,13 +546,42 @@ def index_products(product_ids: Iterable[int]) -> int:
         .select_related(*_DOC_QS_SELECT)
         .prefetch_related(*_DOC_QS_PREFETCH)
     )
+
+    # popularity = sumokėtų užsakymų kiekis per produktą (viena agregacija
+    # per batch'ą, o ne per-produktą).
+    popularity_by_pid: dict[int, int] = {}
+    try:
+        from checkout.models import Order, OrderLine
+        from django.db.models import Sum
+
+        for row in (
+            OrderLine.objects.filter(
+                order__status=Order.Status.PAID,
+                variant__product_id__in=ids,
+            )
+            .values("variant__product_id")
+            .annotate(s=Sum("qty"))
+        ):
+            popularity_by_pid[int(row["variant__product_id"])] = int(row["s"] or 0)
+    except Exception:
+        pass
+
     docs = []
     seen_ids = set()
     stale_ids = []
     numeric_codes = set(numeric_attribute_codes())
+    try:
+        shop_scope = _shop_scope_context()
+    except Exception:
+        shop_scope = None
     for p in qs:
         seen_ids.add(p.id)
-        doc = product_document(p, numeric_codes=numeric_codes)
+        doc = product_document(
+            p,
+            numeric_codes=numeric_codes,
+            popularity=popularity_by_pid.get(int(p.id), 0),
+            shop_scope=shop_scope,
+        )
         if doc:
             docs.append(doc)
         else:
@@ -576,9 +766,141 @@ def search_product_ids(
             res2 = client.collections[COLLECTION_NAME].documents.search(params)
             ids += [int(h["document"]["id"]) for h in res2.get("hits", [])]
         return ids[:limit]
-    except Exception:
+    except Exception as exc:
+        note_search_failure(exc)
         if not _client_failed:
             logger.exception("Typesense search failed; falling back to ORM")
+            _client_failed = True
+        return None
+
+
+def _facet_value_clause(field: str, code: str, value: str) -> str:
+    """`field:=[`code:value`]` — backtick-quote'as leidžia ':' reikšmėje."""
+    v = f"{code}:{value}"
+    return f"{field}:=[`{v}`]"
+
+
+def browse_products(
+    *,
+    q: str | None,
+    shop_id: int | None,
+    channel: str,
+    category_id: int | None = None,
+    brand_id: int | None = None,
+    group_id: int | None = None,
+    feature_pairs: list[tuple[str, str]] | None = None,
+    option_pairs: list[tuple[str, str]] | None = None,
+    ranges: list[tuple[str, object, object]] | None = None,
+    sort: str | None = None,
+    in_stock_only: bool = False,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[int], int] | None:
+    """Pilnas katalogo browse/search per Typesense.
+
+    Grąžina (ids, total_found) — `found` iš Typesense nemokamai pakeičia
+    COUNT užklausą. None = engine nepasiekiamas → caller naudoja ORM
+    fallback'ą (apply_catalog_filters kelias).
+
+    Filtrų atitikmenys ORM'e:
+      - category_id: doc'e yra ancestors+own → `category_ids:=[id]` = subtree
+      - feature=code:val → (feature_facets || option_facets) contains — ORM
+        turi 3-krypčio OR (product features | variant features | options)
+      - option=type:val → option_facets contains (type:val arba type:group)
+      - range → num_* fields (identiška search_product_ids logikai)
+      - in-stock-first rikiavimas: `stock_<ch>:desc` prefiksas
+    """
+    global _client_failed, _browse_schema_ok
+    client = get_client()
+    if client is None:
+        return None
+
+    # Vieną kartą per procesą: prideda naujus schema laukus (stock_*,
+    # disc_*, option_facets). Seni doc'ai tada rikiuojami su missing
+    # reikšmėmis — pilnas teisingumas po reindex'o.
+    if not _browse_schema_ok:
+        try:
+            ensure_collection()
+            _browse_schema_ok = True
+        except Exception:
+            pass
+
+    ch = "outlet" if channel == "outlet" else "normal"
+
+    filters: list[str] = []
+    if shop_id:
+        filters.append(f"shop_ids:=[{int(shop_id)}]")
+    if in_stock_only:
+        filters.append(f"vis_{ch}:=true")
+    if category_id:
+        filters.append(f"category_ids:=[{int(category_id)}]")
+    if brand_id:
+        filters.append(f"brand_id:={int(brand_id)}")
+    if group_id:
+        filters.append(f"group_id:={int(group_id)}")
+    for code, val in feature_pairs or []:
+        clause = _facet_value_clause("feature_facets", code, val)
+        opt_clause = _facet_value_clause("option_facets", code, val)
+        filters.append(f"({clause} || {opt_clause})")
+    for code, val in option_pairs or []:
+        filters.append(_facet_value_clause("option_facets", code, val))
+
+    if ranges:
+        try:
+            valid_fields = {num_field_name(c) for c in numeric_attribute_codes()}
+        except Exception:
+            valid_fields = None
+        for code, lo, hi in ranges:
+            field = num_field_name(code)
+            if valid_fields is not None and field not in valid_fields:
+                continue
+            if lo is not None and hi is not None:
+                filters.append(f"{field}:[{lo}..{hi}]")
+            elif lo is not None:
+                filters.append(f"{field}:>={lo}")
+            elif hi is not None:
+                filters.append(f"{field}:<={hi}")
+
+    qv = (q or "").strip()
+    if qv:
+        # Tekstinė paieška: explicit sort tik jei SORT_MAP turi atitikmenį
+        # (default — Typesense relevance/_text_match, kaip dabar).
+        sort_by = SORT_MAP.get((sort or "").strip().lower(), "")
+        params = {
+            "q": qv,
+            "query_by": "name,sku,search_text",
+            "query_by_weights": "4,3,1",
+            "infix": "fallback",
+            "num_typos": 2,
+        }
+    else:
+        # Browse: q="*" match-all + pilnas ORM sort'ų atitikmuo.
+        sort_v = (sort or "").strip().lower()
+        body = _BROWSE_SORTS.get(sort_v, "name_sort:asc")
+        body = body.replace("{ch}", ch)
+        sort_by = f"stock_{ch}:desc,{body}"
+        params = {"q": "*"}
+
+    params["filter_by"] = " && ".join(filters)
+    params["per_page"] = min(250, max(1, int(page_size)))
+    params["page"] = max(1, int(page))
+    if sort_by:
+        params["sort_by"] = sort_by
+
+    try:
+        res = client.collections[COLLECTION_NAME].documents.search(params)
+        hits = res.get("hits", [])
+        ids = [int(h["document"]["id"]) for h in hits]
+        found = int(res.get("found") or len(ids))
+        if found == 0 and not qv and not filters:
+            # Tuščias indeksas (mid-rebuild / dar neindeksuota) — ORM
+            # fallback, kad katalogas neparodytų 0 prekių.
+            return None
+        return ids, found
+    except Exception as exc:
+        note_search_failure(exc)
+        if not _client_failed:
+            logger.exception("Typesense browse failed; falling back to ORM")
             _client_failed = True
         return None
 

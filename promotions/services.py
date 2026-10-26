@@ -182,6 +182,9 @@ def load_active_promo_rules(*, channel: str | None = None, shop_id: int | None =
     return [r for r in qs if r.allows_channel(channel=ch)]
 
 
+_MISSING = object()
+
+
 def find_best_promo_rule(
     *,
     channel: str,
@@ -192,6 +195,9 @@ def find_best_promo_rule(
     customer_group_id: int | None,
     rules: list | None = None,
     shop_id: int | None = None,
+    product_group_id=_MISSING,
+    feature_value_ids=_MISSING,
+    cat_tree: dict | None = None,
 ):
     from promotions.models import PromoRule
 
@@ -212,7 +218,11 @@ def find_best_promo_rule(
 
     # Kategorijos taisyklė galioja ir visoms jos SUBKATEGORIJOMS —
     # lyginame per MPTT (tree_id + lft/rght), ne tik tiesioginę id.
-    _cat_tree: dict[int | None, tuple[int, int, int] | None] = {}
+    # `cat_tree` caller'io paduodamas dalintas dict — vienas cache'as per
+    # request/listing (vietoj per-product uzklausu).
+    _cat_tree: dict[int | None, tuple[int, int, int] | None] = (
+        cat_tree if cat_tree is not None else {}
+    )
 
     def _cat_range(cat_id: int | None):
         """(tree_id, lft, rght) produkto ar sąlygos kategorijai, cached."""
@@ -278,21 +288,46 @@ def find_best_promo_rule(
             "feature_value_ids": set(),
         }
 
-        # product_group_id and feature_value_ids resolution are optional and lazy.
-        # If caller doesn't provide them, we can infer only if product_id is present.
-        if product_id is not None:
-            try:
-                from catalog.models import ProductFeatureValue, Product
+        # product_group_id / feature_value_ids rezoliucija lazy IR atskira
+        # per lauką — DB užklausa tik jei sąlyga to klauso ir calleris
+        # reikšmės nepateikė (listing'e jos bulk-prefetch'inamos).
+        _resolved = {"group": False, "fv": False}
 
-                p = Product.objects.filter(id=int(product_id)).only("id", "group_id").first()
-                ctx["product_group_id"] = int(p.group_id) if p and p.group_id else None
+        def _ctx_group_id() -> int | None:
+            if not _resolved["group"]:
+                _resolved["group"] = True
+                if product_group_id is not _MISSING:
+                    ctx["product_group_id"] = (
+                        int(product_group_id) if product_group_id is not None else None
+                    )
+                elif product_id is not None:
+                    try:
+                        from catalog.models import Product
 
-                fvs = ProductFeatureValue.objects.filter(product_id=int(product_id)).values_list(
-                    "feature_value_id", flat=True
-                )
-                ctx["feature_value_ids"] = {int(x) for x in fvs if x is not None}
-            except Exception:
-                pass
+                        p = Product.objects.filter(id=int(product_id)).only("id", "group_id").first()
+                        ctx["product_group_id"] = int(p.group_id) if p and p.group_id else None
+                    except Exception:
+                        pass
+            return ctx["product_group_id"]
+
+        def _ctx_feature_ids() -> set[int]:
+            if not _resolved["fv"]:
+                _resolved["fv"] = True
+                if feature_value_ids is not _MISSING:
+                    ctx["feature_value_ids"] = {
+                        int(x) for x in feature_value_ids if x is not None
+                    }
+                elif product_id is not None:
+                    try:
+                        from catalog.models import ProductFeatureValue
+
+                        fvs = ProductFeatureValue.objects.filter(product_id=int(product_id)).values_list(
+                            "feature_value_id", flat=True
+                        )
+                        ctx["feature_value_ids"] = {int(x) for x in fvs if x is not None}
+                    except Exception:
+                        pass
+            return ctx["feature_value_ids"]
 
         def condition_matches(c) -> bool:
             k = str(c.kind)
@@ -305,9 +340,11 @@ def find_best_promo_rule(
             if k == "variant":
                 return bool(c.variant_id) and ctx["variant_id"] == int(c.variant_id)
             if k == "product_group":
-                return bool(c.product_group_id) and ctx["product_group_id"] == int(c.product_group_id)
+                gid = _ctx_group_id()
+                return bool(c.product_group_id) and gid == int(c.product_group_id)
             if k == "feature_value":
-                return bool(c.feature_value_id) and int(c.feature_value_id) in ctx["feature_value_ids"]
+                fids = _ctx_feature_ids()
+                return bool(c.feature_value_id) and int(c.feature_value_id) in fids
             return False
 
         # OR between groups, AND within group
@@ -344,6 +381,9 @@ def apply_promo_to_unit_net(
     is_discounted_offer: bool,
     rules: list | None = None,
     shop_id: int | None = None,
+    product_group_id=_MISSING,
+    feature_value_ids=_MISSING,
+    cat_tree: dict | None = None,
 ):
     base_unit_net = Decimal(base_unit_net)
     if base_unit_net <= 0:
@@ -361,6 +401,9 @@ def apply_promo_to_unit_net(
         customer_group_id=customer_group_id,
         rules=rules,
         shop_id=shop_id,
+        product_group_id=product_group_id,
+        feature_value_ids=feature_value_ids,
+        cat_tree=cat_tree,
     )
     if not rule:
         return base_unit_net, None

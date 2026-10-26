@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import environ
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# `manage.py test` / pytest — deterministinis režimas (Typesense browse
+# engine endpoint'uose išjungiamas, kad test DB nesusidurtų su realiu
+# indeksu; search app unit testai vis tiek naudoja mock'intą client'ą).
+TESTING = "test" in sys.argv[1:] or "pytest" in sys.argv[0]
 
 env = environ.Env(
     DEBUG=(bool, False),
@@ -126,6 +132,11 @@ AUTH_COOKIE_DOMAIN = (env("AUTH_COOKIE_DOMAIN", default="") or "").strip() or No
 AUTH_RETURN_ACCESS_IN_BODY = env.bool("AUTH_RETURN_ACCESS_IN_BODY", default=False)
 
 RECENTLY_VIEWED_MAX = env.int("RECENTLY_VIEWED_MAX", default=12)
+
+# Listing'o (produktų sąrašo) HTTP atsako cache — TTL trumpas, kad
+# likučio/kainos pokyčiai atsirastų greitai; struktūriniai pokyčiai
+# (prekės, taisyklės, promo) invaliduojami per `catalog:listing:ver`.
+LISTING_CACHE_SECONDS = env.int("LISTING_CACHE_SECONDS", default=60)
 
 RECOMMENDATION_LOOKBACK_DAYS = env.int("RECOMMENDATION_LOOKBACK_DAYS", default=180)
 RECOMMENDATION_AUTO_TOP_N = env.int("RECOMMENDATION_AUTO_TOP_N", default=20)

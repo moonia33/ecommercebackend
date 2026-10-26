@@ -10,11 +10,22 @@ from ninja.errors import HttpError
 
 from catalog.localization import localize_brand, localize_category, localize_product
 from catalog.api_schemas import ProductListOut
-from catalog.models import Product, ProductVideo
+from catalog.models import Product, ProductFeatureValue, ProductVideo
 from catalog.services.image_out import image_out
 from catalog.services.money import discount_percent, money_out
 from pricing.services import get_vat_rate
-from promotions.services import apply_promo_to_unit_net, load_active_promo_rules
+from promotions.services import _MISSING, apply_promo_to_unit_net, load_active_promo_rules
+
+
+def _rules_need_feature_ctx(rules: list) -> bool:
+    """Ar aktyviose promo taisyklėse yra feature_value sąlygų —
+    tik tada verta bulk-fetch'inti ProductFeatureValue."""
+    for r in rules or []:
+        for g in list(getattr(r, "condition_groups", []).all()):
+            for c in list(g.conditions.all()):
+                if str(c.kind) == "feature_value":
+                    return True
+    return False
 
 
 def apply_products_sorting(*, qs, sort: str | None):
@@ -110,12 +121,21 @@ def serialize_products_listing(
         vat_cache[key] = Decimal(rate)
         return vat_cache[key]
 
-    promo_rules: list | None = None
+    promo_rules: list = []
+    promo_ctx: dict = {"cat_tree": {}}
+    if products:
+        promo_rules = load_active_promo_rules(channel=channel, shop_id=shop_id)
+        # Bulk prefetch promo ctx visam batch'ui — vietoj per-product N+1.
+        if _rules_need_feature_ctx(promo_rules):
+            fv_map: dict[int, set[int]] = {}
+            for pid, fvid in ProductFeatureValue.objects.filter(
+                product_id__in=[p.id for p in products]
+            ).values_list("product_id", "feature_value_id"):
+                fv_map.setdefault(int(pid), set()).add(int(fvid))
+            promo_ctx["feature_value_ids"] = fv_map
 
     out: list[ProductListOut] = []
     for p in products:
-        if promo_rules is None:
-            promo_rules = load_active_promo_rules(channel=channel, shop_id=shop_id)
         product_loc = localize_product(p, language_code=language_code)
         brand_loc = localize_brand(p.brand, language_code=language_code) if p.brand else None
         category_loc = localize_category(p.category, language_code=language_code) if p.category else None
@@ -138,6 +158,11 @@ def serialize_products_listing(
             allow_additional_promotions=allow_additional_promotions,
             is_discounted_offer=is_discounted_offer,
             rules=promo_rules,
+            product_group_id=p.group_id,
+            feature_value_ids=(promo_ctx["feature_value_ids"].get(p.id) or set())
+            if "feature_value_ids" in promo_ctx
+            else _MISSING,
+            cat_tree=promo_ctx["cat_tree"],
         )
 
         compare_at_price = None
