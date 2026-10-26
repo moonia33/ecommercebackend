@@ -892,10 +892,15 @@ def browse_products(
         hits = res.get("hits", [])
         ids = [int(h["document"]["id"]) for h in hits]
         found = int(res.get("found") or len(ids))
-        if found == 0 and not qv and not filters:
-            # Tuščias indeksas (mid-rebuild / dar neindeksuota) — ORM
-            # fallback, kad katalogas neparodytų 0 prekių.
-            return None
+        if found == 0 and not qv:
+            # Stale/partial-index guard: browse grąžino 0 — gali būti
+            # legit tuščia, bet ir mid-rebuild / dar neindeksuota.
+            # Patikriname per ORM EXISTS (pigu) — jei DB turi aktyvių
+            # prekių, index'ui nepasitikima → ORM fallback.
+            from catalog.models import Product
+
+            if Product.objects.filter(is_active=True).exists():
+                return None
         return ids, found
     except Exception as exc:
         note_search_failure(exc)
