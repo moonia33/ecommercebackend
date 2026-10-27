@@ -200,8 +200,13 @@ def resolve_product_by_slug(*, slug: str, language_code: str | None, is_active: 
         language_code=language_code,
     )
     if translation is None:
-        return None
-    product = translation.product
+        from .services.slugs import resolve_redirect
+
+        product = resolve_redirect(slug, language_code)
+        if product is None:
+            return None
+    else:
+        product = translation.product
     if is_active and not bool(product.is_active):
         return None
     return product
