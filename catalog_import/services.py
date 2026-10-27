@@ -11,6 +11,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connection, transaction
+from django.db.models import Q
 from django.utils import timezone
 from pydantic import ValidationError
 
@@ -66,14 +67,20 @@ def create_run(
     triggered_by=None,
     options: dict | None = None,
 ) -> ImportRun:
-    """Create an ImportRun. Same kind+sha256 file returns the existing run."""
+    """Create an ImportRun. Same kind+sha256 file returns the existing run.
+
+    Dry-runs and real runs are deduplicated separately, so a dry-run never
+    swallows the following real apply of the same file (and vice versa).
+    """
     digest = file_sha256(payload_bytes)
-    existing = (
-        ImportRun.objects.filter(kind=kind, file_sha256=digest)
-        .exclude(status=ImportRun.Status.FAILED)
-        .order_by("-id")
-        .first()
+    qs = ImportRun.objects.filter(kind=kind, file_sha256=digest).exclude(
+        status=ImportRun.Status.FAILED
     )
+    if (options or {}).get("dry_run"):
+        qs = qs.filter(options__dry_run=True)
+    else:
+        qs = qs.filter(Q(options__dry_run=False) | ~Q(options__has_key="dry_run"))
+    existing = qs.order_by("-id").first()
     if existing:
         return existing
     return ImportRun.objects.create(

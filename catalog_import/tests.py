@@ -374,6 +374,22 @@ class CatalogImportTestCase(TestCase):
         r2 = create_run(kind=ImportRun.Kind.CATALOG, payload_bytes=payload)
         self.assertEqual(r1.id, r2.id)
 
+    def test_dry_run_does_not_swallow_real_apply_of_same_file(self):
+        payload = _catalog_doc([])
+        dry = create_run(
+            kind=ImportRun.Kind.CATALOG, payload_bytes=payload, options={"dry_run": True}
+        )
+        execute_run(dry)
+        real = create_run(
+            kind=ImportRun.Kind.CATALOG, payload_bytes=payload, options={"dry_run": False}
+        )
+        self.assertNotEqual(dry.id, real.id)
+        self.assertFalse(real.options.get("dry_run"))
+        again = create_run(
+            kind=ImportRun.Kind.CATALOG, payload_bytes=payload, options={"dry_run": True}
+        )
+        self.assertEqual(again.id, dry.id)
+
     def test_dry_run_writes_nothing(self):
         run = self._run(
             [{"code": "dry", "price_net": "1.00", "tax_class": "standard",
