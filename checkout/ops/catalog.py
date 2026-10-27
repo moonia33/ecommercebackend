@@ -319,6 +319,7 @@ def ops_catalog_products(
             slug=(p.slug or ""),
             is_active=bool(p.is_active),
             brand_name=(getattr(p.brand, "name", "") or "") if p.brand_id else "",
+            category_id=(int(p.category_id) if p.category_id else None),
             category_name=(getattr(p.category, "name", "") or "") if p.category_id else "",
             variants_count=int(getattr(p, "variants_count", 0)),
             thumbnail_url=_product_thumbnail_url(p),

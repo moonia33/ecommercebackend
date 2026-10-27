@@ -427,6 +427,7 @@ class OpsInventoryItemOut(Schema):
     product_name: str
     thumbnail_url: str = ""
     warehouse_code: str
+    warehouse_kind: str = ""
     qty_on_hand: int
     qty_reserved: int
     qty_available: int
@@ -447,6 +448,7 @@ class OpsCatalogProductOut(Schema):
     slug: str
     is_active: bool
     brand_name: str = ""
+    category_id: int | None = None
     category_name: str = ""
     variants_count: int
     thumbnail_url: str = ""

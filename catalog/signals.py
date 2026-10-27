@@ -21,35 +21,45 @@ from .models import (
 )
 
 
+_BUMP_DEBOUNCE_SECONDS = 1.0
+_bump_last: dict[str, float] = {}
+
+
+def _incr_version(key: str) -> None:
+    """Cache versijos bump su debounce — vienas Redis roundtrip per
+    ~1s langą. Bulk operacijos (importas, ops save'ai, queryset.delete())
+    šaudo šimtus signalų; versija jau buvo pakelta pirmuoju — pakankamai
+    (likučių/kainų drift'ą vis tiek dengia TTL)."""
+    import time
+
+    from django.core.cache import cache
+    now = time.monotonic()
+    if now - _bump_last.get(key, 0.0) < _BUMP_DEBOUNCE_SECONDS:
+        return
+    _bump_last[key] = now
+    try:
+        cache.incr(key)
+    except ValueError:
+        cache.set(key, 2)
+
+
 def _bump_catalog_categories_cache(**kwargs):
     """Kategorijų endpoint'o cache versija — naujos kategorijos, rikiavimas
     arba prekės→kategorija priskyrimas matomas iškart, ne per TTL."""
-    from django.core.cache import cache
-    try:
-        cache.incr("catalog:categories:ver")
-    except ValueError:
-        cache.set("catalog:categories:ver", 2)
+    _incr_version("catalog:categories:ver")
 
 
 def _bump_catalog_facets_cache(**kwargs):
     """Facets endpoint'o cache versija — feature/option/facet konfigūracijos
     ir prekių priskyrimų pakeitimai matomi iškart, ne per TTL."""
-    from django.core.cache import cache
-    try:
-        cache.incr("catalog:facets:ver")
-    except ValueError:
-        cache.set("catalog:facets:ver", 2)
+    _incr_version("catalog:facets:ver")
 
 
 def bump_listing_ver(**kwargs):
     """`catalog:listing:ver` — produktų sąrašo HTTP cache versija.
     Struktūriniai pokyčiai invaliduojami iškart; stock/qty drift'ą
     dengia trumpas TTL (qty bulk_update'ai signalų nešaudo)."""
-    from django.core.cache import cache
-    try:
-        cache.incr("catalog:listing:ver")
-    except ValueError:
-        cache.set("catalog:listing:ver", 2)
+    _incr_version("catalog:listing:ver")
 
 
 def _listing_bump_senders():
