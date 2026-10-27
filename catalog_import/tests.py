@@ -779,3 +779,76 @@ class OptionCleanupTests(CatalogImportTestCase):
         self.assertEqual(
             ProductOptionType.objects.filter(product=variant.product).count(), 0
         )
+
+
+class ProductSlugTestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        TaxClass.objects.get_or_create(code="standard", defaults={"name": "Standard"})
+
+    def _run(self, items):
+        run = create_run(
+            kind=ImportRun.Kind.CATALOG,
+            payload_bytes=_catalog_doc(items),
+            options={},
+        )
+        return execute_run(run)
+
+    def _item(self, lt_name, en_name="Spool Nexave 2500"):
+        return {
+            "code": "slug1", "price_net": "1.00", "tax_class": "standard",
+            "translations": {
+                "lt": {"name": lt_name, "slug": "ignored-feed-slug"},
+                "en": {"name": en_name},
+            },
+        }
+
+    def test_slug_follows_name_per_language_and_keeps_redirect(self):
+        from catalog.localization import resolve_product_by_slug
+        from catalog.models import ProductSlugRedirect
+
+        self._run([self._item("Spool Nexave 2500")])
+        product = Product.objects.get(sku="slug1")
+        self.assertEqual(product.slug, "spool-nexave-2500")
+
+        self._run([self._item("Atsarginis būgnelis Shimano Nexave 2500",
+                              en_name="Shimano Nexave 2500 Spare Spool")])
+        product.refresh_from_db()
+        self.assertEqual(product.slug, "atsarginis-bugnelis-shimano-nexave-2500")
+        en = product.translations.get(language_code="en")
+        self.assertEqual(en.slug, "shimano-nexave-2500-spare-spool")
+        self.assertTrue(ProductSlugRedirect.objects.filter(
+            language_code="lt", slug="spool-nexave-2500", product=product).exists())
+        self.assertTrue(ProductSlugRedirect.objects.filter(
+            language_code="en", slug="spool-nexave-2500", product=product).exists())
+        self.assertEqual(
+            resolve_product_by_slug(slug="spool-nexave-2500", language_code="lt"), product)
+
+        # Idempotent: tas pats pavadinimas slug'o nekeičia.
+        self._run([self._item("Atsarginis būgnelis Shimano Nexave 2500",
+                              en_name="Shimano Nexave 2500 Spare Spool")])
+        product.refresh_from_db()
+        self.assertEqual(product.slug, "atsarginis-bugnelis-shimano-nexave-2500")
+        self.assertEqual(ProductSlugRedirect.objects.count(), 2)
+
+    def test_suffixed_slug_is_kept_for_duplicate_names(self):
+        for code in ("dup1", "dup2"):
+            self._run([{"code": code, "price_net": "1.00", "tax_class": "standard",
+                        "translations": {"lt": {"name": "Varžtas"}}}])
+        slugs = {Product.objects.get(sku=c).slug for c in ("dup1", "dup2")}
+        self.assertEqual(slugs, {"varztas", "varztas-2"})
+        self._run([{"code": "dup2", "price_net": "1.00", "tax_class": "standard",
+                    "translations": {"lt": {"name": "Varžtas"}}}])
+        self.assertEqual(Product.objects.get(sku="dup2").slug, "varztas-2")
+
+    def test_sync_product_slugs_command(self):
+        from django.core.management import call_command
+
+        from catalog.models import ProductSlugRedirect
+
+        self._run([self._item("Atsarginis būgnelis")])
+        Product.objects.filter(sku="slug1").update(slug="spool-old")
+        call_command("sync_product_slugs", stdout=open("/dev/null", "w"))
+        product = Product.objects.get(sku="slug1")
+        self.assertEqual(product.slug, "atsarginis-bugnelis")
+        self.assertTrue(ProductSlugRedirect.objects.filter(slug="spool-old").exists())

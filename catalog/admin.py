@@ -33,6 +33,7 @@ from .models import (
     OptionValueGroup,
     OptionValueTranslation,
     Product,
+    ProductSlugRedirect,
     ProductTranslation,
     ProductFeatureValue,
     ProductGroup,
@@ -1234,3 +1235,11 @@ class ShopPriceRuleAdmin(admin.ModelAdmin):
     list_filter = ("price_list__shop", "price_list", "rule_type", "is_active")
     search_fields = ("price_list__code", "variant__sku", "product__sku", "product__name")
     autocomplete_fields = ("price_list", "product", "variant", "category", "brand", "product_group")
+
+
+@admin.register(ProductSlugRedirect)
+class ProductSlugRedirectAdmin(admin.ModelAdmin):
+    list_display = ("slug", "language_code", "product", "created_at")
+    list_filter = ("language_code",)
+    search_fields = ("slug", "product__sku", "product__name")
+    raw_id_fields = ("product",)

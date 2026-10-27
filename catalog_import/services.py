@@ -12,7 +12,6 @@ from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import connection, transaction
 from django.utils import timezone
-from django.utils.text import slugify
 from pydantic import ValidationError
 
 from catalog.models import (
@@ -34,6 +33,12 @@ from catalog.models import (
     OptionType,
     OptionValue,
     Warehouse,
+)
+
+from catalog.services.slugs import (
+    assign_product_slug,
+    assign_translation_slug,
+    slug_base,
 )
 
 from .models import ImportItem, ImportRun
@@ -365,8 +370,10 @@ def _apply_product(run: ImportRun, item: ImportProductIn, seen_ids: set[int], ro
     product.additional_info = item.additional_info or {}
     product.is_part = item.is_part
     if created or not product.slug:
-        product.slug = _unique_slug(Product, lt.slug or lt.name)
+        product.slug = _unique_slug(Product, lt.name)
     product.save()
+    if not created and assign_product_slug(product, lt.name):
+        product.save(update_fields=["slug"])
 
     seen_ids.add(product.id)
     _sync_translations(product, item)
@@ -420,7 +427,7 @@ def _match_product(item: ImportProductIn, source: str) -> Product | None:
 
 
 def _unique_slug(model, base: str) -> str:
-    slug = slugify(base) or "product"
+    slug = slug_base(base)
     candidate, i = slug, 2
     while model.objects.filter(slug=candidate).exists():
         candidate = f"{slug}-{i}"
@@ -453,13 +460,14 @@ def _sync_translations(product: Product, item: ImportProductIn) -> None:
         tr_obj.seo_description = tr.seo_description or ""
         tr_obj.seo_keywords = tr.seo_keywords or ""
         if created or not tr_obj.slug:
-            slug_base = tr.slug or tr.name
-            tr_obj.slug = _unique_translation_slug(product, lang, slug_base)
+            tr_obj.slug = _unique_translation_slug(product, lang, tr.name)
+        else:
+            assign_translation_slug(tr_obj, tr.name)
         tr_obj.save()
 
 
 def _unique_translation_slug(product: Product, lang: str, base: str) -> str:
-    slug = slugify(base) or "product"
+    slug = slug_base(base)
     candidate, i = slug, 2
     qs = ProductTranslation.objects.filter(language_code=lang, slug=candidate)
     while qs.exclude(product=product).exists():

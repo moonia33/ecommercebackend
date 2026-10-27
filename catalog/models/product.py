@@ -137,6 +137,29 @@ class ProductTranslation(models.Model):
         self.language_code = _normalize_and_validate_translation_language_code(self.language_code)
 
 
+class ProductSlugRedirect(models.Model):
+    """Senas prekės slug'as (konkrečia kalba) -> prekė; frontas daro 301."""
+
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, related_name="slug_redirects"
+    )
+    language_code = models.CharField(max_length=10)
+    slug = models.SlugField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["language_code", "slug"],
+                name="uniq_product_slug_redirect",
+            ),
+        ]
+        indexes = [models.Index(fields=["slug"], name="product_slug_redirect_slug")]
+
+    def __str__(self) -> str:
+        return f"{self.language_code}:{self.slug} -> {self.product_id}"
+
+
 class ProductVideo(models.Model):
     """Išorinė video nuoroda (pvz., YouTube) iš tiekėjo feed'o."""
 

@@ -17,7 +17,13 @@ from .features import (
 )
 from .inventory import InventoryItem, Warehouse
 from .pricing_rules import ShopAssortmentRule, ShopPriceList, ShopPriceRule
-from .product import Product, ProductImage, ProductTranslation, ProductVideo
+from .product import (
+    Product,
+    ProductImage,
+    ProductSlugRedirect,
+    ProductTranslation,
+    ProductVideo,
+)
 from .subscriptions import BackInStockSubscription
 from .tax import TaxClass, TaxRate
 from .taxonomy import (
@@ -57,6 +63,7 @@ __all__ = [
     "OptionValueTranslation",
     "Product",
     "ProductFeatureValue",
+    "ProductSlugRedirect",
     "VariantFeatureValue",
     "ProductGroup",
     "ProductImage",
