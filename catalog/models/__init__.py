@@ -15,7 +15,7 @@ from .features import (
     ProductFeatureValue,
     VariantFeatureValue,
 )
-from .inventory import InventoryItem, Warehouse
+from .inventory import InventoryAdjustment, InventoryItem, Warehouse
 from .pricing_rules import ShopAssortmentRule, ShopPriceList, ShopPriceRule
 from .product import (
     Product,
@@ -55,6 +55,7 @@ __all__ = [
     "FeatureValue",
     "FeatureValueGroup",
     "FeatureValueTranslation",
+    "InventoryAdjustment",
     "InventoryItem",
     "OptionType",
     "OptionTypeTranslation",

@@ -130,3 +130,43 @@ class InventoryItem(models.Model):
 
     def __str__(self) -> str:
         return f"{self.variant_id}@{self.warehouse.code}: {self.qty_available}"
+
+
+class InventoryAdjustment(models.Model):
+    """Audit'as kiekvienam rankiniam likučio pakeitimui (ops admin / API)."""
+
+    class ReasonCode(models.TextChoices):
+        CORRECTION = "correction", "Correction"
+        COUNT = "count", "Stock count"
+        DAMAGE = "damage", "Damage/write-off"
+        RETURN = "return", "Return received"
+        SUPPLIER_SYNC = "supplier_sync", "Supplier sync fix"
+        OTHER = "other", "Other"
+
+    inventory_item = models.ForeignKey(
+        InventoryItem, on_delete=models.CASCADE, related_name="adjustments"
+    )
+    variant = models.ForeignKey(
+        "catalog.Variant", on_delete=models.PROTECT, related_name="inventory_adjustments"
+    )
+    warehouse = models.ForeignKey(
+        Warehouse, on_delete=models.PROTECT, related_name="inventory_adjustments"
+    )
+    delta = models.IntegerField()
+    qty_before = models.IntegerField()
+    qty_after = models.IntegerField()
+    reason_code = models.CharField(
+        max_length=32, choices=ReasonCode.choices, default=ReasonCode.OTHER
+    )
+    comment = models.CharField(max_length=500, blank=True)
+    user = models.ForeignKey(
+        "accounts.User", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="inventory_adjustments",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.variant_id}@{self.warehouse.code}: {self.delta:+d}"

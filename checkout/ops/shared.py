@@ -18,6 +18,7 @@ from catalog.models import (
     Category,
     Feature,
     FeatureValue,
+    InventoryAdjustment,
     InventoryItem,
     OptionType,
     OptionValue,
@@ -29,6 +30,7 @@ from catalog.models import (
     TaxClass,
     Variant,
     VariantOptionValue,
+    Warehouse,
 )
 from checkout.models import (
     InventoryAllocation,
@@ -94,6 +96,10 @@ class OpsInventoryAdjustIn(Schema):
     delta: int
     reason_code: str
     comment: str = ""
+    # Remote (tiekėjo) sandėliams privalomas sąmoningas patvirtinimas —
+    # rankinis korekcija nuotolinėje pusėje gali sulaužyti offer'io
+    # atsargas ir pirkėjo matomą prieinamumą.
+    confirm_remote: bool = False
 
 
 class OpsVariantPriceUpdateIn(Schema):
@@ -107,6 +113,8 @@ class OpsOfferVisibilityIn(Schema):
 class OpsCatalogBulkActionIn(Schema):
     action: str
     product_ids: list[int] = []
+    # `assign_category` veiksmui — paskirties Category.id
+    category_id: int | None = None
 
 
 class OpsPaymentActionIn(Schema):

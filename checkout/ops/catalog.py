@@ -5,6 +5,18 @@ from django.core.exceptions import ValidationError
 from .shared import *
 
 
+def _bump_listing_and_categories_cache():
+    """Bulk `.update()` apeina signalus — rankiniu būdu invaliduojame
+    listing'ų ir kategorijų response cache'us."""
+    from django.core.cache import cache
+
+    for key in ("catalog:listing:ver", "catalog:categories:ver"):
+        try:
+            cache.incr(key)
+        except ValueError:
+            cache.set(key, 2)
+
+
 def _translation_map(related) -> dict[str, str]:
     out: dict[str, str] = {}
     for tr in related.all():
@@ -650,12 +662,27 @@ def ops_catalog_bulk_actions(request, payload: OpsCatalogBulkActionIn):
     _ensure_shop_context_if_strict(request)
     _require_ops_user(request)
     action = (payload.action or "").strip().lower()
-    if action not in {"activate_products", "deactivate_products"}:
+    if action not in {"activate_products", "deactivate_products", "assign_category"}:
         raise HttpError(400, "Unsupported catalog bulk action")
     if not payload.product_ids:
         raise HttpError(400, "product_ids cannot be empty")
 
+    if action == "assign_category":
+        category = None
+        if payload.category_id is not None:
+            category = Category.objects.filter(id=int(payload.category_id)).first()
+            if category is None:
+                raise HttpError(404, "Category not found")
+            if not category.is_active:
+                raise HttpError(400, "Category is not active")
+        # category_id=None -> nuimti kategoriją
+        updated = list(Product.objects.filter(id__in=payload.product_ids).values_list("id", flat=True))
+        Product.objects.filter(id__in=updated).update(category=category, updated_at=timezone.now())
+        _bump_listing_and_categories_cache()
+        return OpsActionResultOut(ok=True, message="Category assigned", updated_ids=[int(x) for x in updated], failed_ids=[])
+
     value = action == "activate_products"
     updated = list(Product.objects.filter(id__in=payload.product_ids).values_list("id", flat=True))
     Product.objects.filter(id__in=updated).update(is_active=value, updated_at=timezone.now())
+    _bump_listing_and_categories_cache()
     return OpsActionResultOut(ok=True, message="Catalog bulk action applied", updated_ids=[int(x) for x in updated], failed_ids=[])

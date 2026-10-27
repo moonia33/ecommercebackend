@@ -255,7 +255,8 @@ Request:
 {
   "delta": -2,
   "reason_code": "damage",
-  "comment": "package damaged"
+  "comment": "package damaged",
+  "confirm_remote": false
 }
 ```
 
@@ -263,6 +264,23 @@ Taisyklės:
 
 - negalima padaryti `qty_on_hand < 0`
 - negalima padaryti `qty_on_hand < qty_reserved`
+- `reason_code` privalomas (`correction`, `count`, `damage`, `return`,
+  `supplier_sync`, `other`)
+- **Remote sandėlis** (`warehouse.kind=remote`): papildomai privalomi
+  `confirm_remote=true` IR netuščias `comment` — rankinė nuotolinio
+  sandėlio korekcija gali sulaužyti tiekėjo offer'io atsargas.
+- Kiekvienas adjust'as rašomas į `InventoryAdjustment` audit'ą
+  (delta, qty_before/after, reason, comment, user, laikas).
+
+## GET `/api/v1/ops/inventory/adjustments`
+
+Rankinių korekcijų istorija (audit).
+
+Query: `sku`, `warehouse_code`, `page`, `page_size`.
+
+Grąžina `results[]` su `sku`, `product_name`, `warehouse_code`,
+`warehouse_kind`, `delta`, `qty_before`, `qty_after`, `reason_code`,
+`comment`, `user_email`, `created_at`.
 
 ---
 
@@ -309,10 +327,23 @@ Request:
 }
 ```
 
+arba kategorijos priskyrimas:
+
+```json
+{
+  "action": "assign_category",
+  "product_ids": [501, 502],
+  "category_id": 836
+}
+```
+
 Leidžiami action:
 
 - `activate_products`
 - `deactivate_products`
+- `assign_category` — masinis kategorijos priskyrimas. `category_id=null`
+  nuima kategoriją. Neaktyvi kategorija -> `400`. Po pakeitimo
+  invaliduojami listing'ų ir kategorijų cache'ai.
 
 ---
 
