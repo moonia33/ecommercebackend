@@ -3764,3 +3764,38 @@ class FacetsEngineFallbackTests(TestCase):
         self.assertEqual(res.status_code, 200, res.content[:400])
         codes = {f["code"] for f in res.json()["features"]}
         self.assertIn("weight", codes)
+
+
+@override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
+class ShopConfigEndpointTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()
+        self.client = Client()
+        self.shop = Shop.objects.create(
+            code="a",
+            name="Shop A",
+            primary_domain="a.local",
+            default_language_code="lt",
+            default_country_code="LT",
+            currency="EUR",
+            is_active=True,
+        )
+
+    def test_config_without_shopconfig_row(self):
+        res = self.client.get("/api/v1/shop/config", HTTP_HOST="a.local")
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(body["code"], "a")
+        self.assertEqual(body["name"], "Shop A")
+        self.assertIsNone(body["logo_url"])
+
+    def test_config_reflects_saved_changes(self):
+        from api.models import ShopConfig
+
+        self.client.get("/api/v1/shop/config", HTTP_HOST="a.local")
+        ShopConfig.objects.create(shop=self.shop, site_name="Site A", default_title="Title A")
+        body = self.client.get("/api/v1/shop/config", HTTP_HOST="a.local").json()
+        self.assertEqual(body["site_name"], "Site A")
+        self.assertEqual(body["default_title"], "Title A")
