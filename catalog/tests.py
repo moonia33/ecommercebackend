@@ -1,7 +1,7 @@
 import datetime
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from catalog.localization import (
     localize_brand,
@@ -977,3 +977,20 @@ class SeedCategoryFacetsTests(TestCase):
              .order_by("order")],
             sorted(rows, key=lambda c: rows[c].order),
         )
+
+
+class CategoryTranslationAdminLanguageTests(TestCase):
+    @override_settings(LANGUAGE_CODE="lt", LANGUAGES=[("lt", "Lithuanian"), ("pl", "Polish"), ("en", "English")], SUPPORTED_LANGUAGE_CODES=["lt", "pl", "en"])
+    def test_disabled_language_row_keeps_its_code(self):
+        from catalog.admin import CategoryTranslationInline
+        from catalog.models import Category, CategoryTranslation
+
+        cat = Category.objects.create(name="Palapinės", slug="palapines-adm")
+        lv = CategoryTranslation.objects.create(category=cat, language_code="lv", name="Teltis", slug="teltis-adm")
+        form = CategoryTranslationInline.Form(instance=lv)
+        codes = [c for c, _ in form.fields["language_code"].choices]
+        self.assertEqual(codes, ["pl", "en", "lv"])
+        self.assertIn('value="lv" selected', str(form["language_code"]))
+
+        new = CategoryTranslationInline.Form()
+        self.assertEqual([c for c, _ in new.fields["language_code"].choices], ["pl", "en"])
