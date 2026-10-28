@@ -307,7 +307,9 @@ def ops_catalog_products(
     qs = Product.objects.select_related("brand", "category").prefetch_related("images").annotate(variants_count=Count("variants", distinct=True))
     if q:
         qs = qs.filter(Q(name__icontains=q) | Q(sku__icontains=q) | Q(slug__icontains=q))
-    if category_id is not None:
+    if category_id == 0:
+        qs = qs.filter(category__isnull=True)
+    elif category_id is not None:
         cat = Category.objects.filter(id=int(category_id)).first()
         if cat is not None:
             # subtree (MPTT) — tėvinėje kategorijoje rodomos ir dukterinių prekės
