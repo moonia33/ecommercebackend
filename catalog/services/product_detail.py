@@ -241,6 +241,7 @@ def build_product_detail_payload(
                         "option_type_name": localize_option_type(r.option_type, language_code=language_code),
                         "option_value_code": r.option_value.code,
                         "option_value_label": localize_option_value(r.option_value, language_code=language_code),
+                        "option_value_sort": int(getattr(r.option_value, "sort_order", 0) or 0),
                     }
                     for r in options
                 ],
