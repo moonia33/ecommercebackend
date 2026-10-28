@@ -16,6 +16,7 @@ from cms.api import router as cms_router
 from homebuilder.api import router as home_router
 from shipping.api import router as shipping_router
 from recommendations.api import router as recommendations_router
+from api.shop_api import router as shop_router
 
 docs_url = "/docs" if getattr(settings, "NINJA_ENABLE_DOCS", True) else None
 openapi_url = "/openapi.json" if getattr(settings,
@@ -44,6 +45,7 @@ from giftcards.api import router as giftcards_router
 api.add_router("/giftcards", giftcards_router)
 api.add_router("/shipping", shipping_router)
 api.add_router("/recommendations", recommendations_router)
+api.add_router("/shop", shop_router)
 api.add_router("", home_router)
 
 
