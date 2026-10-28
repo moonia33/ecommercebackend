@@ -308,7 +308,12 @@ def ops_catalog_products(
 
     qs = Product.objects.select_related("brand", "category").prefetch_related("images").annotate(variants_count=Count("variants", distinct=True))
     if q:
-        qs = qs.filter(Q(name__icontains=q) | Q(sku__icontains=q) | Q(slug__icontains=q))
+        qs = qs.filter(
+            Q(name__icontains=q)
+            | Q(sku__icontains=q)
+            | Q(slug__icontains=q)
+            | Q(variants__sku__icontains=q)
+        ).distinct()
     if category_id == 0:
         qs = qs.filter(category__isnull=True)
     elif category_id is not None:
@@ -476,6 +481,21 @@ def ops_catalog_update_product(request, product_id: int, payload: OpsProductUpda
             product.tax_class = _validate_fk_or_400(TaxClass, payload.tax_class_id, "PVM klasė")
 
         product.save()
+
+        if payload.video_urls is not None:
+            urls = [u.strip() for u in payload.video_urls if (u or "").strip()]
+            urls = list(dict.fromkeys(urls))
+            product.videos.filter(
+                video_type=ProductVideo.VideoType.PRODUCT
+            ).delete()
+            ProductVideo.objects.bulk_create(
+                ProductVideo(
+                    product=product, url=u,
+                    video_type=ProductVideo.VideoType.PRODUCT,
+                    sort_order=i,
+                )
+                for i, u in enumerate(urls)
+            )
 
         if payload.translations is not None:
             for tr in payload.translations:

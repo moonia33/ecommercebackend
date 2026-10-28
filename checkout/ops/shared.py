@@ -27,6 +27,7 @@ from catalog.models import (
     ProductGroup,
     ProductOptionType,
     ProductTranslation,
+    ProductVideo,
     TaxClass,
     Variant,
     VariantOptionValue,
@@ -812,6 +813,9 @@ class OpsProductUpdateIn(Schema):
     group_id: int | None = None
     tax_class_id: int | None = None
     additional_info: dict | None = None
+    # video_type='product' video URL'ų sąrašas — PILNAI pakeičia esamus
+    # product-tipo video (kiti tipai neliečiami).
+    video_urls: list[str] | None = None
     translations: list[OpsProductTranslationIn] | None = None
     feature_value_ids: list[int] | None = None
 
