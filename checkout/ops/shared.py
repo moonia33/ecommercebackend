@@ -839,6 +839,8 @@ class OpsProductUpdateIn(Schema):
     video_urls: list[str] | None = None
     translations: list[OpsProductTranslationIn] | None = None
     feature_value_ids: list[int] | None = None
+    # Prekės opcijų tipų (dydis/spalva/ilgis…) id sąrašas — PILNAI pakeičia
+    option_type_ids: list[int] | None = None
 
 
 class OpsVariantOptionIn(Schema):

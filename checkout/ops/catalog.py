@@ -582,6 +582,27 @@ def ops_catalog_update_product(request, product_id: int, payload: OpsProductUpda
                     raise HttpError(400, "; ".join(exc.messages))
                 obj.save()
 
+        if payload.option_type_ids is not None:
+            wanted_ots = list(dict.fromkeys(int(x) for x in payload.option_type_ids))
+            valid = set(OptionType.objects.filter(id__in=wanted_ots).values_list("id", flat=True))
+            missing = [x for x in wanted_ots if x not in valid]
+            if missing:
+                raise HttpError(400, f"Nežinomi opcijų tipai: {missing}")
+            existing = {pot.option_type_id: pot for pot in product.option_types.all()}
+            for ot_id in wanted_ots:
+                if ot_id not in existing:
+                    ProductOptionType.objects.create(
+                        product=product,
+                        option_type_id=ot_id,
+                        sort_order=wanted_ots.index(ot_id),
+                    )
+            for ot_id, pot in existing.items():
+                if ot_id not in wanted_ots:
+                    pot.delete()
+                elif pot.sort_order != wanted_ots.index(ot_id):
+                    pot.sort_order = wanted_ots.index(ot_id)
+                    pot.save(update_fields=["sort_order"])
+
         if payload.feature_value_ids is not None:
             wanted = list(dict.fromkeys(payload.feature_value_ids))
             values = list(
