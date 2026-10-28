@@ -25,6 +25,7 @@ from catalog.models import (
     Product,
     ProductFeatureValue,
     ProductGroup,
+    ProductImage,
     ProductOptionType,
     ProductTranslation,
     ProductVideo,

@@ -453,7 +453,8 @@ def ops_catalog_lookups(request):
             translations=_translation_map(f.translations),
             values=[
                 OpsFeatureValueOptionOut(id=int(v.id), value=(v.value or ""))
-                for v in f.values.filter(is_active=True)
+                for v in f.values.all()
+                if v.is_active
             ],
         )
         for f in Feature.objects.filter(is_active=True).prefetch_related("values", "translations")
@@ -471,7 +472,8 @@ def ops_catalog_lookups(request):
                     label=(v.label or ""),
                     translations=_translation_map(v.translations),
                 )
-                for v in ot.values.filter(is_active=True)
+                for v in ot.values.all()
+                if v.is_active
             ],
         )
         for ot in OptionType.objects.filter(is_active=True).prefetch_related("values__translations", "translations")
