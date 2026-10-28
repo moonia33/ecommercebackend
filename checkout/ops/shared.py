@@ -115,6 +115,8 @@ class OpsCatalogBulkActionIn(Schema):
     product_ids: list[int] = []
     # `assign_category` veiksmui — paskirties Category.id
     category_id: int | None = None
+    # `assign_group` veiksmui — ProductGroup.id
+    group_id: int | None = None
 
 
 class OpsPaymentActionIn(Schema):

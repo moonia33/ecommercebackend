@@ -295,6 +295,8 @@ def ops_catalog_products(
     q: str = "",
     is_active: str = "",
     category_id: int | None = None,
+    group_id: int | None = None,
+    brand_id: int | None = None,
     page: int = 1,
     page_size: int = 50,
 ):
@@ -320,6 +322,14 @@ def ops_catalog_products(
             )
         else:
             qs = qs.filter(category_id=int(category_id))
+    if group_id == 0:
+        qs = qs.filter(group__isnull=True)
+    elif group_id is not None:
+        qs = qs.filter(group_id=int(group_id))
+    if brand_id == 0:
+        qs = qs.filter(brand__isnull=True)
+    elif brand_id is not None:
+        qs = qs.filter(brand_id=int(brand_id))
     if is_active.strip().lower() in {"true", "false"}:
         qs = qs.filter(is_active=is_active.strip().lower() == "true")
 
@@ -677,7 +687,7 @@ def ops_catalog_bulk_actions(request, payload: OpsCatalogBulkActionIn):
     _ensure_shop_context_if_strict(request)
     _require_ops_user(request)
     action = (payload.action or "").strip().lower()
-    if action not in {"activate_products", "deactivate_products", "assign_category"}:
+    if action not in {"activate_products", "deactivate_products", "assign_category", "assign_group"}:
         raise HttpError(400, "Unsupported catalog bulk action")
     if not payload.product_ids:
         raise HttpError(400, "product_ids cannot be empty")
@@ -695,6 +705,17 @@ def ops_catalog_bulk_actions(request, payload: OpsCatalogBulkActionIn):
         Product.objects.filter(id__in=updated).update(category=category, updated_at=timezone.now())
         _bump_listing_and_categories_cache()
         return OpsActionResultOut(ok=True, message="Category assigned", updated_ids=[int(x) for x in updated], failed_ids=[])
+
+    if action == "assign_group":
+        group = None
+        if payload.group_id is not None:
+            group = ProductGroup.objects.filter(id=int(payload.group_id)).first()
+            if group is None:
+                raise HttpError(404, "Product group not found")
+        updated = list(Product.objects.filter(id__in=payload.product_ids).values_list("id", flat=True))
+        Product.objects.filter(id__in=updated).update(group=group, updated_at=timezone.now())
+        _bump_listing_and_categories_cache()
+        return OpsActionResultOut(ok=True, message="Group assigned", updated_ids=[int(x) for x in updated], failed_ids=[])
 
     value = action == "activate_products"
     updated = list(Product.objects.filter(id__in=payload.product_ids).values_list("id", flat=True))
