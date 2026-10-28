@@ -157,9 +157,7 @@ def ops_inventory_adjust(request, item_id: int, payload: OpsInventoryAdjustIn):
             "Remote warehouse adjustment requires confirm_remote=true "
             "(manual remote stock edits can break supplier offers)",
         )
-    if is_remote and not (payload.comment or "").strip():
-        raise HttpError(400, "Remote warehouse adjustment requires a comment")
-
+    # comment nebeprivalomas — priežastis reason_code pakanka
     next_qty = int(item.qty_on_hand) + int(payload.delta)
     if next_qty < 0:
         raise HttpError(400, "Adjustment would make qty_on_hand negative")
@@ -182,6 +180,46 @@ def ops_inventory_adjust(request, item_id: int, payload: OpsInventoryAdjustIn):
         user=user,
     )
     return OpsActionResultOut(ok=True, message="Inventory adjusted", updated_ids=[item.id], failed_ids=[])
+
+
+class OpsInventoryItemCreateIn(Schema):
+    variant_id: int
+    warehouse_id: int
+    qty: int = 0
+    offer_visibility: str = "NORMAL"
+
+
+@router.post("/inventory/items", response=OpsInventoryItemOut, auth=_auth)
+def ops_inventory_create_item(request, payload: OpsInventoryItemCreateIn):
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+    variant = Variant.objects.filter(id=payload.variant_id).first()
+    if variant is None:
+        raise HttpError(404, "Variant not found")
+    warehouse = Warehouse.objects.filter(id=payload.warehouse_id).first()
+    if warehouse is None:
+        raise HttpError(404, "Warehouse not found")
+    item, created = InventoryItem.objects.get_or_create(
+        variant=variant,
+        warehouse=warehouse,
+        defaults={"qty_on_hand": max(0, int(payload.qty or 0)),
+                  "offer_visibility": payload.offer_visibility or "NORMAL"},
+    )
+    if not created:
+        raise HttpError(400, "Šiame sandėlyje likutis jau yra — naudokite korekciją")
+    return OpsInventoryItemOut(
+        id=int(item.id),
+        sku=variant.sku or "",
+        product_id=int(variant.product_id) if variant.product_id else None,
+        product_name=getattr(getattr(variant, "product", None), "name", "") or "",
+        thumbnail_url="",
+        warehouse_code=str(getattr(warehouse, "code", "") or ""),
+        warehouse_kind=str(getattr(warehouse, "kind", "") or ""),
+        qty_on_hand=int(item.qty_on_hand),
+        qty_reserved=int(item.qty_reserved),
+        qty_available=int(item.qty_on_hand) - int(item.qty_reserved),
+        offer_visibility=item.offer_visibility or "",
+    )
 
 
 @router.get("/inventory/adjustments", response=OpsInventoryAdjustmentListOut, auth=_auth)
