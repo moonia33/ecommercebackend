@@ -74,6 +74,95 @@ def ops_list_orders(request, filters: OpsOrderSearchIn = Query(...)):
     )
 
 
+@router.get("/orders/pick-list", response=OpsPickListOut, auth=_auth)
+def ops_orders_pick_list(request, warehouse_code: str):
+    """Put-wall/pick sąrašas: atviri (apmokėti, ne pristatyti) užsakymų
+    kiekiai, sugrupuoti pagal prekę tam sandėliui."""
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+    wc = (warehouse_code or "").strip()
+    if not wc:
+        raise HttpError(400, "warehouse_code privalomas")
+
+    final_states = {
+        Order.DeliveryStatus.DELIVERED,
+        Order.DeliveryStatus.RETURNED,
+        Order.DeliveryStatus.CANCELLED,
+        Order.DeliveryStatus.RETURNING,
+    }
+    qs = (
+        OrderLine.objects
+        .filter(order__status=Order.Status.PAID)
+        .exclude(order__delivery_status__in=final_states)
+        .filter(
+            Q(offer__warehouse__code__iexact=wc)
+            | Q(inventory_allocations__inventory_item__warehouse__code__iexact=wc)
+        )
+        .select_related("order", "variant", "variant__product")
+        .prefetch_related(
+            "variant__product__images",
+            Prefetch(
+                "inventory_allocations",
+                queryset=InventoryAllocation.objects
+                .exclude(status=InventoryAllocation.Status.RELEASED)
+                .select_related("inventory_item__warehouse"),
+                to_attr="ops_active_allocs",
+            ),
+        )
+        .order_by("order_id", "id")
+    )
+
+    rows: dict[int | None, dict] = {}
+    for line in qs:
+        # qty dalis, einanti iš šio sandėlio: alokacijos > offer > visa qty
+        alloc_qty = sum(
+            int(a.qty)
+            for a in getattr(line, "ops_active_allocs", [])
+            if getattr(getattr(a, "inventory_item", None), "warehouse", None)
+            and (a.inventory_item.warehouse.code or "").lower() == wc.lower()
+        )
+        offer_match = (
+            getattr(line, "offer", None) is not None
+            and (line.offer.warehouse.code or "").lower() == wc.lower()
+        )
+        qty = alloc_qty if alloc_qty else (int(line.qty) if offer_match else 0)
+        if qty <= 0:
+            continue
+        key = line.variant_id
+        row = rows.setdefault(key, {
+            "variant_id": line.variant_id,
+            "sku": line.sku or "",
+            "barcode": getattr(getattr(line, "variant", None), "barcode", "") or "",
+            "name": getattr(getattr(line, "variant", None), "name", "") or line.name or "",
+            "thumbnail_url": "",
+            "total_qty": 0,
+            "orders": {},
+        })
+        if not row["thumbnail_url"]:
+            prod = getattr(getattr(line, "variant", None), "product", None)
+            imgs = list(getattr(prod, "images", None).all()) if prod else []
+            if imgs:
+                img = imgs[0]
+                row["thumbnail_url"] = (
+                    (img.listing_webp.url if img.listing_webp else "")
+                    or (img.image.url if img.image else "")
+                    or (img.image_url or "")
+                )
+        row["total_qty"] += qty
+        od = row["orders"].setdefault(line.order_id, 0)
+        row["orders"][line.order_id] = od + qty
+
+    out_rows = [
+        OpsPickListRowOut(
+            **{k: v for k, v in r.items() if k != "orders"},
+            orders=[OpsPickListOrderOut(order_id=oid, qty=q) for oid, q in sorted(r["orders"].items())],
+        )
+        for r in rows.values()
+    ]
+    out_rows.sort(key=lambda r: r.sku)
+    return OpsPickListOut(warehouse_code=wc, rows=out_rows)
+
+
 @router.get("/orders/{order_id}", response=OpsOrderDetailOut, auth=_auth)
 def ops_order_detail(request, order_id: int):
     _ensure_shop_context_if_strict(request)

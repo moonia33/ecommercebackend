@@ -6,7 +6,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Count, F, Max, Prefetch, Q, Sum
+from django.db.models import Count, Exists, F, Max, OuterRef, Prefetch, Q, Sum
 from django.utils import timezone
 from ninja import Query, Router, Schema
 from ninja.errors import HttpError
@@ -191,6 +191,26 @@ class OpsOrderListItemOut(Schema):
     matched_items_count: int
     matched_suppliers: list[str]
     matched_lines: list[OpsOrderMatchLineOut]
+
+
+class OpsPickListOrderOut(Schema):
+    order_id: int
+    qty: int
+
+
+class OpsPickListRowOut(Schema):
+    variant_id: int | None = None
+    sku: str = ""
+    barcode: str = ""
+    name: str = ""
+    thumbnail_url: str = ""
+    total_qty: int = 0
+    orders: list[OpsPickListOrderOut] = []
+
+
+class OpsPickListOut(Schema):
+    warehouse_code: str
+    rows: list[OpsPickListRowOut] = []
 
 
 class OpsOrderSearchOut(Schema):
@@ -1058,13 +1078,15 @@ def _build_order_filter(filters: OpsOrderSearchIn, *, shop_id: int | None) -> tu
         order_q &= Q(created_at__date__lte=filters.date_to)
 
     if filters.remote_only:
-        order_q &= Q(
-            fulfillment_mode__in=[
-                Order.FulfillmentMode.DROPSHIP,
-                Order.FulfillmentMode.REMOTE,
-                Order.FulfillmentMode.MIXED,
-            ]
+        # Remote užsakymas = bent viena eilutė su nuotolinio sandėlio
+        # offer arba aktyvia alokacija (fulfillment_mode 'stock' nepatikimas).
+        remote_line_exists = OrderLine.objects.filter(
+            order=OuterRef("pk"),
+        ).filter(
+            Q(offer__warehouse__kind=Warehouse.Kind.REMOTE)
+            | Q(inventory_allocations__inventory_item__warehouse__kind=Warehouse.Kind.REMOTE)
         )
+        order_q &= Q(Exists(remote_line_exists))
 
     if filters.eta_from:
         order_q &= Q(delivery_max_date__gte=filters.eta_from)
