@@ -793,6 +793,7 @@ def browse_products(
     ranges: list[tuple[str, object, object]] | None = None,
     sort: str | None = None,
     in_stock_only: bool = False,
+    collection: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[int], int] | None:
@@ -860,6 +861,13 @@ def browse_products(
                 filters.append(f"{field}:>={lo}")
             elif hi is not None:
                 filters.append(f"{field}:<={hi}")
+
+    if collection == "new":
+        import time as _time
+
+        filters.append(f"created_ts:>={int(_time.time() - 30 * 86400)}")
+    elif collection == "sale":
+        filters.append(f"disc_{ch}:>0")
 
     qv = (q or "").strip()
     if qv:

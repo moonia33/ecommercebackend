@@ -70,6 +70,7 @@ def _engine_browse(
     range_filter,
     sort,
     in_stock_only,
+    collection,
     page,
     page_size,
     language_code,
@@ -126,6 +127,7 @@ def _engine_browse(
         ranges=parse_range_pairs(range_filter) if range_filter else None,
         sort=sort,
         in_stock_only=in_stock_only,
+        collection=collection,
         page=page,
         page_size=page_size,
     )
@@ -195,6 +197,7 @@ def products(
     range: str | None = None,
     sort: str | None = None,
     in_stock_only: bool = False,
+    collection: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -211,6 +214,9 @@ def products(
 
     shop = _shop_or_404_when_strict(request)
     shop_id = int(shop.id) if shop else None
+    collection = (collection or "").strip().lower() or None
+    if collection not in {None, "new", "sale"}:
+        raise HttpError(400, "Unsupported collection (expected 'new' or 'sale')")
     page = max(1, int(page or 1))
     page_size = max(1, min(int(page_size or 20), 100))
 
@@ -226,7 +232,7 @@ def products(
         "|".join(str(x) for x in (
             q, category_slug, brand_slug, group_code,
             feature, option, range, sort,
-            bool(in_stock_only), page, page_size,
+            bool(in_stock_only), collection, page, page_size,
         )).encode()
     ).hexdigest()
     listing_ver = cache.get("catalog:listing:ver", 1)
@@ -259,6 +265,7 @@ def products(
         range_filter=range,
         sort=sort,
         in_stock_only=in_stock_only,
+        collection=collection,
         page=page,
         page_size=page_size,
         language_code=language_code,
@@ -331,6 +338,13 @@ def products(
         option=option,
         range_filter=range,
     )
+
+    if collection == "new":
+        from django.utils import timezone as _tz
+
+        qs = qs.filter(created_at__gte=_tz.now() - _tz.timedelta(days=30))
+    elif collection == "sale":
+        qs = qs.filter(_min_offer_price__lt=F("_min_variant_price"))
 
     if channel == "outlet":
         qs = qs.filter(_min_offer_price__isnull=False)
