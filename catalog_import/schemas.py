@@ -93,6 +93,8 @@ class ImportProductIn(Schema):
     product_group_code: str = ""
     ean: str = ""
     brand_code: str = ""
+    # Rodomas pavadinimas; naudojamas tik kuriant naują Brand (esamo neperrašo).
+    brand_name: str = ""
     # shop Category.slug (mapping happens in the normalizer)
     category: str = ""
     tax_class: str = "standard"
