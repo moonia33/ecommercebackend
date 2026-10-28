@@ -294,6 +294,7 @@ def ops_catalog_products(
     request,
     q: str = "",
     is_active: str = "",
+    category_id: int | None = None,
     page: int = 1,
     page_size: int = 50,
 ):
@@ -306,6 +307,17 @@ def ops_catalog_products(
     qs = Product.objects.select_related("brand", "category").prefetch_related("images").annotate(variants_count=Count("variants", distinct=True))
     if q:
         qs = qs.filter(Q(name__icontains=q) | Q(sku__icontains=q) | Q(slug__icontains=q))
+    if category_id is not None:
+        cat = Category.objects.filter(id=int(category_id)).first()
+        if cat is not None:
+            # subtree (MPTT) — tėvinėje kategorijoje rodomos ir dukterinių prekės
+            qs = qs.filter(
+                category__tree_id=cat.tree_id,
+                category__lft__gte=cat.lft,
+                category__rght__lte=cat.rght,
+            )
+        else:
+            qs = qs.filter(category_id=int(category_id))
     if is_active.strip().lower() in {"true", "false"}:
         qs = qs.filter(is_active=is_active.strip().lower() == "true")
 
