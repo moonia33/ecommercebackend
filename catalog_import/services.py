@@ -520,7 +520,7 @@ def _sync_taxonomy(product: Product, item: ImportProductIn) -> None:
         if brand is None:
             brand, _ = Brand.objects.get_or_create(
                 slug=item.brand_code,
-                defaults={"name": item.brand_code.replace("-", " ").title()},
+                defaults={"name": (item.brand_name or "").strip() or item.brand_code.replace("-", " ").title()},
             )
         product.brand = brand
     product.save()
