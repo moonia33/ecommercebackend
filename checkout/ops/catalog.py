@@ -486,12 +486,12 @@ def ops_catalog_update_product(request, product_id: int, payload: OpsProductUpda
             urls = [u.strip() for u in payload.video_urls if (u or "").strip()]
             urls = list(dict.fromkeys(urls))
             product.videos.filter(
-                video_type=ProductVideo.VideoType.PRODUCT
+                video_type=ProductVideo.Type.PRODUCT
             ).delete()
             ProductVideo.objects.bulk_create(
                 ProductVideo(
                     product=product, url=u,
-                    video_type=ProductVideo.VideoType.PRODUCT,
+                    video_type=ProductVideo.Type.PRODUCT,
                     sort_order=i,
                 )
                 for i, u in enumerate(urls)
