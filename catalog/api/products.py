@@ -182,6 +182,14 @@ def _apply_search_engine(qs, *, q, shop_id, channel, sort, range_filter=None):
     return qs, None, engine_sorted
 
 
+def _canonical_csv(value: str | None) -> str | None:
+    """Filtro reikšmių tvarka rezultato nekeičia — cache raktui
+    `size:6,size:4` ir `size:4,size:6` turi sutapti."""
+    if not value:
+        return value
+    return ",".join(sorted({p.strip() for p in value.split(",") if p.strip()}))
+
+
 @router.get("/products", response=ProductPageOut)
 def products(
     request,
@@ -231,7 +239,7 @@ def products(
     params_hash = hashlib.md5(
         "|".join(str(x) for x in (
             q, category_slug, brand_slug, group_code,
-            feature, option, range, sort,
+            _canonical_csv(feature), _canonical_csv(option), range, sort,
             bool(in_stock_only), collection, page, page_size,
         )).encode()
     ).hexdigest()
@@ -494,7 +502,7 @@ def product_facets(
     params_hash = hashlib.md5(
         "|".join(str(x) for x in (
             q, category_slug, brand_slug, group_code,
-            feature, option, range,
+            _canonical_csv(feature), _canonical_csv(option), range,
         )).encode()
     ).hexdigest()
     facets_ver = cache.get("catalog:facets:ver", 1)
@@ -601,7 +609,9 @@ def product_facets(
             option=option,
             range_filter=range,
         )
-        product_ids = qs.values_list("id", flat=True)
+        # Materializuojama vieną kartą: kitaip filtruotas subquery (su
+        # Count anotacija) perskaičiuojamas kiekvienoje facet užklausoje.
+        product_ids = list(qs.values_list("id", flat=True))
 
     payload = build_facets_payload(
         product_ids=product_ids,
