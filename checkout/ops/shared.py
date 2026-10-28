@@ -654,6 +654,15 @@ class OpsVariantPickerOut(Schema):
     stock_available: int = 0
 
 
+class OpsVariantCreateIn(Schema):
+    sku: str
+    name: str = ""
+    barcode: str = ""
+    price_eur: str = "0"
+    cost_eur: str = ""
+    is_active: bool | None = None
+
+
 class OpsCatalogVariantOut(Schema):
     id: int
     sku: str

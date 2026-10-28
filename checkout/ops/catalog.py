@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.core.exceptions import ValidationError
+from ninja.files import UploadedFile
 
 from .shared import *
 
@@ -557,6 +558,83 @@ def ops_catalog_update_product(request, product_id: int, payload: OpsProductUpda
                 ProductFeatureValue.objects.bulk_create(to_create)
 
     return _serialize_product_detail(_get_product_or_404(product_id))
+
+
+@router.post("/catalog/products/{product_id}/images", response=OpsProductImageOut, auth=_auth)
+def ops_catalog_upload_image(request, product_id: int, file: UploadedFile):
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+    product = _get_product_or_404(product_id)
+    if (file.content_type or "") not in {"image/jpeg", "image/png", "image/webp", "image/avif"}:
+        raise HttpError(400, "Netinkamas failas — reikalingas JPEG/PNG/WebP/AVIF")
+    img = ProductImage.objects.create(product=product, image=file)
+    try:
+        from catalog.tasks import process_product_image_task
+        process_product_image_task.delay(img.id)
+    except Exception:
+        pass
+    return OpsProductImageOut(
+        id=int(img.id), url=img.image.url if img.image else "",
+        alt_text=img.alt_text or "", sort_order=int(img.sort_order or 0),
+        variant_skus=[],
+    )
+
+
+@router.delete("/catalog/images/{image_id}", response=OpsActionResultOut, auth=_auth)
+def ops_catalog_delete_image(request, image_id: int):
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+    img = ProductImage.objects.filter(id=int(image_id)).first()
+    if img is None:
+        raise HttpError(404, "Image not found")
+    pid = int(img.product_id)
+    img.delete()
+    return OpsActionResultOut(ok=True, message="Image deleted", updated_ids=[pid], failed_ids=[])
+
+
+@router.post("/catalog/products/{product_id}/variants", response=OpsCatalogVariantOut, auth=_auth)
+def ops_catalog_create_variant(request, product_id: int, payload: OpsVariantCreateIn):
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+    product = _get_product_or_404(product_id)
+    sku = (payload.sku or "").strip()
+    if not sku:
+        raise HttpError(400, "SKU privalomas")
+    if Variant.objects.filter(sku=sku).exists():
+        raise HttpError(400, f"SKU „{sku}“ jau egzistuoja")
+    try:
+        price_eur = Decimal((payload.price_eur or "0").strip() or "0")
+    except Exception:
+        raise HttpError(400, "Neteisinga kaina")
+    cost = (payload.cost_eur or "").strip()
+    try:
+        cost_eur = Decimal(cost) if cost else None
+    except Exception:
+        raise HttpError(400, "Neteisinga savikaina")
+    v = Variant.objects.create(
+        product=product, sku=sku,
+        name=(payload.name or "").strip(),
+        barcode=(payload.barcode or "").strip() or None,
+        price_eur=price_eur,
+        cost_eur=cost_eur,
+        is_active=True if payload.is_active is None else bool(payload.is_active),
+    )
+    return _serialize_variant(
+        v,
+        list(product.option_types.select_related("option_type").all()),
+    )
+
+
+@router.delete("/catalog/variants/{variant_id}", response=OpsActionResultOut, auth=_auth)
+def ops_catalog_delete_variant(request, variant_id: int):
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+    v = Variant.objects.filter(id=int(variant_id)).first()
+    if v is None:
+        raise HttpError(404, "Variant not found")
+    vid = int(v.id)
+    v.delete()
+    return OpsActionResultOut(ok=True, message="Variant deleted", updated_ids=[vid], failed_ids=[])
 
 
 @router.post("/catalog/products/{product_id}/toggle-active", response=OpsActionResultOut, auth=_auth)
