@@ -654,6 +654,15 @@ class OpsVariantPickerOut(Schema):
     stock_available: int = 0
 
 
+class OpsProductCreateIn(Schema):
+    name: str
+    sku: str = ""
+    brand_id: int | None = None
+    category_id: int | None = None
+    group_id: int | None = None
+    price_eur: str = "0"
+
+
 class OpsVariantCreateIn(Schema):
     sku: str
     name: str = ""
@@ -661,6 +670,8 @@ class OpsVariantCreateIn(Schema):
     price_eur: str = "0"
     cost_eur: str = ""
     is_active: bool | None = None
+    # OptionValue.id sąrašas — kombinacija (pvz. dydis+spalva)
+    option_value_ids: list[int] = []
 
 
 class OpsCatalogVariantOut(Schema):
@@ -684,6 +695,7 @@ class OpsCatalogOfferOut(Schema):
     variant_sku: str = ""
     warehouse_code: str
     warehouse_name: str = ""
+    warehouse_kind: str = ""
     qty_on_hand: int = 0
     qty_reserved: int = 0
     qty_available: int = 0

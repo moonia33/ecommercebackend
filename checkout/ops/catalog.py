@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.core.exceptions import ValidationError
+from django.utils.text import slugify
 from ninja.files import UploadedFile
 
 from .shared import *
@@ -98,6 +99,7 @@ def _serialize_product_detail(product: Product) -> OpsCatalogProductDetailOut:
                     variant_sku=(v.sku or ""),
                     warehouse_code=(getattr(warehouse, "code", "") or ""),
                     warehouse_name=(getattr(warehouse, "name", "") or ""),
+                    warehouse_kind=(getattr(warehouse, "kind", "") or ""),
                     qty_on_hand=int(item.qty_on_hand),
                     qty_reserved=int(item.qty_reserved),
                     qty_available=int(item.qty_available),
@@ -357,6 +359,61 @@ def ops_catalog_products(
         for p in rows
     ]
     return OpsCatalogProductsOut(page=page, page_size=page_size, total_count=total_count, results=out)
+
+
+@router.post("/catalog/products", response=OpsCatalogProductOut, auth=_auth)
+def ops_catalog_create_product(request, payload: OpsProductCreateIn):
+    _ensure_shop_context_if_strict(request)
+    _require_ops_user(request)
+    name = (payload.name or "").strip()
+    if not name:
+        raise HttpError(400, "Pavadinimas privalomas")
+    sku = (payload.sku or "").strip()
+    if sku and Product.objects.filter(sku=sku).exists():
+        raise HttpError(400, f"SKU „{sku}“ jau egzistuoja")
+    if not sku:
+        # auto SKU: PS- prefix'as + increment nuo didžiausio PS-id
+        last = Product.objects.filter(sku__regex=r"^PS-\d+$").order_by("-sku").values_list("sku", flat=True).first()
+        try:
+            n = int((last or "PS-0").split("-")[-1]) + 1
+        except Exception:
+            n = 1
+        sku = f"PS-{n}"
+        while Product.objects.filter(sku=sku).exists() or Variant.objects.filter(sku=sku).exists():
+            n += 1
+            sku = f"PS-{n}"
+    base = slugify(name) or "preke"
+    slug = base
+    i = 2
+    while Product.objects.filter(slug=slug).exists():
+        slug = f"{base}-{i}"
+        i += 1
+    product = Product.objects.create(
+        name=name,
+        slug=slug,
+        sku=sku,
+        brand=Brand.objects.filter(id=payload.brand_id).first() if payload.brand_id else None,
+        category=Category.objects.filter(id=payload.category_id).first() if payload.category_id else None,
+        group=ProductGroup.objects.filter(id=payload.group_id).first() if payload.group_id else None,
+        is_active=False,
+    )
+    Variant.objects.create(
+        product=product,
+        sku=sku,
+        price_eur=Decimal((payload.price_eur or "0").strip() or "0"),
+    )
+    return OpsCatalogProductOut(
+        id=int(product.id),
+        name=product.name,
+        slug=product.slug,
+        sku=product.sku or "",
+        brand_name=product.brand.name if product.brand else "",
+        category_id=product.category_id,
+        category_name=product.category.name if product.category else "",
+        variants_count=1,
+        is_active=False,
+        thumbnail_url="",
+    )
 
 
 @router.get("/catalog/lookups", response=OpsCatalogLookupsOut, auth=_auth)
@@ -619,6 +676,20 @@ def ops_catalog_create_variant(request, product_id: int, payload: OpsVariantCrea
         cost_eur=cost_eur,
         is_active=True if payload.is_active is None else bool(payload.is_active),
     )
+    if payload.option_value_ids:
+        allowed = {
+            int(pot.option_type_id)
+            for pot in product.option_types.all()
+        }
+        for ov in OptionValue.objects.filter(id__in=payload.option_value_ids).select_related("option_type"):
+            if int(ov.option_type_id) not in allowed:
+                raise HttpError(400, f"Reikšmė „{ov.label}“ nepriklauso šios prekės opcijoms")
+            VariantOptionValue.objects.update_or_create(
+                variant=v,
+                option_type=ov.option_type,
+                defaults={"option_value": ov},
+            )
+
     return _serialize_variant(
         v,
         list(product.option_types.select_related("option_type").all()),
