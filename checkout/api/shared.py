@@ -198,10 +198,18 @@ def _resolve_checkout_payment_method(
             raise HttpError(400, "Payment method not available")
         return provider, None
 
-    allowed = {m.code for m in pm.allowed_shipping_methods.all()}
-    if allowed and (shipping_method or "") not in allowed:
-        raise HttpError(
-            400, "Payment method not available for this shipping method")
+    if (shipping_method or "") == "digital":
+        # Skaitmeniniams orderiams nėra fizinio pristatymo — shipping
+        # apribojimai netaikomi (veidrodis payment_methods listing logikai).
+        # COD iš esmės negalimas (nėra siuntos).
+        if code == "cod" or (pm.provider or "").strip().lower() == "cod":
+            raise HttpError(
+                400, "Payment method not available for this shipping method")
+    else:
+        allowed = {m.code for m in pm.allowed_shipping_methods.all()}
+        if allowed and (shipping_method or "") not in allowed:
+            raise HttpError(
+                400, "Payment method not available for this shipping method")
 
     override = (pm.provider or "").strip().lower()
     if override:
