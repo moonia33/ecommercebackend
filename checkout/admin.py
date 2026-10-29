@@ -15,28 +15,31 @@ from .models import Cart, CartItem, FeeRule, Order, OrderConsent, OrderDiscount,
 class CartItemInline(admin.TabularInline):
     model = CartItem
     extra = 0
-    autocomplete_fields = ("variant",)
+    autocomplete_fields = ("variant", "offer")
 
 
 @admin.register(Cart)
 class CartAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "updated_at")
+    list_select_related = ("user",)
     search_fields = ("user__email",)
+    autocomplete_fields = ("user",)
     inlines = (CartItemInline,)
 
 
 @admin.register(CartItem)
 class CartItemAdmin(admin.ModelAdmin):
     list_display = ("id", "cart", "variant", "qty", "updated_at")
+    list_select_related = ("cart", "variant")
     search_fields = ("cart__user__email", "variant__sku",
                      "variant__product__name")
-    autocomplete_fields = ("variant",)
+    autocomplete_fields = ("cart", "variant", "offer")
 
 
 class OrderLineInline(admin.TabularInline):
     model = OrderLine
     extra = 1
-    autocomplete_fields = ("variant",)
+    autocomplete_fields = ("variant", "offer")
 
     class Form(forms.ModelForm):
         sku = forms.CharField(required=False)
@@ -180,6 +183,7 @@ class OrderAdmin(admin.ModelAdmin):
         "total_gross",
         "created_at",
     )
+    list_select_related = ("shop", "user")
     list_filter = (
         "shop",
         "status",
@@ -189,7 +193,7 @@ class OrderAdmin(admin.ModelAdmin):
         "supplier_reservation_status",
     )
     search_fields = ("id", "user__email", "tracking_number")
-    autocomplete_fields = ("pickup_locker",)
+    autocomplete_fields = ("pickup_locker", "user")
     readonly_fields = (
         "created_at",
         "updated_at",
