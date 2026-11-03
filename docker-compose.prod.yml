@@ -28,6 +28,16 @@ services:
       retries: 3
       start_period: 60s
 
+  worker_imports:
+    <<: *app
+    command: celery -A config worker -l info -Q imports -c 2 -n imports@%h
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping -d imports@$$HOSTNAME --timeout 10 | grep -q pong"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 60s
+
   beat:
     <<: *app
     command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
