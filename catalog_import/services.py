@@ -47,6 +47,8 @@ from .schemas import (
     CatalogImportEnvelope,
     ImportProductIn,
     ImportVariantIn,
+    PriceImportEnvelope,
+    PriceImportItemIn,
     StockImportEnvelope,
     StockImportItemIn,
 )
@@ -128,6 +130,8 @@ def execute_run(run: ImportRun, *, triggered_by=None) -> ImportRun:
         with suppress_search_sync(), _suppress_image_ingest():
             if run.kind == ImportRun.Kind.CATALOG:
                 touched_product_ids = _process_catalog(run, data, dry_run=dry_run)
+            elif run.kind == ImportRun.Kind.PRICE:
+                touched_product_ids = _process_prices(run, data, dry_run=dry_run)
             else:
                 touched_product_ids = _process_stock(run, data, dry_run=dry_run)
     except ValidationError as exc:
@@ -295,6 +299,31 @@ def _process_stock(run: ImportRun, data: dict, *, dry_run: bool) -> set[int]:
         product_id = _apply_one(
             run, row, lambda: _apply_stock(row, item, warehouse), dry_run
         )
+        if product_id and not dry_run:
+            touched_product_ids.add(product_id)
+    run.recount()
+    run.save(update_fields=["total_items", "ok_items", "failed_items", "skipped_items"])
+    return touched_product_ids
+
+
+def _process_prices(run: ImportRun, data: dict, *, dry_run: bool) -> set[int]:
+    env = PriceImportEnvelope(**data)
+    if env.format_version not in (1, 2):
+        raise _ItemError(f"unsupported format_version {env.format_version}")
+    run.source = env.source
+    run.save(update_fields=["source"])
+
+    touched_product_ids: set[int] = set()
+    for row_no, raw in enumerate(env.items, start=1):
+        row = ImportItem.objects.create(run=run, row_no=row_no, payload=raw)
+        try:
+            item = PriceImportItemIn(**raw)
+            row.external_code = item.code
+            row.save(update_fields=["external_code"])
+        except ValidationError as exc:
+            _mark_error(row, _format_validation(exc))
+            continue
+        product_id = _apply_one(run, row, lambda: _apply_price(row, item), dry_run)
         if product_id and not dry_run:
             touched_product_ids.add(product_id)
     run.recount()
@@ -512,7 +541,15 @@ def _sync_taxonomy(product: Product, item: ImportProductIn) -> None:
         category = Category.objects.filter(slug=item.category).first()
         if category is None:
             raise _ItemError(f"unknown category slug '{item.category}'")
-        product.category = category
+        # Tikslesnė esama kategorija (incoming kategorijos vaikas, pvz. iš
+        # PrestaShop ar rankinė) paliekama – importas jos nesuplatina.
+        current = product.category if product.category_id else None
+        if not (
+            current is not None
+            and current.pk != category.pk
+            and current.is_descendant_of(category)
+        ):
+            product.category = category
     if item.brand_code:
         brand = Brand.objects.filter(slug=item.brand_code).first() or Brand.objects.filter(
             import_code=item.brand_code
@@ -977,3 +1014,59 @@ def _apply_stock(row: ImportItem, item: StockImportItemIn, warehouse: Warehouse)
     row.variant_id = variant.id
     row.save(update_fields=["variant_id"])
     return variant.product_id
+
+
+def _apply_price(row: ImportItem, item: PriceImportItemIn) -> int | None:
+    """Kaina be PVM (price_eur) + savikaina; rašoma tik pasikeitusi.
+
+    Grąžina product_id tik kai kaina pasikeitė (paieškos reindeksui).
+    """
+    if item.price_net < 0 or (item.cost_net is not None and item.cost_net < 0):
+        raise _ItemError(f"negative price for '{item.code}'")
+    variant = Variant.objects.filter(sku=item.code).first()
+    if variant is None:
+        raise _ItemError(f"unknown variant sku '{item.code}'")
+    fields = []
+    price = Decimal(item.price_net).quantize(Decimal("0.01"))
+    if variant.price_eur != price:
+        variant.price_eur = price
+        fields.append("price_eur")
+    if item.cost_net is not None:
+        cost = Decimal(item.cost_net).quantize(Decimal("0.01"))
+        if variant.cost_eur != cost:
+            variant.cost_eur = cost
+            fields.append("cost_eur")
+    if fields:
+        variant.save(update_fields=fields)
+    row.variant_id = variant.id
+    row.save(update_fields=["variant_id"])
+    return variant.product_id if "price_eur" in fields else None
+
+
+def variant_state(codes: list[str], warehouse_code: str = "") -> list[dict]:
+    """Esama variantų būsena (kaina, savikaina, likutis sandėlyje) delta sinchronizacijai."""
+    variants = list(
+        Variant.objects.filter(sku__in=set(codes)).only(
+            "id", "sku", "is_active", "price_eur", "cost_eur"
+        )
+    )
+    qty_by_variant: dict[int, int] = {}
+    if warehouse_code:
+        warehouse = Warehouse.objects.filter(code=warehouse_code).first()
+        if warehouse is None:
+            raise _ItemError(f"unknown warehouse_code '{warehouse_code}'")
+        qty_by_variant = dict(
+            InventoryItem.objects.filter(
+                warehouse=warehouse, variant_id__in=[v.id for v in variants]
+            ).values_list("variant_id", "qty_on_hand")
+        )
+    return [
+        {
+            "code": v.sku,
+            "is_active": v.is_active,
+            "price_net": v.price_eur,
+            "cost_net": v.cost_eur,
+            "qty": qty_by_variant.get(v.id, 0) if warehouse_code else None,
+        }
+        for v in variants
+    ]

@@ -8,6 +8,7 @@ class ImportRun(models.Model):
     class Kind(models.TextChoices):
         CATALOG = "catalog", "Catalog"
         STOCK = "stock", "Stock"
+        PRICE = "price", "Price"
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"
