@@ -868,3 +868,85 @@ class ProductSlugTestCase(TestCase):
         product = Product.objects.get(sku="slug1")
         self.assertEqual(product.slug, "atsarginis-bugnelis")
         self.assertTrue(ProductSlugRedirect.objects.filter(slug="spool-old").exists())
+
+
+class PriceImportTestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        tc, _ = TaxClass.objects.get_or_create(
+            code="standard", defaults={"name": "Standard"}
+        )
+        cls.warehouse, _ = Warehouse.objects.get_or_create(
+            code="main", defaults={"name": "Main", "country_code": "LT"}
+        )
+        product = Product.objects.create(sku="pp1", name="PP1", slug="pp1", tax_class=tc)
+        cls.variant = Variant.objects.create(product=product, sku="pp1-v", price_eur=10)
+
+    def _run(self, items, options=None):
+        run = create_run(
+            kind=ImportRun.Kind.PRICE,
+            payload_bytes=json.dumps({"format_version": 1, "items": items}).encode(),
+            options=options or {},
+        )
+        return execute_run(run)
+
+    def test_price_import_updates_price_and_cost(self):
+        run = self._run([{"code": "pp1-v", "price_net": "12.50", "cost_net": "6"}])
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        self.variant.refresh_from_db()
+        self.assertEqual(str(self.variant.price_eur), "12.50")
+        self.assertEqual(str(self.variant.cost_eur), "6.00")
+
+    def test_price_unknown_and_negative(self):
+        run = self._run([
+            {"code": "missing", "price_net": "1"},
+            {"code": "pp1-v", "price_net": "-1"},
+            {"code": "pp1-v", "price_net": "11"},
+        ])
+        self.assertEqual(run.failed_items, 2)
+        self.assertEqual(run.ok_items, 1)
+
+    def test_price_dry_run(self):
+        self._run([{"code": "pp1-v", "price_net": "99"}], options={"dry_run": True})
+        self.variant.refresh_from_db()
+        self.assertEqual(str(self.variant.price_eur), "10.00")
+
+    def test_variant_state(self):
+        from .services import variant_state
+
+        InventoryItem.objects.create(
+            variant=self.variant, warehouse=self.warehouse, qty_on_hand=3
+        )
+        rows = variant_state(["pp1-v", "nope"], "main")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["qty"], 3)
+        self.assertEqual(str(rows[0]["price_net"]), "10.00")
+        self.assertIsNone(variant_state(["pp1-v"])[0]["qty"])
+
+
+class CategoryRefinementTestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        TaxClass.objects.get_or_create(code="standard", defaults={"name": "Standard"})
+        cls.parent = Category.objects.create(name="Kvapai", slug="kvapai-ir-dipai")
+        cls.child = Category.objects.create(name="Skysti", slug="skysti-kvapai", parent=cls.parent)
+        cls.other = Category.objects.create(name="Kita", slug="kita")
+
+    def _import(self, category):
+        item = {
+            "code": "cr1",
+            "category": category,
+            "price_net": "1",
+            "translations": {"lt": {"name": "CR1"}},
+        }
+        return execute_run(create_run(kind=ImportRun.Kind.CATALOG, payload_bytes=_catalog_doc([item])))
+
+    def test_keeps_more_specific_existing_category(self):
+        self._import("skysti-kvapai")
+        self._import("kvapai-ir-dipai")
+        self.assertEqual(Product.objects.get(sku="cr1").category, self.child)
+
+    def test_moves_to_unrelated_category(self):
+        self._import("skysti-kvapai")
+        self._import("kita")
+        self.assertEqual(Product.objects.get(sku="cr1").category, self.other)

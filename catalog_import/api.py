@@ -9,8 +9,14 @@ from accounts.auth import JWTAuth
 from checkout.ops.shared import _require_ops_user, _to_iso
 
 from .models import ImportItem, ImportRun
-from .schemas import ImportItemOut, ImportRunOut
-from .services import _start_async_apply, create_run, execute_run
+from .schemas import ImportItemOut, ImportRunOut, VariantStateIn, VariantStateOut
+from .services import (
+    _ItemError,
+    _start_async_apply,
+    create_run,
+    execute_run,
+    variant_state,
+)
 
 router = Router(tags=["ops-imports"])
 _auth = JWTAuth()
@@ -82,6 +88,43 @@ def import_stock(
         else:
             execute_run(run)
     return _serialize_run(run)
+
+
+@router.post("/prices", response=ImportRunOut, auth=_auth)
+def import_prices(
+    request,
+    payload: dict = Body(...),
+    dry_run: bool = Query(False),
+    apply_async: bool = Query(False),
+):
+    """Stage a price import: {items: [{code, price_net, cost_net?}]} (be PVM)."""
+    user = _require_ops_user(request)
+    body = json.dumps(payload).encode("utf-8")
+    run = create_run(
+        kind=ImportRun.Kind.PRICE,
+        payload_bytes=body,
+        file_name=str(payload.get("file_name") or "api"),
+        triggered_by=user,
+        options={"dry_run": dry_run},
+    )
+    if run.status == ImportRun.Status.QUEUED:
+        if apply_async:
+            _start_async_apply(run)
+        else:
+            execute_run(run)
+    return _serialize_run(run)
+
+
+@router.post("/variant-state", response=list[VariantStateOut], auth=_auth)
+def get_variant_state(request, payload: VariantStateIn):
+    """Esama kaina/savikaina/likutis pagal SKU – normalyzer'io delta sinchronizacijai."""
+    _require_ops_user(request)
+    if len(payload.codes) > 50000:
+        raise HttpError(400, "too many codes (max 50000)")
+    try:
+        return variant_state(payload.codes, payload.warehouse_code)
+    except _ItemError as exc:
+        raise HttpError(400, str(exc))
 
 
 @router.post("/runs/{run_id}/apply", response=ImportRunOut, auth=_auth)

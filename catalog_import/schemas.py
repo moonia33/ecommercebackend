@@ -157,6 +157,35 @@ class StockImportFile(StockImportEnvelope):
     items: list[StockImportItemIn]
 
 
+class PriceImportItemIn(Schema):
+    code: str  # variant sku
+    price_net: Decimal
+    cost_net: Decimal | None = None
+
+
+class PriceImportEnvelope(Schema):
+    format_version: int = 1
+    source: str = "normalizer"
+    items: list[dict]
+
+
+class PriceImportFile(PriceImportEnvelope):
+    items: list[PriceImportItemIn]
+
+
+class VariantStateIn(Schema):
+    codes: list[str]
+    warehouse_code: str = ""
+
+
+class VariantStateOut(Schema):
+    code: str
+    is_active: bool
+    price_net: Decimal
+    cost_net: Decimal | None = None
+    qty: int | None = None
+
+
 class ImportRunOut(Schema):
     id: int
     kind: str
