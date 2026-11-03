@@ -29,7 +29,7 @@ services:
 
   worker:
     build: .
-    command: celery -A config worker -l info -Q default
+    command: celery -A config worker -l info -Q default,imports
     volumes:
       - .:/app
     depends_on:

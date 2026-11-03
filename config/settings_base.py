@@ -446,3 +446,8 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
+# Importai (normalyzer kainos/likuciai/katalogas) - atskira eile, kad nuotrauku
+# apdorojimo uzduotys ju neuzblokuotu (docker-compose.prod.yml: worker_imports).
+CELERY_TASK_ROUTES = {
+    "catalog_import.tasks.apply_import_run_task": {"queue": "imports"},
+}
