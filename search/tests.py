@@ -420,6 +420,23 @@ class SearchTests(TestCase):
         names = [f["name"] for f in coll.update_calls[0]["fields"]]
         self.assertIn("num_line_diameter", names)
 
+    def test_ensure_collection_keeps_index_when_update_fails(self):
+        from search.services import SCHEMA, ensure_collection
+
+        client = FakeClient()
+        coll = client.collections["products"]
+        coll.schema = {
+            "fields": [f for f in SCHEMA["fields"] if f["name"] != "badges"]
+        }
+        with mock.patch(
+            "search.services.get_client", return_value=client
+        ), mock.patch.object(
+            coll, "update", side_effect=TimeoutError("read timeout")
+        ):
+            self.assertFalse(ensure_collection())
+        # Timed-out alter must not drop the live index.
+        self.assertFalse(coll.deleted)
+
     def test_index_products_deletes_inactive_and_missing(self):
         from search.services import index_products
 
