@@ -208,10 +208,13 @@ def ensure_collection(*, force_recreate: bool = False) -> bool:
                     )
                     return True
                 except Exception:
+                    # Schema alter runs server-side and outlives the client
+                    # timeout on a big collection; recreating here would drop
+                    # the whole live index. Keep it — the next call re-diffs.
                     logger.exception(
-                        "Typesense field update failed; recreating collection"
+                        "Typesense field update failed; keeping collection"
                     )
-                    recreate = True
+                    return False
             else:
                 recreate = wanted != actual
         except Exception as exc:
