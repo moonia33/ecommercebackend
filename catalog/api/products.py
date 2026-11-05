@@ -224,7 +224,10 @@ def products(
     shop_id = int(shop.id) if shop else None
     collection = (collection or "").strip().lower() or None
     if collection not in {None, "new", "sale"}:
-        raise HttpError(400, "Unsupported collection (expected 'new' or 'sale')")
+        from catalog.models import Badge
+
+        if not Badge.objects.filter(code=collection).exists():
+            raise HttpError(400, "Unsupported collection (expected 'new', 'sale' or a badge code)")
     page = max(1, int(page or 1))
     page_size = max(1, min(int(page_size or 20), 100))
 
@@ -353,6 +356,10 @@ def products(
         qs = qs.filter(created_at__gte=_tz.now() - _tz.timedelta(days=30))
     elif collection == "sale":
         qs = qs.filter(_min_offer_price__lt=F("_min_variant_price"))
+    elif collection:
+        from catalog.badges import live_badge_q
+
+        qs = qs.filter(live_badge_q(collection))
 
     if channel == "outlet":
         qs = qs.filter(_min_offer_price__isnull=False)

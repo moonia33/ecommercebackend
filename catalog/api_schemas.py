@@ -129,6 +129,13 @@ class VariantOut(Schema):
     stock_remote: "StockLineOut | None" = None
 
 
+class BadgeOut(Schema):
+    code: str
+    name: str
+    style: str = "primary"
+    color: str = ""
+
+
 class ProductListOut(Schema):
     id: int
     sku: str
@@ -154,6 +161,7 @@ class ProductListOut(Schema):
 
     has_video: bool = False
     labels: list[str] = []
+    badges: list[BadgeOut] = []
 
 
 class ProductFeatureOut(Schema):
@@ -219,6 +227,7 @@ class ProductDetailOut(Schema):
     features: list[ProductFeatureOut] = []
     delivery_window: DeliveryWindowOut | None = None
     content_blocks: list[ContentBlockOut] = []
+    badges: list[BadgeOut] = []
     variants: list[VariantOut]
 
 

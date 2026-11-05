@@ -24,6 +24,12 @@ from promotions.services import apply_promo_to_unit_net, load_active_promo_rules
 from shipping.services import estimate_delivery_window
 
 
+def _badges(product_id: int, language_code: str | None) -> list[dict]:
+    from catalog.badges import badges_for_products
+
+    return badges_for_products([product_id], language_code=language_code).get(product_id, [])
+
+
 def build_product_detail_payload(
     *,
     product,
@@ -325,6 +331,7 @@ def build_product_detail_payload(
             for v in videos
         ],
         "features": features_out,
+        "badges": _badges(product.id, language_code),
         "delivery_window": delivery_window_out,
         "content_blocks": [
             {

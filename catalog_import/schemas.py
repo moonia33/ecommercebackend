@@ -115,6 +115,8 @@ class ImportProductIn(Schema):
     category: str = ""
     tax_class: str = "standard"
     is_active: bool = True
+    # Badge kodai (source=import); None – importo badge'ų nekeisti.
+    badges: list[str] | None = None
     # Atsarginė dalis: True -> prekė perkeliama į 'atsargines-dalys'
     # kategoriją (list template). False -> `category` iš payload'as.
     is_part: bool = False

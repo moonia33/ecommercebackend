@@ -34,6 +34,25 @@ def suppress_search_sync():
         _state.suppressed = prev
 
 
+def _badge_signals():
+    from catalog.models import Badge, ProductBadge
+
+    @receiver(post_save, sender=ProductBadge, dispatch_uid="search_product_badge_saved")
+    @receiver(post_delete, sender=ProductBadge, dispatch_uid="search_product_badge_deleted")
+    def product_badge_changed(sender, instance, **kwargs):
+        _enqueue(instance.product_id)
+
+    @receiver(post_save, sender=Badge, dispatch_uid="search_badge_saved")
+    def badge_saved(sender, instance, **kwargs):
+        if search_sync_suppressed():
+            return
+        from catalog.badges import reindex_products
+
+        reindex_products(
+            instance.product_links.values_list("product_id", flat=True).distinct()
+        )
+
+
 def search_sync_suppressed() -> bool:
     return getattr(_state, "suppressed", False)
 
@@ -220,3 +239,6 @@ from .models import (  # noqa: E402
 @receiver(post_delete, sender=SearchOverrideExclude)
 def curation_changed(sender, **kwargs):
     _schedule_curation_sync()
+
+
+_badge_signals()

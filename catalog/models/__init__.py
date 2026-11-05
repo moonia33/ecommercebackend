@@ -1,3 +1,4 @@
+from .badges import Badge, BadgeRule, BadgeTranslation, ProductBadge
 from .content import ContentBlock, ContentBlockTranslation, ContentRule
 from .enrichment import EnrichmentMatch, EnrichmentRule, EnrichmentRun
 from .features import (
@@ -39,6 +40,9 @@ from .variants import ProductOptionType, Variant, VariantOptionValue
 __all__ = [
     "AttributeDatatype",
     "BackInStockSubscription",
+    "Badge",
+    "BadgeRule",
+    "BadgeTranslation",
     "Brand",
     "BrandTranslation",
     "Category",
@@ -63,6 +67,7 @@ __all__ = [
     "OptionValueGroup",
     "OptionValueTranslation",
     "Product",
+    "ProductBadge",
     "ProductFeatureValue",
     "ProductSlugRedirect",
     "VariantFeatureValue",

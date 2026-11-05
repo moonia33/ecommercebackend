@@ -326,3 +326,24 @@ def notify_back_in_stock_task(inventory_item_id: int):
             sub.notified_at = now
             sub.is_active = False
             sub.save(update_fields=["notified_at", "is_active"])
+
+
+@shared_task
+def apply_badge_rules_task():
+    """Naktinis: taisyklės (likutis, nuolaida, naujumas keičiasi) + pasibaigę badge'ai."""
+    from django.db.models import Q
+    from django.utils import timezone
+
+    from catalog.badges import apply_badge_rules, reindex_products
+    from catalog.models import ProductBadge
+
+    result = apply_badge_rules()
+    # galiojimo ribos (vakar baigėsi / šiandien prasidėjo) – doc'ams reikia naujų badges
+    today = timezone.localdate()
+    edge = [today, today - timezone.timedelta(days=1)]
+    reindex_products(
+        ProductBadge.objects.filter(
+            Q(valid_until__in=edge) | Q(badge__valid_from__in=edge) | Q(badge__valid_to__in=edge)
+        ).values_list("product_id", flat=True)
+    )
+    return {"added": result.added, "removed": result.removed}
