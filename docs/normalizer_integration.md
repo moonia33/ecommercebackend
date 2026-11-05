@@ -133,6 +133,8 @@ Klaidos visada per `GET /ops/imports/runs/{id}/items?status=error` — ten `row_
 | `features` | array | ne | Spec. charakteristikos (filtrams). `Feature`/`FeatureValue` auto-create pagal `code`/`value`. **Failas yra source of truth**: prekės feature'ai, kurių nėra faile, ištrinami. |
 | `images` | array | ne | `url` privalomas → sukuriamas `ProductImage` su `image_url`; Celery `ingest_product_image_task` atsiunčia originalą į object storage (R2) ir generuoja AVIF/WebP renditions. Rekomenduota: ≥1200px kraštinė, ≤8MB, JPEG/PNG/WebP. **Bendra galerija** — rodoma visoms variantams. |
 | `stock` | object | ne | `{"<warehouse_code>": <qty>}` → `qty_on_hand` default variantui. Nežinomas warehouse → item ERROR. `qty >= 0`. |
+| `offers` | object | ne | `{"<warehouse_code>": {"price_net", "cost_net", "discount_percent"}}` → default varianto `InventoryItem` (žr. 3.3). |
+| `badges` | array\|null | ne | Marketingo badge kodai, pvz. `["new-2027"]` (žr. `docs/badges.md`). `null`/nėra = nekeisti; sąrašas sinchronizuoja **tik `import`** šaltinio badge'us (trūkstami nuimami, nauji kodai auto-create). |
 | `variants` | array | ne | Žr. žemiau. Tuščias/nėra → automatinis default variantas (`code = item.code`, paveldi `price_net`/`ean`/`stock`). |
 
 ### 3.2 Variantas
@@ -162,6 +164,25 @@ Klaidos visada per `GET /ops/imports/runs/{id}/items?status=error` — ten `row_
 | `stock` | Tas pats kaip prekės lygyje, bet rašoma į **šio** varianto `InventoryItem`. Tas pats variantas gali turėti likučius keliuose warehouse'uose (skirtingi tiekėjai). |
 | `images` | Variantui priskirtos nuotraukos (`ProductImage.variants` M2M). Rodo tik kai variantas pasirinktas. Dedup pagal `url` — tas pats URL keliems variantams = vienas `ProductImage` priskirtas keliems. |
 
+| `offers` | Sandėlio sąlygos šio varianto `InventoryItem` (žr. 3.3). |
+
+### 3.3 Sandėlio sąlygos (`offers`)
+
+```json
+"offers": {"albatros": {"price_net": null, "cost_net": "7.00", "discount_percent": 30},
+           "fox":      {"price_net": "12.40", "cost_net": "8.10", "discount_percent": null}}
+```
+
+| Laukas | → `InventoryItem` | Semantika |
+|---|---|---|
+| `price_net` | `offer_price_override_eur` | Sandėlio galutinė kaina be PVM, kai skiriasi nuo varianto kainos (papildomas tiekėjas). `null` = išvalyti. |
+| `cost_net` | `cost_eur` | Sandėlio savikaina be PVM. `null` = išvalyti. |
+| `discount_percent` | `offer_discount_percent` | 0–100, nuolaida nuo varianto kainos (pvz. Albatros SALE). `null` = išvalyti. |
+
+- Rašomi tik pasikeitę laukai; nežinomas warehouse, neigiama kaina ar % už ribų → item ERROR.
+- Frontui BE parenka sandėlį su `qty_available > 0` pagal `offer_priority`, efektyvią kainą, id;
+  `compare_at_price`/`discount_percent`/`delivery_window` – pagal parinktą sandėlį.
+
 **Svarbu:** variantas visada priklauso savo prekei. Tas pats `variant.code`, atėjęs kitos prekės viduje → item ERROR (konfliktas).
 
 ## 4. Likučių dokumentas
@@ -182,6 +203,9 @@ Atskiri, dažni atnaujinimai — tik `qty_on_hand`, niekada neliečia `qty_reser
 
 - `code` = `Variant.sku` (ne prekės kodas — default varianto sku = prekės `code`).
 - `qty >= 0`, kitapus → item ERROR.
+- Neprivalomas `"offer": {price_net, cost_net, discount_percent}` – tos pačios sąlygos kaip 3.3;
+  nėra/`null` = sandėlio kainų nekeisti. `POST /ops/imports/variant-state` grąžina ir esamą `offer`
+  būseną, kad normalizeris siųstų tik deltas.
 - Nežinomas SKU arba warehouse → item ERROR.
 
 ## 5. Klaidų ir konfliktų modelis
