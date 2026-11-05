@@ -49,6 +49,24 @@ class CatalogImportTestCase(TestCase):
         )
         return execute_run(run)
 
+    def test_variant_offers_written(self):
+        Warehouse.objects.get_or_create(
+            code="albatros", defaults={"name": "Centrinis", "country_code": "LT"}
+        )
+        run = self._run([{
+            "code": "off-p", "tax_class": "standard", "price_net": "15.00",
+            "translations": {"lt": {"name": "P"}},
+            "variants": [{
+                "code": "off-v", "price_net": "15.00",
+                "stock": {"albatros": 4},
+                "offers": {"albatros": {"cost_net": "7.00", "discount_percent": 30}},
+            }],
+        }])
+        self.assertEqual(run.status, ImportRun.Status.DONE, run.items.values_list("error", flat=True))
+        inv = InventoryItem.objects.get(variant__sku="off-v", warehouse__code="albatros")
+        self.assertEqual((inv.qty_on_hand, inv.offer_discount_percent), (4, 30))
+        self.assertEqual(str(inv.cost_eur), "7.00")
+
     def test_product_with_variants(self):
         run = self._run([
             {
@@ -487,6 +505,46 @@ class StockImportTestCase(TestCase):
         ])
         self.assertEqual(run.failed_items, 2)
         self.assertEqual(run.ok_items, 1)
+
+    def test_stock_offer_terms_set_and_cleared(self):
+        run = self._run_stock([{
+            "code": "p1-v", "qty": 3,
+            "offer": {"price_net": "8.50", "cost_net": "5.00", "discount_percent": None},
+        }])
+        self.assertEqual(run.status, ImportRun.Status.DONE)
+        inv = InventoryItem.objects.get(variant=self.variant, warehouse=self.warehouse)
+        self.assertEqual(str(inv.offer_price_override_eur), "8.50")
+        self.assertEqual(str(inv.cost_eur), "5.00")
+        self.assertIsNone(inv.offer_discount_percent)
+        self._run_stock([{
+            "code": "p1-v", "qty": 3,
+            "offer": {"price_net": None, "cost_net": "4.00", "discount_percent": 30},
+        }])
+        inv.refresh_from_db()
+        self.assertIsNone(inv.offer_price_override_eur)
+        self.assertEqual(inv.offer_discount_percent, 30)
+        # be "offer" sąlygos nekeičiamos
+        self._run_stock([{"code": "p1-v", "qty": 1}])
+        inv.refresh_from_db()
+        self.assertEqual((inv.qty_on_hand, inv.offer_discount_percent), (1, 30))
+
+    def test_stock_offer_invalid_discount(self):
+        run = self._run_stock([
+            {"code": "p1-v", "qty": 1, "offer": {"discount_percent": 150}},
+        ])
+        self.assertEqual(run.failed_items, 1)
+
+    def test_variant_state_includes_offer(self):
+        from .services import variant_state
+
+        InventoryItem.objects.create(
+            variant=self.variant, warehouse=self.warehouse, qty_on_hand=2,
+            offer_discount_percent=20,
+        )
+        row = variant_state(["p1-v"], "main")[0]
+        self.assertEqual(row["qty"], 2)
+        self.assertEqual(row["offer"]["discount_percent"], 20)
+        self.assertNotIn("offer", variant_state(["p1-v"])[0])
 
     def test_stock_dry_run(self):
         InventoryItem.objects.create(

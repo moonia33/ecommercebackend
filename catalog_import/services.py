@@ -51,6 +51,7 @@ from .schemas import (
     PriceImportItemIn,
     StockImportEnvelope,
     StockImportItemIn,
+    WarehouseOfferIn,
 )
 
 
@@ -978,9 +979,13 @@ def _sync_stock(product: Product, variants: list[Variant], item: ImportProductIn
     # product-level stock applies to the default/first variant
     if item.stock:
         _write_stock(variants[0], item.stock)
+    if item.offers:
+        _write_offers(variants[0], item.offers)
     for spec, variant in zip(item.variants, variants):
         if spec.stock:
             _write_stock(variant, spec.stock)
+        if spec.offers:
+            _write_offers(variant, spec.offers)
 
 
 def _write_stock(variant: Variant, stock: dict[str, int]) -> None:
@@ -998,6 +1003,47 @@ def _write_stock(variant: Variant, stock: dict[str, int]) -> None:
             inv.save(update_fields=["qty_on_hand", "updated_at"])
 
 
+def _write_offers(variant: Variant, offers: dict[str, WarehouseOfferIn]) -> None:
+    for wh_code, offer in offers.items():
+        warehouse = Warehouse.objects.filter(code=wh_code).first()
+        if warehouse is None:
+            raise _ItemError(f"unknown warehouse_code '{wh_code}'")
+        inv, _ = InventoryItem.objects.get_or_create(variant=variant, warehouse=warehouse)
+        _write_offer(inv, offer)
+
+
+def _money(value) -> Decimal | None:
+    return None if value is None else Decimal(value).quantize(Decimal("0.01"))
+
+
+def _write_offer(inv: InventoryItem, offer: WarehouseOfferIn) -> None:
+    """Sandėlio kaina/nuolaida/savikaina; rašoma tik pasikeitusi."""
+    if any(v is not None and v < 0 for v in (offer.price_net, offer.cost_net)):
+        raise _ItemError(f"negative offer price for '{inv.variant.sku}'")
+    if offer.discount_percent is not None and not 0 <= offer.discount_percent <= 100:
+        raise _ItemError(f"discount_percent out of range for '{inv.variant.sku}'")
+    wanted = {
+        "offer_price_override_eur": _money(offer.price_net),
+        "cost_eur": _money(offer.cost_net),
+        "offer_discount_percent": offer.discount_percent,
+    }
+    fields = [f for f, v in wanted.items() if getattr(inv, f) != v]
+    if fields:
+        for f in fields:
+            setattr(inv, f, wanted[f])
+        inv.save(update_fields=[*fields, "updated_at"])
+
+
+def _offer_state(inv: InventoryItem | None) -> dict | None:
+    if inv is None:
+        return None
+    return {
+        "price_net": inv.offer_price_override_eur,
+        "cost_net": inv.cost_eur,
+        "discount_percent": inv.offer_discount_percent,
+    }
+
+
 # ---------------- stock items ----------------
 
 
@@ -1011,6 +1057,8 @@ def _apply_stock(row: ImportItem, item: StockImportItemIn, warehouse: Warehouse)
     if inv.qty_on_hand != item.qty:
         inv.qty_on_hand = item.qty
         inv.save(update_fields=["qty_on_hand", "updated_at"])
+    if item.offer is not None:
+        _write_offer(inv, item.offer)
     row.variant_id = variant.id
     row.save(update_fields=["variant_id"])
     return variant.product_id
@@ -1050,23 +1098,32 @@ def variant_state(codes: list[str], warehouse_code: str = "") -> list[dict]:
             "id", "sku", "is_active", "price_eur", "cost_eur"
         )
     )
-    qty_by_variant: dict[int, int] = {}
+    inv_by_variant: dict[int, InventoryItem] = {}
     if warehouse_code:
         warehouse = Warehouse.objects.filter(code=warehouse_code).first()
         if warehouse is None:
             raise _ItemError(f"unknown warehouse_code '{warehouse_code}'")
-        qty_by_variant = dict(
-            InventoryItem.objects.filter(
+        inv_by_variant = {
+            inv.variant_id: inv
+            for inv in InventoryItem.objects.filter(
                 warehouse=warehouse, variant_id__in=[v.id for v in variants]
-            ).values_list("variant_id", "qty_on_hand")
-        )
-    return [
-        {
+            ).only(
+                "variant_id", "qty_on_hand", "offer_price_override_eur",
+                "cost_eur", "offer_discount_percent",
+            )
+        }
+    rows = []
+    for v in variants:
+        row = {
             "code": v.sku,
             "is_active": v.is_active,
             "price_net": v.price_eur,
             "cost_net": v.cost_eur,
-            "qty": qty_by_variant.get(v.id, 0) if warehouse_code else None,
+            "qty": None,
         }
-        for v in variants
-    ]
+        if warehouse_code:
+            inv = inv_by_variant.get(v.id)
+            row["qty"] = inv.qty_on_hand if inv else 0
+            row["offer"] = _offer_state(inv)
+        rows.append(row)
+    return rows
