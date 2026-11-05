@@ -100,6 +100,7 @@ SCHEMA = {
         # offer < list (akcijos/ispardavimas) — "discounted" sort'ui.
         {"name": "disc_normal", "type": "int32"},
         {"name": "disc_outlet", "type": "int32"},
+        {"name": "badges", "type": "string[]", "facet": True, "optional": True},
         {"name": "created_ts", "type": "int64"},
         {"name": "popularity", "type": "int32"},
     ],
@@ -513,14 +514,32 @@ def product_document(
         "stock_outlet": 1 if price_outlet is not None else 0,
         "disc_normal": _disc(price_normal),
         "disc_outlet": _disc(price_outlet),
+        "badges": _live_badge_codes(p),
         "created_ts": int(p.created_at.timestamp()) if p.created_at else 0,
         "popularity": int(popularity or 0),
         **numeric,
     }
 
 
+def _live_badge_codes(p) -> list[str]:
+    from django.utils import timezone
+
+    today = timezone.localdate()
+    codes = set()
+    for link in p.badge_links.all():
+        b = link.badge
+        if not b.is_active or (b.valid_from and b.valid_from > today):
+            continue
+        if (b.valid_to and b.valid_to < today) or (
+            link.valid_until and link.valid_until < today
+        ):
+            continue
+        codes.add(b.code)
+    return sorted(codes)
+
+
 _DOC_QS_SELECT = ("brand", "category")
-_DOC_QS_PREFETCH = ("variants", "variants__inventory_items",
+_DOC_QS_PREFETCH = ("variants", "badge_links", "badge_links__badge", "variants__inventory_items",
                     "variants__feature_values", "variants__feature_values__feature",
                     "variants__feature_values__feature_value",
                     "variants__feature_values__feature_value__groups",
@@ -868,6 +887,8 @@ def browse_products(
         filters.append(f"created_ts:>={int(_time.time() - 30 * 86400)}")
     elif collection == "sale":
         filters.append(f"disc_{ch}:>0")
+    elif collection:
+        filters.append(f"badges:=[`{collection}`]")
 
     qv = (q or "").strip()
     if qv:

@@ -14,6 +14,10 @@ from api.admin_i18n import apply_language_code_choices
 from .widgets import TableEditorWidget, ToastUIMarkdownWidget
 
 from .models import (
+    Badge,
+    BadgeRule,
+    BadgeTranslation,
+    ProductBadge,
     Brand,
     BrandTranslation,
     Category,
@@ -502,6 +506,14 @@ class VariantInline(admin.TabularInline):
         return base_fields + dynamic_fields
 
 
+class ProductBadgeInline(admin.TabularInline):
+    model = ProductBadge
+    extra = 0
+    fields = ("badge", "source", "rule", "valid_until", "created_at")
+    readonly_fields = ("rule", "created_at")
+    autocomplete_fields = ("badge",)
+
+
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = ("sku", "product_group_code", "name", "brand", "category", "group", "is_active")
@@ -527,6 +539,7 @@ class ProductAdmin(admin.ModelAdmin):
         ProductImageInline,
         ProductFeatureValueInline,
         ProductOptionTypeInline,
+        ProductBadgeInline,
         VariantInline,
     )
 
@@ -1243,3 +1256,88 @@ class ProductSlugRedirectAdmin(admin.ModelAdmin):
     list_filter = ("language_code",)
     search_fields = ("slug", "product__sku", "product__name")
     raw_id_fields = ("product",)
+
+
+class BadgeTranslationInline(admin.TabularInline):
+    model = BadgeTranslation
+    extra = 0
+
+
+class BadgeProductInline(admin.TabularInline):
+    model = ProductBadge
+    extra = 1
+    fields = ("product", "source", "rule", "valid_until", "created_at")
+    readonly_fields = ("rule", "created_at")
+    autocomplete_fields = ("product",)
+    verbose_name = "Priskirta prekė"
+    verbose_name_plural = "Priskirtos prekės (rankiniu būdu galima pridėti bet kiek)"
+
+
+@admin.register(Badge)
+class BadgeAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "style", "priority", "is_active", "valid_from", "valid_to", "products")
+    list_filter = ("is_active", "style")
+    search_fields = ("code", "name", "translations__name")
+    inlines = (BadgeTranslationInline, BadgeProductInline)
+
+    @admin.display(description="Prekės")
+    def products(self, obj):
+        return obj.product_links.values("product_id").distinct().count()
+
+
+@admin.register(BadgeRule)
+class BadgeRuleAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "badge", "is_active", "brand", "category", "sku_prefix", "feature", "assigned", "updated_at")
+    list_filter = ("is_active", "badge")
+    search_fields = ("name", "pattern", "sku_prefix")
+    autocomplete_fields = ("badge", "brand", "category", "product_group", "feature", "feature_value", "warehouse")
+    actions = ("run_selected_dry_run", "run_selected_apply")
+    fieldsets = (
+        (None, {"fields": ("name", "badge", "is_active")}),
+        ("Kur", {"fields": ("brand", "category", "include_descendants", "product_group", "sku_prefix")}),
+        ("Feature (pvz. iš enrichment)", {"fields": ("feature", "feature_value")}),
+        ("Tekstas", {"fields": ("matcher_type", "pattern", "match_in_name", "match_in_description", "match_in_sku")}),
+        ("Likutis / kaina / naujumas", {"fields": ("in_stock_only", "warehouse", "discounted_only", "created_within_days")}),
+    )
+
+    @admin.display(description="Priskirta")
+    def assigned(self, obj):
+        return obj.assignments.count()
+
+    def _run(self, request, queryset, *, dry_run: bool):
+        from catalog.badges import apply_badge_rules
+
+        result = apply_badge_rules(rule_ids=queryset.values_list("id", flat=True), dry_run=dry_run)
+        prefix = "Dry-run" if dry_run else "Pritaikyta"
+        self.message_user(
+            request,
+            f"{prefix}: atitinka {sum(result.matched.values())}, pridėtų {result.added}, nuimtų {result.removed}.",
+        )
+
+    @admin.action(description="Badge taisyklės: dry-run")
+    def run_selected_dry_run(self, request, queryset):
+        self._run(request, queryset, dry_run=True)
+
+    @admin.action(description="Badge taisyklės: pritaikyti")
+    def run_selected_apply(self, request, queryset):
+        self._run(request, queryset, dry_run=False)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        from catalog.badges import apply_badge_rules
+
+        apply_badge_rules(rule_ids=[obj.id])
+
+    def delete_queryset(self, request, queryset):
+        from catalog.badges import reindex_products
+
+        ids = list(ProductBadge.objects.filter(rule__in=queryset).values_list("product_id", flat=True))
+        super().delete_queryset(request, queryset)
+        reindex_products(ids)
+
+    def delete_model(self, request, obj):
+        from catalog.badges import reindex_products
+
+        ids = list(obj.assignments.values_list("product_id", flat=True))
+        super().delete_model(request, obj)
+        reindex_products(ids)

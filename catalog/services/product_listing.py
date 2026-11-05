@@ -99,6 +99,11 @@ def serialize_products_listing(
     )
 
     new_cutoff = timezone.now() - timedelta(days=30)
+    from catalog.badges import badges_for_products
+
+    badges_by_pid = badges_for_products(
+        [p.id for p in products], language_code=language_code
+    )
 
     def labels_for(product: Product) -> list[str]:
         labels: list[str] = []
@@ -206,6 +211,7 @@ def serialize_products_listing(
                 "discount_percent": disc_pct,
                 "has_video": p.id in video_product_ids,
                 "labels": labels_for(p),
+                "badges": badges_by_pid.get(p.id, []),
             }
         )
     return out

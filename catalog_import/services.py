@@ -415,6 +415,10 @@ def _apply_product(run: ImportRun, item: ImportProductIn, seen_ids: set[int], ro
     _sync_translations(product, item)
     _sync_taxonomy(product, item)
     _sync_features(product, item)
+    if item.badges is not None:
+        from catalog.badges import sync_import_badges
+
+        sync_import_badges(product, item.badges)
     img_keep_ids = _sync_images(product, item)
     _sync_videos(product, item)
     variants, img_keep_ids = _sync_variants(
