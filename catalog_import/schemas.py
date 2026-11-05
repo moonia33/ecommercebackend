@@ -51,6 +51,20 @@ class ImportVideoIn(Schema):
     sort_order: int = 0
 
 
+class WarehouseOfferIn(Schema):
+    """Sandėlio pasiūlymo sąlygos (InventoryItem). Laukas None = išvalyti.
+
+    price_net: kaina be PVM šiame sandėlyje (offer_price_override_eur),
+    kai sandėlio kaina skiriasi nuo varianto kainos (kitas tiekėjas).
+    discount_percent: nuolaida % nuo varianto kainos (offer_discount_percent).
+    cost_net: sandėlio savikaina be PVM (cost_eur).
+    """
+
+    price_net: Decimal | None = None
+    cost_net: Decimal | None = None
+    discount_percent: int | None = None
+
+
 class ImportVariantIn(Schema):
     code: str
     product_group_code: str = ""
@@ -72,6 +86,8 @@ class ImportVariantIn(Schema):
     width_cm: int = 0
     height_cm: int = 0
     is_active: bool = True
+    # warehouse_code -> sandėlio kaina/nuolaida/savikaina
+    offers: dict[str, WarehouseOfferIn] = {}
     # Pakuotės / trade-pack info (FOX): pack_unit='pcs', trade_pack_qty=dėžėje
     # vienetų, pack_barcode=dėžės EAN; sold_as_pack=True -> variantas = visa
     # dėžė (ean=dėžės EAN, kainos jau padaugintos iš trade_pack_qty).
@@ -123,6 +139,7 @@ class ImportProductIn(Schema):
     videos: list[ImportVideoIn] = []
     # warehouse_code -> qty (product-level stock goes to the default variant)
     stock: dict[str, int] = {}
+    offers: dict[str, WarehouseOfferIn] = {}
     variants: list[ImportVariantIn] = []
 
 
@@ -146,6 +163,8 @@ class CatalogImportFile(CatalogImportEnvelope):
 class StockImportItemIn(Schema):
     code: str  # variant sku
     qty: int
+    # None = sandėlio kainos/nuolaidos nekeisti
+    offer: WarehouseOfferIn | None = None
 
 
 class StockImportEnvelope(Schema):
