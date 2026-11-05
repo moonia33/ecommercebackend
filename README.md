@@ -12,6 +12,10 @@ Ilgalaikei plėtrai paruošta e-commerce platforma su multi-shop, daugiašaliu t
 - Middleware importų kontraktas: `docs/middleware/integration_spec.md`
 - Middleware job lifecycle: `docs/middleware/import_job_lifecycle.md`
 - FE API v2 trumpa santrauka: `docs/api_v2_frontend_guidelines.md`
+- Normalizerio importo formatas (katalogas, likučiai, sandėlio sąlygos): `docs/normalizer_integration.md`
+- Prekių badge'ai (admin, taisyklės, importas, API, Typesense): `docs/badges.md`
+- Enrichment (tekstas → feature'ai): `docs/enrichment.md`
+- Paieška (Typesense): `docs/search.md`
 
 ## GitHub naudojimas (komandai)
 

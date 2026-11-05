@@ -26,8 +26,15 @@ tada `./manage.py reindex_products`.
 - **`infix: true`** ant `name`/`sku`/`search_text` — fragmentinė paieška
   („5500" randa „SLA-5500") per `infix=fallback`.
 - **`ensure_collection()`** palygina laukų signature'us (`name`, `type`,
-  `facet`, `optional`, `infix`, `index`) — schema pasikeitus kolekcija
-  perkuriama automatiškai. `id` laukas išskirtas (Typesense managed).
+  `facet`, `optional`, `infix`, `index`); `id` išskirtas (Typesense managed).
+  Tik nauji laukai → `collections.update()` (indeksas lieka). Jei update
+  nespėja per client timeout (didelė kolekcija — alter tęsiasi serveryje),
+  kolekcija **paliekama** ir grąžinama `False`; kitas kvietimas diff'ina iš
+  naujo. Kiti skirtumai (pakeistas/pašalintas laukas) → perkūrimas.
+- **Po schemos pakeitimo deploy'aus** patikrinti `num_documents`; jei 0 —
+  `manage.py reindex_products` (prod ~27k prekių ≈ 8 min, ~1 GB RAM).
+- **`badges`** — `string[]` facet (gyvi badge kodai); `?collection=<kodas>`
+  kataloge filtruoja `badges:=[kodas]`. Žr. `docs/badges.md`.
 - **Importo klaidos loguojamos** — `import_` per-document `success`
   tikrinamas; anksčiau reject'ai buvo nurisami tyliai.
 
