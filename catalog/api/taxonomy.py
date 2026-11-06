@@ -56,6 +56,15 @@ def categories(request):
     used_category_ids = set(
         scoped_ids.values_list("category_id", flat=True).distinct()
     )
+    if used_category_ids:
+        # Tėvai be tiesiogiai priskirtų prekių vis tiek turi likti
+        # sąraše — kitaip jų vaikai FE'e tampa "dangling" root'ais
+        # ir mega-meniu taksonomija sugenda.
+        used_category_ids |= set(
+            Category.objects.filter(id__in=used_category_ids)
+            .get_ancestors()
+            .values_list("id", flat=True)
+        )
     # Medžio tvarka (tree_id, lft) — admin'e vilkimas DraggableMPTTAdmin
     # valdo mega-meniu rikiavimą; order_insertion_by=["name"] tik numatyta
     # naujų kategorijų padėtis kol jas perrikiuoja.
