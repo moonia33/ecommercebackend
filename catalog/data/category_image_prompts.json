@@ -9,7 +9,7 @@
       "background": "transparent",
       "output_format": "svg",
       "svg_model": "gpt-5.2",
-      "color": "#111827",
+      "color": "#000000",
       "stroke_scale": 0.6,
       "max_px": 256,
       "quality": 85
