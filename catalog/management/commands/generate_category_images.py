@@ -24,7 +24,15 @@ def _load_config(path: Path) -> dict:
         raise CommandError(f"Neteisingas JSON ({path}): {e}")
 
 
-def _generate_image(*, prompt: str, model: str, size: str, background: str) -> bytes:
+def _generate_image(
+    *,
+    prompt: str,
+    model: str,
+    size: str,
+    background: str,
+    output_format: str,
+    svg_model: str = "",
+) -> bytes:
     key = getattr(settings, "OPENAI_API_KEY", "") or ""
     if not key:
         raise CommandError("OPENAI_API_KEY nenustatytas (.env).")
@@ -36,6 +44,12 @@ def _generate_image(*, prompt: str, model: str, size: str, background: str) -> b
     }
     if background and background != "auto":
         payload["background"] = background
+    if output_format:
+        # 'svg' palaiko tik naujesni gpt-image modeliai (pvz. 2.6-sunburst);
+        # API reikalauja atskiro svg.model parametro (SVG rašo tekstinis modelis).
+        payload["output_format"] = output_format
+        if output_format == "svg":
+            payload["svg"] = {"model": svg_model or "gpt-5.2"}
     resp = requests.post(
         IMAGES_ENDPOINT,
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
@@ -175,6 +189,7 @@ class Command(BaseCommand):
                 self.stdout.write(f"  {c.slug}{tag}: {prompt}")
             return
 
+        out_format = kcfg.get("output_format") or "webp"
         done = failed = 0
         for c, prompt, fb in todo:
             full_prompt = f"{kcfg['style']} {prompt}"
@@ -184,16 +199,21 @@ class Command(BaseCommand):
                     model=options["model"],
                     size=kcfg.get("size") or settings.OPENAI_IMAGE_SIZE,
                     background=kcfg.get("background") or "auto",
+                    output_format=out_format,
+                    svg_model=kcfg.get("svg_model") or "",
                 )
-                out = _postprocess(
-                    raw,
-                    max_px=int(kcfg.get("max_px") or 1024),
-                    out_format=kcfg.get("output_format") or "webp",
-                    quality=int(kcfg.get("quality") or 85),
-                    keep_alpha=keep_alpha,
-                )
-                ext = kcfg.get("output_format") or "webp"
-                getattr(c, field).save(f"{c.slug}.{ext}", ContentFile(out), save=True)
+                if out_format == "svg":
+                    # Vektorius — PIL postprocess nereikalingas.
+                    out = raw
+                else:
+                    out = _postprocess(
+                        raw,
+                        max_px=int(kcfg.get("max_px") or 1024),
+                        out_format=out_format,
+                        quality=int(kcfg.get("quality") or 85),
+                        keep_alpha=keep_alpha,
+                    )
+                getattr(c, field).save(f"{c.slug}.{out_format}", ContentFile(out), save=True)
                 done += 1
                 self.stdout.write(f"  OK {c.slug}" + (" [fallback]" if fb else ""))
             except Exception as e:

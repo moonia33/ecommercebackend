@@ -1,12 +1,13 @@
 {
   "kinds": {
     "menu_icon": {
-      "style": "Minimal flat icon for a fishing-tackle e-commerce mega menu. Single solid color #475569 on a fully transparent background. Bold rounded strokes, simple silhouette, centered, generous padding (~15% margin), no text, no shadows, no gradients, no photo details. Readable at 16px. Square 1:1.",
+      "style": "Lucide-style vector line icon for a fishing-tackle e-commerce mega menu, drawn as clean SVG. Uniform stroke weight, rounded line caps and joins, single solid color #2563eb on a transparent background. Simple geometric silhouette, centered, generous padding (~15% margin), no text, no shadows, no gradients. Readable at 16px. Square 1:1. Return only the SVG markup.",
       "fallback_prompt": "Icon of {name} (fishing tackle category item)",
       "field": "menu_icon",
       "size": "1024x1024",
       "background": "transparent",
-      "output_format": "webp",
+      "output_format": "svg",
+      "svg_model": "gpt-5.2",
       "max_px": 256,
       "quality": 85
     },
