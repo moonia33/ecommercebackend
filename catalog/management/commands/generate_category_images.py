@@ -183,8 +183,31 @@ class Command(BaseCommand):
             return
 
         keep_alpha = kcfg.get("background") == "transparent"
+
+        # Kontekstas prompt'ui: tėvinė kategorija, tipinės prekės ir
+        # brolinių kategorijų ikonų motyvai (kad ikonos nesikartotų).
+        with_ctx = bool(kcfg.get("with_context"))
+        cat_list = list(qs)
+        prod_names = {}
+        if with_ctx:
+            from catalog.models import Product
+
+            for pid, pname in (
+                Product.objects.filter(is_active=True, category__in=cat_list)
+                .values_list("category_id", "name")[: len(cat_list) * 5]
+            ):
+                prod_names.setdefault(int(pid), []).append(pname)
+
+        sibling_subjects = {}
+        if with_ctx:
+            for c in cat_list:
+                sib = [x for x in cat_list if x.parent_id == c.parent_id and x.id != c.id]
+                sibling_subjects[c.id] = [
+                    (prompts.get(s.slug) or s.name) for s in sib[:8]
+                ]
+
         todo = []
-        for c in qs:
+        for c in cat_list:
             current = getattr(c, field)
             has_value = bool(current or getattr(c, f"{field}_url", ""))
             if has_value and not options["force"]:
@@ -194,6 +217,23 @@ class Command(BaseCommand):
             )
             if not prompt:
                 continue
+            if with_ctx:
+                extra = [f"Icon for e-commerce category '{c.name}'."]
+                if c.parent_id:
+                    extra.append(f"Parent category: {c.parent.name}.")
+                if prod_names.get(c.id):
+                    extra.append(
+                        "Typical products in it: "
+                        + "; ".join(prod_names[c.id][:5])
+                        + "."
+                    )
+                if sibling_subjects.get(c.id):
+                    extra.append(
+                        "Do NOT reuse motifs already used by sibling icons: "
+                        + "; ".join(sibling_subjects[c.id])
+                        + "."
+                    )
+                prompt = f"{prompt} {' '.join(extra)}"
             todo.append((c, prompt, c.slug not in prompts))
         if options["limit"]:
             todo = todo[: options["limit"]]

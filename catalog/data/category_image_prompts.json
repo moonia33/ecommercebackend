@@ -1,14 +1,15 @@
 {
   "kinds": {
     "menu_icon": {
-      "style": "Lucide-style vector line icon for a fishing-tackle e-commerce mega menu, drawn as clean SVG. THIN uniform strokes (delicate, ~1.5px equivalent at 24px), rounded line caps and joins, outlines only — NO filled shapes, single color #475569, transparent background. Simple minimal silhouette with generous whitespace (~20% padding), no text, no shadows, no gradients, no decorative details. Readable at 16px. Square 1:1 viewBox. Return only the SVG markup.",
+      "style": "Icon for an e-commerce category. Lucide icon style — thin strict lines, subtle and elegant, clean SVG. Single changeable color (default #111827), transparent background, no text, no shadows, no gradients. Readable at 16px. Square 1:1 viewBox. Return only the SVG markup.",
+      "with_context": true,
       "fallback_prompt": "Icon of {name} (fishing tackle category item)",
       "field": "menu_icon",
       "size": "1024x1024",
       "background": "transparent",
       "output_format": "svg",
       "svg_model": "gpt-5.2",
-      "color": "#475569",
+      "color": "#111827",
       "stroke_scale": 0.6,
       "max_px": 256,
       "quality": 85
