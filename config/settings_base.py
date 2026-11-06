@@ -170,6 +170,12 @@ EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default=env(
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default=env(
     "DJANGO_DEFAULT_FROM_EMAIL", default=""))
 
+# OpenAI Images API — kategorijų ikonų/hero generavimas
+# (catalog.management.commands.generate_category_images).
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+OPENAI_IMAGE_MODEL = env("OPENAI_IMAGE_MODEL", default="gpt-image-1")
+OPENAI_IMAGE_SIZE = env("OPENAI_IMAGE_SIZE", default="1024x1024")
+
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
 INSTALLED_APPS = [
