@@ -95,6 +95,25 @@ def _postprocess(raw: bytes, *, max_px: int, out_format: str, quality: int, keep
     return buf.getvalue()
 
 
+def _postprocess_svg(raw: bytes, *, color: str = "", stroke_scale: float = 0.0) -> bytes:
+    """SVG normalizavimas — spalva ir linijų storis keičiami be modelio."""
+    import re
+
+    text = raw.decode("utf-8", errors="replace")
+    if color:
+        text = re.sub(r'stroke="#[0-9a-fA-F]{3,8}"', f'stroke="{color}"', text)
+        text = re.sub(r'fill="#[0-9a-fA-F]{3,8}"', f'fill="{color}"', text)
+    if stroke_scale and 0 < stroke_scale < 1:
+        def _shrink(m):
+            try:
+                v = float(m.group(1))
+                return f'stroke-width="{max(1.0, v * stroke_scale):g}"'
+            except ValueError:
+                return m.group(0)
+        text = re.sub(r'stroke-width="([0-9.]+)"', _shrink, text)
+    return text.encode("utf-8")
+
+
 class Command(BaseCommand):
     help = (
         "Generuoja kategorijų paveikslus (menu_icon / hero_image) per OpenAI "
@@ -203,8 +222,11 @@ class Command(BaseCommand):
                     svg_model=kcfg.get("svg_model") or "",
                 )
                 if out_format == "svg":
-                    # Vektorius — PIL postprocess nereikalingas.
-                    out = raw
+                    out = _postprocess_svg(
+                        raw,
+                        color=kcfg.get("color") or "",
+                        stroke_scale=float(kcfg.get("stroke_scale") or 0.0),
+                    )
                 else:
                     out = _postprocess(
                         raw,
