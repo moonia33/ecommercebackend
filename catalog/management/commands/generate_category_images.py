@@ -235,7 +235,12 @@ class Command(BaseCommand):
                         quality=int(kcfg.get("quality") or 85),
                         keep_alpha=keep_alpha,
                     )
-                getattr(c, field).save(f"{c.slug}.{out_format}", ContentFile(out), save=True)
+                img_field = getattr(c, field)
+                # file_overwrite=False storage'e — ištrinti seną failą,
+                # kad vardas liktų <slug>.<ext> be random sufikso.
+                if img_field:
+                    img_field.delete(save=False)
+                img_field.save(f"{c.slug}.{out_format}", ContentFile(out), save=True)
                 done += 1
                 self.stdout.write(f"  OK {c.slug}" + (" [fallback]" if fb else ""))
             except Exception as e:
