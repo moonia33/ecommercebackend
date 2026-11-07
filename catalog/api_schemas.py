@@ -55,6 +55,9 @@ class CategoryOut(Schema):
     description: str = ""
     hero_image_url: str | None = None
     menu_icon_url: str | None = None
+    # Fallback nuotraukos iš kategorijos prekių (iki 4; tėvams — iš
+    # palikuonių). Tik /catalog/categories endpoint'as.
+    image_urls: list[str] = []
 
     seo_title: str = ""
     seo_description: str = ""

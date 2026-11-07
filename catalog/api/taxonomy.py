@@ -65,6 +65,65 @@ def categories(request):
             .get_ancestors()
             .values_list("id", flat=True)
         )
+    # Fallback nuotraukos iš kategorijos prekių: iki 4 per kategoriją
+    # (tėvams — iš palikuonių). Viena užklausa + medžio apėjimas.
+    img_urls: dict[int, list[str]] = {}
+    if used_category_ids:
+        from django.core.files.storage import default_storage
+
+        from ..models import ProductImage
+
+        children_of: dict[int | None, list[int]] = {}
+        for cid, pid in Category.objects.filter(is_active=True).values_list(
+            "id", "parent_id"
+        ):
+            children_of.setdefault(pid, []).append(cid)
+
+        seen_products: set[int] = set()
+        for pid, cat_id, lwebp, webp, img, ext in (
+            ProductImage.objects.filter(product_id__in=scoped_ids)
+            .order_by("product__category_id", "product_id", "sort_order")
+            .values_list(
+                "product_id",
+                "product__category_id",
+                "listing_webp",
+                "image_webp",
+                "image",
+                "image_url",
+            )
+        ):
+            if (
+                pid in seen_products
+                or not cat_id
+                or cat_id not in used_category_ids
+            ):
+                continue
+            name = lwebp or webp or img
+            url = default_storage.url(name) if name else (ext or "")
+            if not url:
+                continue
+            seen_products.add(pid)
+            bucket = img_urls.setdefault(int(cat_id), [])
+            if len(bucket) < 4:
+                bucket.append(url)
+
+        def _gather(cid: int) -> list[str]:
+            own = img_urls.get(cid)
+            if own:
+                return own
+            merged: list[str] = []
+            for kid in children_of.get(cid, []):
+                merged.extend(_gather(kid))
+                if len(merged) >= 4:
+                    break
+            if merged:
+                img_urls[cid] = merged[:4]
+            return img_urls.get(cid, [])
+
+        for cid in children_of:
+            if cid is not None:
+                _gather(cid)
+
     # Medžio tvarka (tree_id, lft) — admin'e vilkimas DraggableMPTTAdmin
     # valdo mega-meniu rikiavimą; order_insertion_by=["name"] tik numatyta
     # naujų kategorijų padėtis kol jas perrikiuoja.
@@ -88,6 +147,7 @@ def categories(request):
                 "description": loc["description"],
                 "hero_image_url": (c.hero_url or None),
                 "menu_icon_url": (c.menu_icon_url_resolved or None),
+                "image_urls": img_urls.get(c.id, []),
                 "seo_title": loc["seo_title"],
                 "seo_description": loc["seo_description"],
                 "seo_keywords": loc["seo_keywords"],
