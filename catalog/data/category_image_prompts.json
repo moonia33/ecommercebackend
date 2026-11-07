@@ -1,9 +1,9 @@
 {
   "kinds": {
     "menu_icon": {
-      "style": "Icon for an e-commerce category, Lucide icon style — thin strict lines, subtle and elegant. One clear central subject that any shopper instantly recognizes; no clutter, generous whitespace. Clean SVG with strokes ONLY on the root <svg> element (stroke=\"currentColor\", stroke-width ~24, stroke-linecap/linejoin round), viewBox 1536x1024, fill=\"none\", transparent background, no text, no gradients. Return only the SVG markup.",
-      "with_context": true,
-      "fallback_prompt": "Icon of {name} (fishing tackle category item)",
+      "style": "Icon for an e-commerce category. SVG with changeable color, default black. Lucide icon style. Keep it subtle and elegant. Keep lines strict/thin. Return only the SVG markup.",
+      "with_context": false,
+      "fallback_prompt": "Category: {name}.",
       "field": "menu_icon",
       "size": "1024x1024",
       "background": "transparent",

@@ -204,11 +204,12 @@ class Command(BaseCommand):
             has_value = bool(current or getattr(c, f"{field}_url", ""))
             if has_value and not options["force"]:
                 continue
-            prompt = prompts.get(c.slug) or (
-                fallback.format(name=c.name) if fallback else ""
-            )
-            if not prompt:
-                continue
+            # Paprasčiausias prompt'as geriausia: kategorijos pavadinimas +
+            # stilius. Explicit subject tik kaip override (pvz. žuvies siluetas).
+            subject = prompts.get(c.slug) or ""
+            prompt = fallback.format(name=c.name) if fallback else f"Category: {c.name}."
+            if subject:
+                prompt = f"{prompt} {subject}"
             if with_ctx:
                 extra = [f"Icon for e-commerce category '{c.name}'."]
                 if c.parent_id:
