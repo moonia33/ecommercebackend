@@ -198,14 +198,6 @@ class Command(BaseCommand):
             ):
                 prod_names.setdefault(int(pid), []).append(pname)
 
-        sibling_subjects = {}
-        if with_ctx:
-            for c in cat_list:
-                sib = [x for x in cat_list if x.parent_id == c.parent_id and x.id != c.id]
-                sibling_subjects[c.id] = [
-                    (prompts.get(s.slug) or s.name) for s in sib[:8]
-                ]
-
         todo = []
         for c in cat_list:
             current = getattr(c, field)
@@ -225,12 +217,6 @@ class Command(BaseCommand):
                     extra.append(
                         "Typical products in it: "
                         + "; ".join(prod_names[c.id][:5])
-                        + "."
-                    )
-                if sibling_subjects.get(c.id):
-                    extra.append(
-                        "Do NOT reuse motifs already used by sibling icons: "
-                        + "; ".join(sibling_subjects[c.id])
                         + "."
                     )
                 prompt = f"{prompt} {' '.join(extra)}"
