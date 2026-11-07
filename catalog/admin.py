@@ -158,6 +158,9 @@ class CategoryAdmin(DraggableMPTTAdmin):
                     "menu_icon",
                     "menu_icon_url",
                     "menu_icon_alt",
+                    "card_image",
+                    "card_image_url",
+                    "card_image_alt",
                 )
             },
         ),

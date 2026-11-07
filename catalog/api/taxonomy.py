@@ -147,6 +147,7 @@ def categories(request):
                 "description": loc["description"],
                 "hero_image_url": (c.hero_url or None),
                 "menu_icon_url": (c.menu_icon_url_resolved or None),
+                "card_image_url": (c.card_url or None),
                 "image_urls": img_urls.get(c.id, []),
                 "seo_title": loc["seo_title"],
                 "seo_description": loc["seo_description"],

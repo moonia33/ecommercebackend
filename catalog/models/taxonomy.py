@@ -53,6 +53,16 @@ class Category(MPTTModel):
     menu_icon_url = models.URLField(blank=True, default="")
     menu_icon_alt = models.CharField(max_length=255, blank=True)
 
+    # Kortelės nuotrauka (kategorijų grid'as / koliažo pagrindinė).
+    # Fallback'iui naudojamos prekių nuotraukos (image_urls API'e).
+    card_image = models.ImageField(
+        upload_to="category-cards/%Y/%m/",
+        null=True,
+        blank=True,
+    )
+    card_image_url = models.URLField(blank=True, default="")
+    card_image_alt = models.CharField(max_length=255, blank=True)
+
     # SEO
     seo_title = models.CharField(max_length=255, blank=True)
     seo_description = models.CharField(max_length=320, blank=True)
@@ -92,6 +102,15 @@ class Category(MPTTModel):
             except Exception:
                 return ""
         return self.menu_icon_url
+
+    @property
+    def card_url(self) -> str:
+        if self.card_image:
+            try:
+                return self.card_image.url
+            except Exception:
+                return ""
+        return self.card_image_url
 
 
 class CategoryTranslation(models.Model):
