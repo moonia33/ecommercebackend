@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
@@ -35,10 +36,14 @@ def documents_for_shop(shop) -> dict[str, LegalDocument]:
 
 
 def document_by_slug(shop, slug: str) -> LegalDocument | None:
-    for doc in documents_for_shop(shop).values():
+    docs = documents_for_shop(shop)
+    for doc in docs.values():
         if doc.slug == slug:
             return doc
-    return None
+    # A shop override may use its own slug; keep the global URL working.
+    glob = LegalDocument.objects.filter(
+        is_active=True, shop__isnull=True, slug=slug).first()
+    return docs.get(glob.kind) if glob else None
 
 
 def _published(doc_ids):
@@ -105,7 +110,28 @@ def checkout_definitions(shop, language_code: str | None) -> list[dict] | None:
             "url": document_url(doc),
             "version_obj": ver,
         })
-    return out or None
+    if not out:
+        return None
+    # Terms/privacy are always mandatory: keep the settings-based consent
+    # for a kind that has no published legal document yet.
+    have = {d["kind"] for d in out}
+    for legacy in _legacy_definitions():
+        if legacy["kind"] not in have:
+            out.append(legacy)
+    return out
+
+
+def _legacy_definitions() -> list[dict]:
+    return [
+        {"kind": "terms", "name": "Pirkimo sąlygos",
+         "document_version": getattr(settings, "CHECKOUT_TERMS_VERSION", "v1"),
+         "required": True, "url": getattr(settings, "CHECKOUT_TERMS_URL", "/terms"),
+         "version_obj": None},
+        {"kind": "privacy", "name": "Privatumo politika",
+         "document_version": getattr(settings, "CHECKOUT_PRIVACY_VERSION", "v1"),
+         "required": True, "url": getattr(settings, "CHECKOUT_PRIVACY_URL", "/privacy"),
+         "version_obj": None},
+    ]
 
 
 class ConsentError(Exception):
@@ -212,14 +238,15 @@ def page_payload(shop, slug: str, language_code: str | None, version: str | None
     if not versions:
         return None
     current = versions[0]
+    upcoming = upcoming_version(doc)
     if version:
-        shown = next((v for v in versions if v.version == version), None)
+        candidates = versions + ([upcoming] if upcoming else [])
+        shown = next((v for v in candidates if v.version == version), None)
         if shown is None:
             raise LookupError(version)
     else:
         shown = current
     t = pick_translation(shown, language_code, shop=shop)
-    upcoming = upcoming_version(doc)
     blocks = []
     if t and t.body_markdown.strip():
         blocks.append({"type": "rich_text", "payload": {"markdown": t.body_markdown}})
@@ -236,6 +263,7 @@ def page_payload(shop, slug: str, language_code: str | None, version: str | None
             "version": shown.version,
             "effective_from": shown.effective_from,
             "is_current": shown.id == current.id,
+            "is_upcoming": bool(upcoming and shown.id == upcoming.id),
             "change_summary": (t.change_summary if t else "") or "",
             "upcoming": (
                 {"version": upcoming.version, "effective_from": upcoming.effective_from}

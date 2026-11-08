@@ -131,6 +131,10 @@ class LegalCheckoutTests(TestCase):
         legal = res.json()["legal"]
         self.assertEqual(legal["version"], "2026-01-01")
         self.assertEqual(legal["upcoming"]["version"], "2099-01-01")
+        future = self.client.get(
+            "/api/v1/cms/pages/taisykles?version=2099-01-01", HTTP_HOST="ops.local").json()
+        self.assertTrue(future["legal"]["is_upcoming"])
+        self.assertFalse(future["legal"]["is_current"])
 
     def test_page_history(self):
         make_version(self.terms, "2026-02-01", days_ago=1, body="Nauja")
@@ -151,6 +155,20 @@ class LegalCheckoutTests(TestCase):
         make_version(own, "s-1")
         self.assertEqual(services.documents_for_shop(self.shop)["privacy"], own)
         self.assertEqual(services.documents_for_shop(None)["privacy"], self.privacy)
+        # The global slug keeps resolving to the shop's own document.
+        res = self.client.get("/api/v1/cms/pages/privatumas", HTTP_HOST="ops.local").json()
+        self.assertEqual(res["slug"], "privatumas-s")
+
+    @override_settings(CHECKOUT_PRIVACY_VERSION="v7")
+    def test_kind_without_document_keeps_legacy_consent(self):
+        LegalDocument.objects.filter(pk=self.privacy.pk).update(is_active=False)
+        by_kind = {d["kind"]: d for d in services.checkout_definitions(self.shop, "lt")}
+        self.assertEqual(by_kind["privacy"]["document_version"], "v7")
+        self.assertEqual(self._confirm("2026-01-01", "x").status_code, 409)
+        res = self._confirm("2026-01-01", "v7")
+        self.assertEqual(res.status_code, 200, res.content[:400])
+        oc = OrderConsent.objects.get(order__user=self.user, kind="privacy")
+        self.assertEqual((oc.document_version, oc.legal_version), ("v7", None))
 
 
 class LegalImmutabilityTests(TestCase):

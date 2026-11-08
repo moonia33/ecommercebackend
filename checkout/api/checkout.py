@@ -767,6 +767,11 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
 
             lang = get_request_language_code(request)
             for kind, ver in legal_versions.items():
+                if ver is None:
+                    OrderConsent.objects.create(
+                        order=order, kind=kind, document_version=consents_by_kind[kind],
+                        ip_address=ip_address, user_agent=user_agent)
+                    continue
                 OrderConsent.objects.create(
                     order=order, kind=kind, document_version=ver.version,
                     legal_version=ver, ip_address=ip_address, user_agent=user_agent)

@@ -47,6 +47,10 @@ def forwards(apps, schema_editor):
                 kind=kind, document_version=label, order__user__isnull=False)
             if page.shop_id:
                 consents = consents.filter(order__shop_id=page.shop_id)
+            else:
+                # Orders of shops with their own page accepted that text.
+                consents = consents.exclude(order__shop_id__in=CmsPage.objects.filter(
+                    slug=slug, shop__isnull=False).values("shop_id"))
             consents.update(legal_version=ver)
             Acceptance.objects.bulk_create([
                 Acceptance(

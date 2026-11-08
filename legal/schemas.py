@@ -16,6 +16,7 @@ class LegalInfoOut(Schema):
     version: str
     effective_from: datetime
     is_current: bool
+    is_upcoming: bool = False
     change_summary: str = ""
     upcoming: LegalVersionRefOut | None = None
     versions: list[LegalVersionRefOut] = []
