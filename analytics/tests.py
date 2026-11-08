@@ -25,6 +25,15 @@ class CookieConsentTests(TestCase):
                          [("custom", False), ("accept_all", True)])
         self.assertEqual(rows[0].user_agent, "UA")
 
+    def test_accept_all_implies_every_category(self):
+        cid = uuid.uuid4()
+        self.client.post(
+            "/api/v1/analytics/cookie-consent",
+            data=json.dumps({"consent_id": str(cid), "version": 1, "action": "accept_all"}),
+            content_type="application/json")
+        row = CookieConsentRecord.objects.get(consent_id=cid)
+        self.assertTrue(row.functional and row.analytics and row.marketing)
+
     def test_rejects_bad_id(self):
         res = self.client.post(
             "/api/v1/analytics/cookie-consent",

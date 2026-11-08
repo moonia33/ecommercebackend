@@ -27,16 +27,20 @@ class OkOut(Schema):
 @router.post("/cookie-consent", response=OkOut)
 def cookie_consent(request, payload: CookieConsentIn):
     action = payload.action
-    if action not in CookieConsentRecord.Action.values:
+    choice = {"functional": payload.functional, "analytics": payload.analytics,
+              "marketing": payload.marketing}
+    if action == CookieConsentRecord.Action.ACCEPT_ALL:
+        choice = dict.fromkeys(choice, True)
+    elif action == CookieConsentRecord.Action.REJECT_ALL:
+        choice = dict.fromkeys(choice, False)
+    else:
         action = CookieConsentRecord.Action.CUSTOM
     CookieConsentRecord.objects.create(
         consent_id=payload.consent_id,
         shop=get_request_shop(request),
         version=max(payload.version, 0),
         action=action,
-        functional=payload.functional,
-        analytics=payload.analytics,
-        marketing=payload.marketing,
+        **choice,
         user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:500],
     )
     return {"ok": True}
