@@ -4,7 +4,7 @@ Naujos taisyklės kuriamos IŠJUNGTOS (is_active=False): pirma
 `apply_activity_rules --dry-run`, peržiūra, tada įjungiama admine. Be
 `--update` esamų įrašų nekeičia – tik sukuria trūkstamus. Su `--update`
 esamoms taisyklėms (pagal veiklą + pavadinimą) perrašo kategorijas,
-gamintojus ir tekstą (is_active nekeičia). Nerasti slug'ai parodomi išvestyje.
+gamintojus ir tekstą; išimtis tik papildo (is_active nekeičia). Nerasti slug'ai parodomi išvestyje.
 """
 
 from __future__ import annotations
@@ -125,7 +125,11 @@ class Command(BaseCommand):
                 )
             rule.categories.set(cat_objs)
             rule.brands.set(brand_objs)
-            rule.exclude_categories.set(excl)
+            if existing:
+                # admine pridėtų išimčių nenuimame
+                rule.exclude_categories.add(*excl)
+            else:
+                rule.exclude_categories.set(excl)
             self.stdout.write(
                 f"{'~' if existing else '+'} rule {act_code}: {name}"
                 + (f" (nerasta: {missing})" if missing else "")
