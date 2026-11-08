@@ -166,9 +166,16 @@ def _merge_option_type(old: OptionType, new_code: str, stats: Counter, conflicts
         stats["option_types_deleted"] += 1
 
 
-def _merge_facets(old_code: str, new_code: str, stats: Counter) -> None:
+def _merge_facets(old_code: str, new_code: str, stats: Counter, keep_old: bool) -> None:
     for facet in CategoryFacet.objects.filter(code=old_code):
-        if CategoryFacet.objects.filter(category_id=facet.category_id, code=new_code).exists():
+        if keep_old:
+            _, created = CategoryFacet.objects.get_or_create(
+                category_id=facet.category_id,
+                code=new_code,
+                defaults=_field_copy(facet, "category", "code"),
+            )
+            stats["facets_copied"] += int(created)
+        elif CategoryFacet.objects.filter(category_id=facet.category_id, code=new_code).exists():
             facet.delete()
             stats["facets_dropped_dup"] += 1
         else:
@@ -201,7 +208,11 @@ class Command(BaseCommand):
                         _merge_feature(feature, new_code, stats)
                     for option_type in OptionType.objects.filter(code=old_code):
                         _merge_option_type(option_type, new_code, stats, conflicts)
-                    _merge_facets(old_code, new_code, stats)
+                    still_used = (
+                        Feature.objects.filter(code=old_code).exists()
+                        or OptionType.objects.filter(code=old_code).exists()
+                    )
+                    _merge_facets(old_code, new_code, stats, keep_old=still_used)
                     if stats:
                         per_code[old_code] = stats
                 if not opts["apply"]:

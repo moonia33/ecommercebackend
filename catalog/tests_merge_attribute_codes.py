@@ -56,6 +56,7 @@ class MergeAttributeCodesTests(TestCase):
         self.assertIn("DRY-RUN", report)
         self.assertIn("variant_options_moved=2", report)
         self.assertTrue(OptionType.objects.filter(code="kabliuku-dydis").exists())
+        self.assertFalse(CategoryFacet.objects.filter(code="hook-size").exists())
         self.assertEqual(VariantOptionValue.objects.filter(option_type=self.hook).count(), 0)
 
     def test_apply_moves_options_translations_groups_and_facets(self):
@@ -94,3 +95,5 @@ class MergeAttributeCodesTests(TestCase):
         self.assertIn("Konfliktai (variantas jau turi tikslinę ašį su kita reikšme): 1", report)
         self.assertTrue(VariantOptionValue.objects.filter(variant=self.v1, option_type=self.legacy).exists())
         self.assertTrue(OptionType.objects.filter(code="kabliuku-dydis").exists())
+        self.assertTrue(CategoryFacet.objects.filter(code="kabliuku-dydis").exists())
+        self.assertTrue(CategoryFacet.objects.filter(code="hook-size").exists())
