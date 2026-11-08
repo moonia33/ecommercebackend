@@ -130,3 +130,29 @@ class ActivityTests(TestCase):
         page = self.client.get("/api/v1/catalog/products?activity=stovyklavimas").json()
         self.assertEqual({i["slug"] for i in page["items"]}, {"a2", "a3"})
         self.assertEqual(self.client.get("/api/v1/catalog/products?activity=nera").status_code, 404)
+
+    def test_reassigned_rule_moves_links(self):
+        rule = self._rule(self.carp, "tents", cats=[self.tents])
+        apply_activity_rules(reindex=False)
+        rule.activity = self.camp
+        rule.save()
+        res = apply_activity_rules(reindex=False)
+        self.assertEqual(res.removed, 2)
+        self.assertEqual(self._ids(self.carp), set())
+        self.assertEqual(self._ids(self.camp), {self.p_tent.id, self.p_tent_korda.id})
+
+    def test_parent_exclude_and_inactive_child(self):
+        from catalog.activities import activity_q
+
+        self._rule(self.carp, "tents", cats=[self.tents])
+        apply_activity_rules(reindex=False)
+        ProductActivity.objects.create(product=self.p_tent, activity=self.fishing, source="exclude")
+        self.assertEqual(product_document(Product.objects.get(id=self.p_tent.id))["activities"], [])
+        self.assertEqual(activity_product_counts()[self.fishing.id], 1)
+        self.assertEqual(
+            set(Product.objects.filter(activity_q(self.carp)).values_list("id", flat=True)),
+            {self.p_tent_korda.id},
+        )
+        self.carp.is_active = False
+        self.carp.save()
+        self.assertNotIn(self.fishing.id, activity_product_counts())

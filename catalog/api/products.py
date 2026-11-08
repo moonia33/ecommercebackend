@@ -129,6 +129,7 @@ def _engine_browse(
         sort=sort,
         in_stock_only=in_stock_only,
         collection=collection,
+        activity=activity.code if activity else None,
         page=page,
         page_size=page_size,
     )

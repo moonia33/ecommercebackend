@@ -117,17 +117,21 @@ def apply_activity_rules(
         rules = rules.filter(id__in=list(rule_ids))
     with transaction.atomic():
         for rule in rules:
+            stale = ProductActivity.objects.filter(rule=rule).exclude(activity_id=rule.activity_id)
+            stale_ids = set(stale.values_list("product_id", flat=True))
             current = set(
-                ProductActivity.objects.filter(rule=rule).values_list("product_id", flat=True)
+                ProductActivity.objects.filter(rule=rule, activity_id=rule.activity_id)
+                .values_list("product_id", flat=True)
             )
             wanted = rule_product_ids(rule) if rule.is_active and rule.activity.is_active else set()
             result.matched[rule.id] = len(wanted)
             add, remove = wanted - current, current - wanted
             result.added += len(add)
-            result.removed += len(remove)
-            result.changed_product_ids |= add | remove
+            result.removed += len(remove) + len(stale_ids)
+            result.changed_product_ids |= add | remove | stale_ids
             if dry_run:
                 continue
+            stale.delete()
             if remove:
                 ProductActivity.objects.filter(rule=rule, product_id__in=remove).delete()
             ProductActivity.objects.bulk_create(
@@ -143,8 +147,13 @@ def apply_activity_rules(
             )
         if dry_run:
             transaction.set_rollback(True)
-    if reindex and not dry_run and result.changed_product_ids:
-        reindex_products(result.changed_product_ids)
+    if not dry_run and result.changed_product_ids:
+        from .signals import _bump_catalog_facets_cache, bump_listing_ver
+
+        bump_listing_ver()
+        _bump_catalog_facets_cache()
+        if reindex:
+            reindex_products(result.changed_product_ids)
     return result
 
 
@@ -155,7 +164,9 @@ def activity_codes_from_links(links) -> list[str]:
     codes: set[str] = set()
     for l in links:
         a = l.activity
-        if l.source == ProductActivity.Source.EXCLUDE or a.id in excluded or not a.is_active:
+        if l.source == ProductActivity.Source.EXCLUDE or not a.is_active:
+            continue
+        if a.id in excluded or (a.parent_id and a.parent_id in excluded):
             continue
         codes.add(a.code)
         if a.parent_id and a.parent.is_active:
@@ -179,8 +190,10 @@ def activity_q(activity: Activity) -> Q:
         Exists(
             ProductActivity.objects.filter(
                 product_id=OuterRef("product_id"),
-                activity_id=OuterRef("activity_id"),
                 source=ProductActivity.Source.EXCLUDE,
+            ).filter(
+                Q(activity_id=OuterRef("activity_id"))
+                | Q(activity_id=OuterRef("activity__parent_id"))
             )
         )
     )
@@ -198,13 +211,17 @@ def activity_product_counts(product_qs=None) -> dict[int, int]:
         )
     )
     per: dict[int, set[int]] = defaultdict(set)
-    parent_of = dict(Activity.objects.values_list("id", "parent_id"))
+    meta = {aid: (parent, active) for aid, parent, active in
+            Activity.objects.values_list("id", "parent_id", "is_active")}
     for pid, aid in qs.values_list("product_id", "activity_id").distinct().iterator():
-        if (pid, aid) in excluded:
+        parent, active = meta.get(aid, (None, False))
+        if not active or (pid, aid) in excluded:
+            continue
+        if parent and (not meta.get(parent, (None, False))[1] or (pid, parent) in excluded):
             continue
         per[aid].add(pid)
-        if parent_of.get(aid):
-            per[parent_of[aid]].add(pid)
+        if parent:
+            per[parent].add(pid)
     return {aid: len(pids) for aid, pids in per.items()}
 
 

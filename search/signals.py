@@ -59,10 +59,18 @@ def _activity_signals():
     @receiver(post_save, sender=ProductActivity, dispatch_uid="search_product_activity_saved")
     @receiver(post_delete, sender=ProductActivity, dispatch_uid="search_product_activity_deleted")
     def product_activity_changed(sender, instance, **kwargs):
+        from catalog.signals import _bump_catalog_facets_cache, bump_listing_ver
+
+        bump_listing_ver()
+        _bump_catalog_facets_cache()
         _enqueue(instance.product_id)
 
     @receiver(post_save, sender=Activity, dispatch_uid="search_activity_saved")
     def activity_saved(sender, instance, **kwargs):
+        from catalog.signals import _bump_catalog_facets_cache, bump_listing_ver
+
+        bump_listing_ver()
+        _bump_catalog_facets_cache()
         if search_sync_suppressed():
             return
         from catalog.badges import reindex_products
