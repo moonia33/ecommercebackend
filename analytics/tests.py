@@ -34,6 +34,26 @@ class CookieConsentTests(TestCase):
         row = CookieConsentRecord.objects.get(consent_id=cid)
         self.assertTrue(row.functional and row.analytics and row.marketing)
 
+    def test_rate_limited_per_ip(self):
+        from django.core.cache import cache
+
+        from analytics.api import CONSENT_RATE_LIMIT
+
+        cache.clear()
+        body = json.dumps({"consent_id": str(uuid.uuid4()), "version": 1, "action": "reject_all"})
+        codes = [
+            self.client.post("/api/v1/analytics/cookie-consent", data=body,
+                             content_type="application/json",
+                             HTTP_CF_CONNECTING_IP="203.0.113.9").status_code
+            for _ in range(CONSENT_RATE_LIMIT + 1)
+        ]
+        self.assertEqual(codes[-1], 429)
+        self.assertTrue(all(c == 200 for c in codes[:-1]))
+        other = self.client.post("/api/v1/analytics/cookie-consent", data=body,
+                                 content_type="application/json",
+                                 HTTP_CF_CONNECTING_IP="203.0.113.10")
+        self.assertEqual(other.status_code, 200)
+
     def test_rejects_bad_id(self):
         res = self.client.post(
             "/api/v1/analytics/cookie-consent",
