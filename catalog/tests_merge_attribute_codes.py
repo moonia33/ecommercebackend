@@ -78,6 +78,15 @@ class MergeAttributeCodesTests(TestCase):
         self.assertEqual(ProductFeatureValue.objects.filter(product=self.product).count(), 1)
         self.assertEqual(self.color.translations.get(language_code="lt").name, "Spalva")
 
+    def test_new_target_keeps_flags(self):
+        talpa = Feature.objects.create(code="talpa", name="Talpa", is_active=False, recommendation_boost=True)
+        FeatureValue.objects.create(feature=talpa, value="5l", is_active=False)
+        self._run("--apply", "--code", "talpa")
+        volume = Feature.objects.get(code="volume")
+        self.assertFalse(volume.is_active)
+        self.assertTrue(volume.recommendation_boost)
+        self.assertFalse(volume.values.get(value="5l").is_active)
+
     def test_conflicting_variant_left_untouched(self):
         other = OptionValue.objects.create(option_type=self.hook, code="4", label="4")
         VariantOptionValue.objects.create(variant=self.v1, option_type=self.hook, option_value=other)

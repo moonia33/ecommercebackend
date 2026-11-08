@@ -45,6 +45,15 @@ class _DryRun(Exception):
     pass
 
 
+def _field_copy(obj, *exclude: str) -> dict:
+    """Visi saugomi laukai (is_active, recommendation_boost, ...) be pk ir `exclude`."""
+    return {
+        f.name: getattr(obj, f.name)
+        for f in obj._meta.concrete_fields
+        if not f.primary_key and f.name not in exclude
+    }
+
+
 def _copy_missing_translations(model, fk: str, src, dst, text_field: str) -> None:
     have = set(model.objects.filter(**{fk: dst}).values_list("language_code", flat=True))
     for tr in model.objects.filter(**{fk: src}):
@@ -69,14 +78,7 @@ def _move_groups(model, fk: str, old, target, stats: Counter) -> None:
 
 def _merge_feature(old: Feature, new_code: str, stats: Counter) -> None:
     target, created = Feature.objects.get_or_create(
-        code=new_code,
-        defaults={
-            "name": old.name,
-            "datatype": old.datatype,
-            "unit": old.unit,
-            "is_filterable": old.is_filterable,
-            "allows_multiple": old.allows_multiple,
-        },
+        code=new_code, defaults=_field_copy(old, "code")
     )
     stats["features_created"] += int(created)
     _copy_missing_translations(FeatureTranslation, "feature", old, target, "name")
@@ -85,13 +87,7 @@ def _merge_feature(old: Feature, new_code: str, stats: Counter) -> None:
         tval, vcreated = FeatureValue.objects.get_or_create(
             feature=target,
             value=value.value,
-            defaults={
-                "label": value.label,
-                "value_num": value.value_num,
-                "value_num_max": value.value_num_max,
-                "unit": value.unit,
-                "sort_order": value.sort_order,
-            },
+            defaults=_field_copy(value, "feature", "value"),
         )
         stats["feature_values_created" if vcreated else "feature_values_merged"] += 1
         _copy_missing_translations(
@@ -119,14 +115,7 @@ def _merge_feature(old: Feature, new_code: str, stats: Counter) -> None:
 
 def _merge_option_type(old: OptionType, new_code: str, stats: Counter, conflicts: list) -> None:
     target, created = OptionType.objects.get_or_create(
-        code=new_code,
-        defaults={
-            "name": old.name,
-            "datatype": old.datatype,
-            "unit": old.unit,
-            "display_type": old.display_type,
-            "swatch_type": old.swatch_type,
-        },
+        code=new_code, defaults=_field_copy(old, "code")
     )
     stats["option_types_created"] += int(created)
     _copy_missing_translations(OptionTypeTranslation, "option_type", old, target, "name")
@@ -135,13 +124,7 @@ def _merge_option_type(old: OptionType, new_code: str, stats: Counter, conflicts
         tval, vcreated = OptionValue.objects.get_or_create(
             option_type=target,
             code=value.code,
-            defaults={
-                "label": value.label,
-                "value_num": value.value_num,
-                "value_num_max": value.value_num_max,
-                "unit": value.unit,
-                "sort_order": value.sort_order,
-            },
+            defaults=_field_copy(value, "option_type", "code"),
         )
         stats["option_values_created" if vcreated else "option_values_merged"] += 1
         _copy_missing_translations(
