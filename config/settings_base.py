@@ -196,6 +196,7 @@ INSTALLED_APPS = [
     "catalog.apps.CatalogConfig",
     "catalog_import",
     "cms.apps.CmsConfig",
+    "legal.apps.LegalConfig",
     "homebuilder.apps.HomebuilderConfig",
     "shipping",
     "payments",
@@ -457,3 +458,6 @@ CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_TASK_ROUTES = {
     "catalog_import.tasks.apply_import_run_task": {"queue": "imports"},
 }
+
+# Header with the real visitor IP (set by Cloudflare). Empty = REMOTE_ADDR only.
+CLIENT_IP_HEADER = env("CLIENT_IP_HEADER", default="HTTP_CF_CONNECTING_IP")

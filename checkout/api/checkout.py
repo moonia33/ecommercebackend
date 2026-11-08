@@ -547,21 +547,27 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             raise HttpError(400, "Invalid consent entry")
         consents_by_kind[kind] = ver
 
-    missing = []
-    if "terms" not in consents_by_kind:
-        missing.append("terms")
-    if "privacy" not in consents_by_kind:
-        missing.append("privacy")
-    if missing:
-        raise HttpError(
-            400, f"Missing required consents: {', '.join(missing)}")
+    from legal.services import ConsentError, validate_checkout_consents
 
-    # Optional safety: if the front-end has stale versions, fail with 409 so it can refresh.
-    current_terms = getattr(settings, "CHECKOUT_TERMS_VERSION", "v1")
-    current_privacy = getattr(settings, "CHECKOUT_PRIVACY_VERSION", "v1")
-    if consents_by_kind["terms"] != current_terms or consents_by_kind["privacy"] != current_privacy:
-        raise HttpError(
-            409, "Consent versions are outdated; refresh /checkout/consents")
+    try:
+        legal_versions = validate_checkout_consents(
+            get_request_shop(request), get_request_language_code(request),
+            consents_by_kind)
+    except ConsentError as exc:
+        raise HttpError(exc.status, exc.detail)
+
+    if legal_versions is None:
+        missing = [k for k in ("terms", "privacy") if k not in consents_by_kind]
+        if missing:
+            raise HttpError(
+                400, f"Missing required consents: {', '.join(missing)}")
+
+        # Optional safety: if the front-end has stale versions, fail with 409 so it can refresh.
+        current_terms = getattr(settings, "CHECKOUT_TERMS_VERSION", "v1")
+        current_privacy = getattr(settings, "CHECKOUT_PRIVACY_VERSION", "v1")
+        if consents_by_kind["terms"] != current_terms or consents_by_kind["privacy"] != current_privacy:
+            raise HttpError(
+                409, "Consent versions are outdated; refresh /checkout/consents")
 
     # Reuse preview logic for totals + validation
     preview = checkout_preview(
@@ -594,7 +600,9 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
             country_code=country_code,
         )
 
-    ip_address = request.META.get("REMOTE_ADDR")
+    from legal.services import client_ip
+
+    ip_address = client_ip(request)
     user_agent = (request.META.get("HTTP_USER_AGENT") or "").strip()
 
     with transaction.atomic():
@@ -744,24 +752,32 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
                 raise HttpError(409, "Not enough stock")
             raise HttpError(409, msg)
 
-        OrderConsent.objects.bulk_create(
-            [
+        if legal_versions is None:
+            OrderConsent.objects.bulk_create([
                 OrderConsent(
-                    order=order,
-                    kind=OrderConsent.Kind.TERMS,
-                    document_version=consents_by_kind["terms"],
-                    ip_address=ip_address,
-                    user_agent=user_agent,
-                ),
-                OrderConsent(
-                    order=order,
-                    kind=OrderConsent.Kind.PRIVACY,
-                    document_version=consents_by_kind["privacy"],
-                    ip_address=ip_address,
-                    user_agent=user_agent,
-                ),
-            ]
-        )
+                    order=order, kind=kind,
+                    document_version=consents_by_kind[kind],
+                    ip_address=ip_address, user_agent=user_agent,
+                )
+                for kind in (OrderConsent.Kind.TERMS, OrderConsent.Kind.PRIVACY)
+            ])
+        else:
+            from legal.models import LegalAcceptance
+            from legal.services import record_acceptance
+
+            lang = get_request_language_code(request)
+            for kind, ver in legal_versions.items():
+                if ver is None:
+                    OrderConsent.objects.create(
+                        order=order, kind=kind, document_version=consents_by_kind[kind],
+                        ip_address=ip_address, user_agent=user_agent)
+                    continue
+                OrderConsent.objects.create(
+                    order=order, kind=kind, document_version=ver.version,
+                    legal_version=ver, ip_address=ip_address, user_agent=user_agent)
+                record_acceptance(
+                    user=user, version=ver, request=request, order=order,
+                    language_code=lang, source=LegalAcceptance.Source.CHECKOUT)
 
         if preview.fees:
             fee_rows: list[OrderFee] = []
@@ -861,7 +877,6 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
     if pi.provider == PaymentIntent.Provider.MONTONIO:
         from payments import montonio as montonio_svc
         try:
-            from api.i18n import get_request_language_code
             # Split tender: gateway'ui siunčiame tik likutį po GC debit'o.
             partial = Decimal(pi.amount_gross) != Decimal(order.total_gross)
             res = montonio_svc.create_order_payment(
@@ -893,7 +908,6 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
     elif pi.provider == PaymentIntent.Provider.INBANK:
         from payments import inbank as inbank_svc
         try:
-            from api.i18n import get_request_language_code
             session = inbank_svc.create_pos_session(
                 order=order,
                 locale=f"{get_request_language_code(request) or 'lt'}-LT",

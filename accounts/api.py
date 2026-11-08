@@ -379,6 +379,15 @@ def logout(request):
     return resp
 
 
+def _legal_pending(request, user) -> list[dict]:
+    from api.shop_context import get_request_shop
+    from legal.services import pending_for_user
+
+    items = pending_for_user(
+        user, get_request_shop(request), get_request_language_code(request))
+    return [i.__dict__ for i in items]
+
+
 @router.get("/me", response=MeOut, auth=auth)
 def me(request):
     user = request.auth
@@ -477,6 +486,7 @@ def me(request):
         "customer_groups": groups,
         "primary_customer_group": primary_out,
         "consents": consents_out,
+        "legal_pending": _legal_pending(request, user),
         "phones": phones_out,
         "addresses": addresses_out,
         "primary_pickup_point": _serialize_pickup_point(request, pickup_point),

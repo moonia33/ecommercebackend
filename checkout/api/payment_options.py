@@ -6,6 +6,13 @@ from .shared import *
 @router.get("/consents", response=list[ConsentDefinitionOut], auth=_auth)
 def checkout_consents(request):
     _require_user(request)
+    from legal.services import checkout_definitions
+
+    defs = checkout_definitions(
+        get_request_shop(request), get_request_language_code(request))
+    if defs is not None:
+        return [ConsentDefinitionOut(**{k: v for k, v in d.items() if k != "version_obj"})
+                for d in defs]
     return [
         ConsentDefinitionOut(
             kind="terms",

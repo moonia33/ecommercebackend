@@ -4,6 +4,8 @@ from datetime import datetime
 
 from ninja import Schema
 
+from legal.schemas import LegalInfoOut
+
 
 class ContentBlockOut(Schema):
     type: str
@@ -20,6 +22,8 @@ class CmsPageOut(Schema):
     updated_at: datetime
 
     content_blocks: list[ContentBlockOut]
+
+    legal: LegalInfoOut | None = None
 
 
 class CmsCategoryOut(Schema):
