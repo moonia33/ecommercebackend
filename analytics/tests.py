@@ -54,6 +54,18 @@ class CookieConsentTests(TestCase):
                                  HTTP_CF_CONNECTING_IP="203.0.113.10")
         self.assertEqual(other.status_code, 200)
 
+    def test_internal_proxy_address_not_rate_limited(self):
+        from django.core.cache import cache
+
+        from analytics.api import CONSENT_RATE_LIMIT
+
+        cache.clear()
+        body = json.dumps({"consent_id": str(uuid.uuid4()), "version": 1, "action": "reject_all"})
+        for _ in range(CONSENT_RATE_LIMIT + 1):
+            resp = self.client.post("/api/v1/analytics/cookie-consent", data=body,
+                                    content_type="application/json", REMOTE_ADDR="10.0.1.7")
+        self.assertEqual(resp.status_code, 200)
+
     def test_rejects_bad_id(self):
         res = self.client.post(
             "/api/v1/analytics/cookie-consent",

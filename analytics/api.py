@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 from uuid import UUID
 
 from django.core.cache import cache
@@ -19,7 +20,8 @@ CONSENT_RATE_LIMIT = 30  # per IP per hour; a real visitor saves a handful at mo
 
 def _rate_limited(request) -> bool:
     ip = client_ip(request)
-    if not ip:
+    # Private/loopback = the internal proxy hop (no CF header); don't pool all visitors.
+    if not ip or ipaddress.ip_address(ip).is_private or ipaddress.ip_address(ip).is_loopback:
         return False
     key = f"cookie-consent-rl:{ip}"
     cache.add(key, 0, 3600)
