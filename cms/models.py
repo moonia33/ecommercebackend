@@ -429,6 +429,13 @@ class BlogPost(models.Model):
         ordering = ["-published_at", "-id"]
         indexes = [models.Index(fields=["status", "published_at"])]
 
+    def save(self, *args, **kwargs):
+        if self.status == self.Status.PUBLISHED and self.published_at is None:
+            from django.utils import timezone
+
+            self.published_at = timezone.now()
+        super().save(*args, **kwargs)
+
     def __str__(self) -> str:
         return f"blog #{self.pk}"
 
