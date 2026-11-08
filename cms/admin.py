@@ -8,6 +8,7 @@ from api.admin_i18n import apply_language_code_choices
 from catalog.widgets import ToastUIMarkdownWidget
 
 from .models import (
+    BlogCategory, BlogCategoryTranslation, BlogPost, BlogPostTranslation, CmsMedia,
     CmsCategory, CmsCategoryTranslation, CmsPage, CmsPageTranslation,
     MegaMenuFeature, MegaMenuFeatureTranslation, Menu, MenuItem,
     MenuItemTranslation, StoreLocation,
@@ -188,3 +189,38 @@ class StoreLocationAdmin(admin.ModelAdmin):
     list_filter = ("shop", "is_active", "is_pickup_point")
     search_fields = ("name", "city", "line1")
     list_editable = ("sort_order", "is_active")
+
+
+class BlogPostTranslationInline(admin.StackedInline):
+    model = BlogPostTranslation
+    extra = 0
+    fields = ("language_code", "slug", "title", "excerpt", "seo_title", "seo_description",
+              "cover_image_alt", "reading_minutes")
+    readonly_fields = ("reading_minutes",)
+
+
+@admin.register(BlogPost)
+class BlogPostAdmin(admin.ModelAdmin):
+    list_display = ("id", "__str__", "shop", "status", "published_at", "is_featured", "updated_at")
+    list_filter = ("status", "shop", "is_featured", "categories")
+    search_fields = ("translations__title", "translations__slug")
+    autocomplete_fields = ("shop", "related_products")
+    filter_horizontal = ("categories", "related_categories")
+    inlines = [BlogPostTranslationInline]
+
+
+class BlogCategoryTranslationInline(admin.TabularInline):
+    model = BlogCategoryTranslation
+    extra = 0
+
+
+@admin.register(BlogCategory)
+class BlogCategoryAdmin(admin.ModelAdmin):
+    list_display = ("slug", "shop", "sort_order", "is_active")
+    inlines = [BlogCategoryTranslationInline]
+
+
+@admin.register(CmsMedia)
+class CmsMediaAdmin(admin.ModelAdmin):
+    list_display = ("id", "image", "width", "height", "uploaded_by", "created_at")
+    readonly_fields = ("width", "height", "uploaded_by", "created_at")

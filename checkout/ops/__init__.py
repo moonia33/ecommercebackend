@@ -15,3 +15,4 @@ from . import shipments  # noqa: F401
 # Keep underscore helpers importable via `from checkout.ops import *`
 # (e.g. checkout.ops_api shim used by checkout/tasks.py).
 __all__ = [n for n in dir() if not n.startswith("__")]
+from cms import ops as _cms_ops  # noqa: E402,F401

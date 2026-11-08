@@ -94,6 +94,7 @@ def cms_page_detail(
             "hero_image",
             "hero_image_alt",
             "body_markdown",
+            "body_json",
         ),
     )
 
@@ -120,7 +121,13 @@ def cms_page_detail(
                 }
             )
 
-    if body_markdown.strip():
+    body_json = getattr(best, "body_json", None)
+    if body_json:
+        from .content import rich_content_blocks
+
+        content_blocks.extend(
+            rich_content_blocks(body_json, shop=shop, language_code=language_code))
+    elif body_markdown.strip():
         content_blocks.append({"type": "rich_text", "payload": {"markdown": body_markdown}})
 
     return {
@@ -426,3 +433,6 @@ def cms_stores(request):
         }
         for s in qs
     ]
+
+
+from . import blog_api  # noqa: E402,F401  (registers /cms/blog/* on this router)
