@@ -16,6 +16,7 @@ Ilgalaikei plėtrai paruošta e-commerce platforma su multi-shop, daugiašaliu t
 - Prekių badge'ai (admin, taisyklės, importas, API, Typesense): `docs/badges.md`
 - Enrichment (tekstas → feature'ai): `docs/enrichment.md`
 - Paieška (Typesense): `docs/search.md`
+- CMS: blogas, Tiptap JSON turinys, ops CRUD API, storefront `/patarimai`: `docs/blog_cms.md`
 
 ## GitHub naudojimas (komandai)
 
