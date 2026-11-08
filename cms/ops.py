@@ -576,7 +576,7 @@ def _save_post(post: BlogPost | None, payload: OpsBlogPostIn, user) -> BlogPost:
             tr = existing.get(code) or BlogPostTranslation(post=post, language_code=code)
             if tr.pk and tr.slug and tr.slug != slug:
                 BlogSlugRedirect.objects.get_or_create(post=post, language_code=code, old_slug=tr.slug)
-            BlogSlugRedirect.objects.filter(language_code=code, old_slug=slug).delete()
+            BlogSlugRedirect.objects.filter(post=post, language_code=code, old_slug=slug).delete()
             tr.slug = slug
             tr.title = title
             tr.excerpt = item.excerpt.strip()
