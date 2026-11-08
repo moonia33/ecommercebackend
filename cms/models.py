@@ -94,6 +94,9 @@ class CmsPageTranslation(models.Model):
     hero_image_alt = models.CharField(max_length=255, blank=True, default="")
 
     body_markdown = models.TextField(blank=True, default="")
+    body_json = models.JSONField(
+        null=True, blank=True,
+        help_text="Tiptap JSON (ecommerceadmin redaktorius). Jei užpildyta, naudojama vietoj body_markdown.")
 
     class Meta:
         unique_together = ("cms_page", "language_code")
@@ -332,3 +335,150 @@ class StoreLocation(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.city})"
+
+
+def _validate_lang(obj):
+    try:
+        obj.language_code = validate_supported_language_code(obj.language_code)
+    except ValueError:
+        code = (obj.language_code or "").strip().lower()
+        allowed = get_supported_language_codes()
+        raise ValidationError(
+            {"language_code": f"Neleistinas language_code '{code}'. Leidziami: {', '.join(sorted(allowed))}"}
+        )
+
+
+class CmsMedia(models.Model):
+    """Images uploaded from the rich text editor (pages and blog posts)."""
+
+    image = models.ImageField(upload_to="cms/media/%Y/%m/")
+    alt_text = models.CharField(max_length=255, blank=True, default="")
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    uploaded_by = models.ForeignKey(
+        "accounts.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return self.image.name if self.image else f"media #{self.pk}"
+
+
+class BlogCategory(models.Model):
+    slug = models.SlugField(max_length=200)
+    shop = models.ForeignKey(
+        "api.Shop", null=True, blank=True, on_delete=models.PROTECT, related_name="blog_categories")
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["sort_order", "slug"]
+        constraints = [
+            models.UniqueConstraint(fields=["shop", "slug"], name="uniq_blog_category_shop_slug"),
+        ]
+
+    def __str__(self) -> str:
+        return self.slug
+
+
+class BlogCategoryTranslation(models.Model):
+    category = models.ForeignKey(BlogCategory, on_delete=models.CASCADE, related_name="translations")
+    language_code = models.CharField(max_length=8)
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+
+    class Meta:
+        unique_together = ("category", "language_code")
+
+    def __str__(self) -> str:
+        return f"{self.name} [{self.language_code}]"
+
+    def clean(self):
+        super().clean()
+        _validate_lang(self)
+
+
+class BlogPost(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Juodraštis"
+        PUBLISHED = "published", "Publikuotas"
+
+    shop = models.ForeignKey(
+        "api.Shop", null=True, blank=True, on_delete=models.PROTECT, related_name="blog_posts",
+        help_text="Tuščia = rodoma visose parduotuvėse")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    published_at = models.DateTimeField(
+        null=True, blank=True, help_text="Ateities data = suplanuotas publikavimas")
+    author = models.ForeignKey(
+        "accounts.User", null=True, blank=True, on_delete=models.SET_NULL, related_name="blog_posts")
+    author_name = models.CharField(max_length=120, blank=True, default="")
+    cover_image = models.ImageField(upload_to="cms/blog/", blank=True, null=True)
+    categories = models.ManyToManyField(BlogCategory, blank=True, related_name="posts")
+    related_products = models.ManyToManyField(
+        "catalog.Product", blank=True, related_name="blog_posts")
+    related_categories = models.ManyToManyField(
+        "catalog.Category", blank=True, related_name="blog_posts")
+    is_featured = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-published_at", "-id"]
+        indexes = [models.Index(fields=["status", "published_at"])]
+
+    def save(self, *args, **kwargs):
+        if self.status == self.Status.PUBLISHED and self.published_at is None:
+            from django.utils import timezone
+
+            self.published_at = timezone.now()
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"blog #{self.pk}"
+
+
+class BlogPostTranslation(models.Model):
+    post = models.ForeignKey(BlogPost, on_delete=models.CASCADE, related_name="translations")
+    language_code = models.CharField(max_length=8)
+    slug = models.SlugField(max_length=200)
+    title = models.CharField(max_length=255)
+    excerpt = models.TextField(blank=True, default="")
+    body_json = models.JSONField(null=True, blank=True)
+    seo_title = models.CharField(max_length=255, blank=True, default="")
+    seo_description = models.TextField(blank=True, default="")
+    cover_image_alt = models.CharField(max_length=255, blank=True, default="")
+    reading_minutes = models.PositiveSmallIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("post", "language_code")
+        indexes = [models.Index(fields=["language_code", "slug"])]
+
+    def __str__(self) -> str:
+        return f"{self.slug} [{self.language_code}]"
+
+    def clean(self):
+        super().clean()
+        _validate_lang(self)
+
+    def save(self, *args, **kwargs):
+        from .richtext import doc_plain_text
+
+        words = len(doc_plain_text(self.body_json).split()) if self.body_json else 0
+        self.reading_minutes = max(1, round(words / 200)) if words else 0
+        super().save(*args, **kwargs)
+
+
+class BlogSlugRedirect(models.Model):
+    """Old per-language slugs keep resolving (301) after a rename."""
+
+    post = models.ForeignKey(BlogPost, on_delete=models.CASCADE, related_name="slug_redirects")
+    language_code = models.CharField(max_length=8)
+    old_slug = models.SlugField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["language_code", "old_slug"])]
