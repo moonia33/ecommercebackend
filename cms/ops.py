@@ -578,6 +578,8 @@ def _save_post(post: BlogPost | None, payload: OpsBlogPostIn, user) -> BlogPost:
             if tr.pk and tr.slug and tr.slug != slug:
                 BlogSlugRedirect.objects.get_or_create(post=post, language_code=code, old_slug=tr.slug)
             stale = BlogSlugRedirect.objects.filter(language_code=code, old_slug=slug)
+            if shop_id is not None:
+                stale = stale.filter(Q(post__shop_id=shop_id) | Q(post__shop__isnull=True))
             if not (post.status == BlogPost.Status.PUBLISHED and post.published_at <= timezone.now()):
                 # A draft must not steal a live post's old permalink.
                 stale = stale.filter(post=post)
