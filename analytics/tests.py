@@ -44,14 +44,14 @@ class CookieConsentTests(TestCase):
         codes = [
             self.client.post("/api/v1/analytics/cookie-consent", data=body,
                              content_type="application/json",
-                             HTTP_CF_CONNECTING_IP="203.0.113.9").status_code
+                             HTTP_CF_CONNECTING_IP="93.184.216.34").status_code
             for _ in range(CONSENT_RATE_LIMIT + 1)
         ]
         self.assertEqual(codes[-1], 429)
         self.assertTrue(all(c == 200 for c in codes[:-1]))
         other = self.client.post("/api/v1/analytics/cookie-consent", data=body,
                                  content_type="application/json",
-                                 HTTP_CF_CONNECTING_IP="203.0.113.10")
+                                 HTTP_CF_CONNECTING_IP="93.184.216.35")
         self.assertEqual(other.status_code, 200)
 
     def test_internal_proxy_address_not_rate_limited(self):
