@@ -24,6 +24,11 @@ def forwards(apps, schema_editor):
 
     for kind, slug, setting in PAGES:
         label = getattr(settings, setting, "v1") or "v1"
+        # Shops whose own page gets imported (it has text); others use global.
+        own_shops = {
+            p.shop_id for p in CmsPage.objects.filter(slug=slug, shop__isnull=False)
+            if any(t.body_markdown.strip() for t in p.translations.all())
+        }
         for page in CmsPage.objects.filter(slug=slug):
             translations = [t for t in page.translations.all() if t.body_markdown.strip()]
             if not translations:
@@ -49,8 +54,7 @@ def forwards(apps, schema_editor):
                 consents = consents.filter(order__shop_id=page.shop_id)
             else:
                 # Orders of shops with their own page accepted that text.
-                consents = consents.exclude(order__shop_id__in=CmsPage.objects.filter(
-                    slug=slug, shop__isnull=False).values("shop_id"))
+                consents = consents.exclude(order__shop_id__in=own_shops)
             consents.update(legal_version=ver)
             Acceptance.objects.bulk_create([
                 Acceptance(
