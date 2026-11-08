@@ -159,6 +159,85 @@ class ActivityTests(TestCase):
         self.assertNotIn(self.fishing.id, activity_product_counts())
 
 
+@override_settings(
+    ALLOWED_HOSTS=["*"],
+    SHOP_CONTEXT_ENABLED=True,
+    SHOP_CONTEXT_STRICT=True,
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+class OpsActivityTests(TestCase):
+    setUp_catalog = ActivityTests.setUp
+    _product = ActivityTests._product
+
+    def setUp(self):
+        from accounts.jwt_utils import issue_access_token
+        from accounts.models import User
+        from api.models import Shop, ShopLanguage
+
+        self.setUp_catalog()
+        shop = Shop.objects.create(
+            code="ops", name="Ops", primary_domain="ops.local", default_language_code="lt",
+            default_country_code="LT", currency="EUR", is_active=True,
+        )
+        ShopLanguage.objects.create(shop=shop, language_code="lt", is_active=True, is_default=True)
+        staff = User.objects.create_user(email="s@example.com", password="x", is_staff=True)
+        self.client.cookies["access_token"] = issue_access_token(user_id=staff.id)
+
+    def _bulk(self, action, ids, activity):
+        return self.client.post(
+            "/api/v1/ops/catalog/bulk-actions",
+            data={"action": action, "product_ids": ids, "activity_id": activity.id},
+            content_type="application/json", HTTP_HOST="ops.local",
+        )
+
+    def _products(self, activity_id):
+        res = self.client.get(
+            "/api/v1/ops/catalog/products", {"activity_id": activity_id}, HTTP_HOST="ops.local"
+        )
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        return {r["id"] for r in res.json()["results"]}
+
+    def test_bulk_add_exclude_clear_and_filters(self):
+        rule = ActivityRule.objects.create(activity=self.carp, name="r")
+        rule.categories.set([self.carp_cat])
+        apply_activity_rules(reindex=False)
+        p1, p2 = self.p_boilie.id, self.p_tent.id
+
+        res = self._bulk("add_activity", [p2], self.carp)
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        self.assertEqual(self._products(self.carp.id), {p1, p2})
+        self.assertEqual(self._products(self.fishing.id), {p1, p2})
+        self.assertNotIn(p2, self._products(0))
+
+        self._bulk("exclude_activity", [p1, p2], self.carp)
+        self.assertEqual(self._products(self.carp.id), set())
+        self.assertTrue({p1, p2} <= self._products(0))
+        self.assertFalse(
+            ProductActivity.objects.filter(product_id=p2, activity=self.carp, source="manual").exists()
+        )
+        self.assertTrue(ProductActivity.objects.filter(product_id=p1, source="rule").exists())
+
+        self._bulk("clear_activity", [p1, p2], self.carp)
+        self.assertEqual(self._products(self.carp.id), {p1})
+
+        detail = self.client.get(f"/api/v1/ops/catalog/products/{p1}", HTTP_HOST="ops.local").json()
+        self.assertEqual(
+            [(a["code"], a["source"], a["rule_name"], a["parent_code"]) for a in detail["activities"]],
+            [("karpine", "rule", "r", "zvejyba")],
+        )
+        lookups = self.client.get("/api/v1/ops/catalog/lookups", HTTP_HOST="ops.local").json()
+        self.assertIn(("karpine", 1), [(a["code"], a["depth"]) for a in lookups["activities"]])
+
+    def test_bulk_requires_activity(self):
+        res = self.client.post(
+            "/api/v1/ops/catalog/bulk-actions",
+            data={"action": "add_activity", "product_ids": [self.p_tent.id]},
+            content_type="application/json", HTTP_HOST="ops.local",
+        )
+        self.assertEqual(res.status_code, 400)
+
+
+
 class SeedActivitiesUpdateTests(TestCase):
     def test_update_keeps_admin_exclusions_and_is_active(self):
         from django.core.management import call_command

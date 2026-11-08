@@ -183,10 +183,19 @@ def activity_subtree_ids(activity: Activity) -> list[int]:
 
 def activity_q(activity: Activity) -> Q:
     """ORM filtras: prekė priklauso veiklai (arba bet kuriai srities veiklai)."""
-    ids = activity_subtree_ids(activity)
-    positive = ProductActivity.objects.filter(
-        product_id=OuterRef("pk"), activity_id__in=ids, source__in=POSITIVE
-    ).exclude(
+    return Q(Exists(_effective_links(activity_subtree_ids(activity))))
+
+
+def any_activity_q() -> Q:
+    """ORM filtras: prekė priklauso bent vienai veiklai (išėmimai įvertinti)."""
+    return Q(Exists(_effective_links()))
+
+
+def _effective_links(ids=None):
+    positive = ProductActivity.objects.filter(product_id=OuterRef("pk"), source__in=POSITIVE)
+    if ids is not None:
+        positive = positive.filter(activity_id__in=ids)
+    return positive.exclude(
         Exists(
             ProductActivity.objects.filter(
                 product_id=OuterRef("product_id"),
@@ -197,7 +206,6 @@ def activity_q(activity: Activity) -> Q:
             )
         )
     )
-    return Q(Exists(positive))
 
 
 def activity_product_counts(product_qs=None) -> dict[int, int]:
@@ -242,3 +250,31 @@ def localized(activity: Activity, language_code: str | None) -> dict:
                         out[k] = v
                 break
     return out
+
+
+def set_manual_activity(product_ids: Iterable[int], activity: Activity, mode: str) -> list[int]:
+    """Rankinis veiklos priskyrimas (`add`), išėmimas (`exclude`) arba abiejų
+    nuėmimas (`clear`). Taisyklių (`rule`) ryšių neliečia. Grąžina prekių ID."""
+    if mode not in {"add", "exclude", "clear"}:
+        raise ValueError(f"unknown mode: {mode}")
+    ids = list(Product.objects.filter(id__in=list(product_ids)).values_list("id", flat=True))
+    if not ids:
+        return []
+    S = ProductActivity.Source
+    drop = {"add": [S.EXCLUDE], "exclude": [S.MANUAL], "clear": [S.MANUAL, S.EXCLUDE]}[mode]
+    with transaction.atomic():
+        ProductActivity.objects.filter(
+            product_id__in=ids, activity=activity, source__in=drop, rule__isnull=True
+        ).delete()
+        if mode != "clear":
+            source = S.MANUAL if mode == "add" else S.EXCLUDE
+            ProductActivity.objects.bulk_create(
+                [ProductActivity(product_id=pid, activity=activity, source=source) for pid in ids],
+                ignore_conflicts=True,
+            )
+    from .signals import _bump_catalog_facets_cache, bump_listing_ver
+
+    bump_listing_ver()
+    _bump_catalog_facets_cache()
+    reindex_products(ids)
+    return ids

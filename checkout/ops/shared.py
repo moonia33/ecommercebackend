@@ -119,6 +119,8 @@ class OpsCatalogBulkActionIn(Schema):
     category_id: int | None = None
     # `assign_group` veiksmui — ProductGroup.id
     group_id: int | None = None
+    # `add_activity` / `exclude_activity` / `clear_activity` — Activity.id
+    activity_id: int | None = None
 
 
 class OpsPaymentActionIn(Schema):
@@ -759,6 +761,16 @@ class OpsProductVideoOut(Schema):
     sort_order: int = 0
 
 
+class OpsProductActivityOut(Schema):
+    activity_id: int
+    code: str
+    name: str
+    parent_code: str | None = None
+    # rule | manual | exclude
+    source: str
+    rule_name: str = ""
+
+
 class OpsCatalogProductDetailOut(OpsCatalogProductOut):
     description: str = ""
     thumbnail_url: str = ""
@@ -777,6 +789,7 @@ class OpsCatalogProductDetailOut(OpsCatalogProductOut):
     videos: list[OpsProductVideoOut] = []
     variants: list[OpsCatalogVariantOut] = []
     offers: list[OpsCatalogOfferOut] = []
+    activities: list[OpsProductActivityOut] = []
 
 
 class OpsLanguageOut(Schema):
@@ -827,6 +840,8 @@ class OpsCatalogLookupsOut(Schema):
     brands: list[OpsLookupOptionOut] = []
     categories: list[OpsLookupOptionOut] = []
     groups: list[OpsLookupOptionOut] = []
+    # veiklų medis: depth 0 = sritis, 1 = veikla; code = Activity.code
+    activities: list[OpsLookupOptionOut] = []
     tax_classes: list[OpsLookupOptionOut] = []
     features: list[OpsFeatureOptionOut] = []
     option_types: list[OpsOptionTypeOptionOut] = []
