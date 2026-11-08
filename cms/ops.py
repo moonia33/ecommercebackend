@@ -571,6 +571,7 @@ def _save_post(post: BlogPost | None, payload: OpsBlogPostIn, user) -> BlogPost:
         post.related_products.set(Product.objects.filter(id__in=payload.related_product_ids[:50]))
         post.related_categories.set(Category.objects.filter(id__in=payload.related_category_ids[:50]))
 
+        post.translations.exclude(language_code__in=[i[0] for i in items]).delete()
         existing = {t.language_code: t for t in post.translations.all()}
         for code, slug, title, item in items:
             tr = existing.get(code) or BlogPostTranslation(post=post, language_code=code)
