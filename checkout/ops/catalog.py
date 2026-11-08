@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.utils.text import slugify
 from ninja.files import UploadedFile
 
-from catalog.models import Activity, ProductActivity
+from catalog.models import Activity
 
 from .shared import *
 
@@ -355,13 +355,9 @@ def ops_catalog_products(
     elif brand_id is not None:
         qs = qs.filter(brand_id=int(brand_id))
     if activity_id == 0:
-        qs = qs.exclude(
-            Exists(
-                ProductActivity.objects.filter(product_id=OuterRef("pk")).exclude(
-                    source=ProductActivity.Source.EXCLUDE
-                )
-            )
-        )
+        from catalog.activities import any_activity_q
+
+        qs = qs.exclude(any_activity_q())
     elif activity_id is not None:
         act = Activity.objects.filter(id=int(activity_id)).first()
         if act is not None:

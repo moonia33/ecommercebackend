@@ -183,10 +183,19 @@ def activity_subtree_ids(activity: Activity) -> list[int]:
 
 def activity_q(activity: Activity) -> Q:
     """ORM filtras: prekė priklauso veiklai (arba bet kuriai srities veiklai)."""
-    ids = activity_subtree_ids(activity)
-    positive = ProductActivity.objects.filter(
-        product_id=OuterRef("pk"), activity_id__in=ids, source__in=POSITIVE
-    ).exclude(
+    return Q(Exists(_effective_links(activity_subtree_ids(activity))))
+
+
+def any_activity_q() -> Q:
+    """ORM filtras: prekė priklauso bent vienai veiklai (išėmimai įvertinti)."""
+    return Q(Exists(_effective_links()))
+
+
+def _effective_links(ids=None):
+    positive = ProductActivity.objects.filter(product_id=OuterRef("pk"), source__in=POSITIVE)
+    if ids is not None:
+        positive = positive.filter(activity_id__in=ids)
+    return positive.exclude(
         Exists(
             ProductActivity.objects.filter(
                 product_id=OuterRef("product_id"),
@@ -197,7 +206,6 @@ def activity_q(activity: Activity) -> Q:
             )
         )
     )
-    return Q(Exists(positive))
 
 
 def activity_product_counts(product_qs=None) -> dict[int, int]:

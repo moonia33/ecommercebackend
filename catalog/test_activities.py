@@ -210,6 +210,7 @@ class OpsActivityTests(TestCase):
 
         self._bulk("exclude_activity", [p1, p2], self.carp)
         self.assertEqual(self._products(self.carp.id), set())
+        self.assertTrue({p1, p2} <= self._products(0))
         self.assertFalse(
             ProductActivity.objects.filter(product_id=p2, activity=self.carp, source="manual").exists()
         )
