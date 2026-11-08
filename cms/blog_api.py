@@ -135,7 +135,7 @@ def blog_post_detail(request, slug: str, language_code: str | None = None):
     language_code = language_code or get_request_language_code(request)
     shop = _shop(request)
     langs = translation_fallback_chain(language_code, shop=shop)
-    post, moved = _find_post(shop, slug, language_code)
+    post, _moved = _find_post(shop, slug, language_code)
     if post is None:
         raise HttpError(404, "Post not found")
     translations = list(post.translations.all())
@@ -151,7 +151,7 @@ def blog_post_detail(request, slug: str, language_code: str | None = None):
         content_blocks=rich_content_blocks(tr.body_json, shop=shop, language_code=language_code),
         alternates=[{"language_code": t.language_code, "slug": t.slug} for t in translations],
         related_products=products_payload(related_ids, shop=shop, language_code=language_code),
-        redirect_to_slug=(tr.slug if (moved or tr.slug != slug) else ""),
+        redirect_to_slug=(tr.slug if tr.slug != slug else ""),
     )
     return data
 
