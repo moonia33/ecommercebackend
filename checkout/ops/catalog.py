@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.utils.text import slugify
 from ninja.files import UploadedFile
 
+from catalog.badges import reindex_products
 from catalog.models import Activity
 
 from .shared import *
@@ -944,6 +945,7 @@ def ops_catalog_bulk_actions(request, payload: OpsCatalogBulkActionIn):
         updated = list(Product.objects.filter(id__in=payload.product_ids).values_list("id", flat=True))
         Product.objects.filter(id__in=updated).update(category=category, updated_at=timezone.now())
         _bump_listing_and_categories_cache()
+        reindex_products(updated)
         return OpsActionResultOut(ok=True, message="Category assigned", updated_ids=[int(x) for x in updated], failed_ids=[])
 
     if action == "assign_group":
@@ -955,10 +957,12 @@ def ops_catalog_bulk_actions(request, payload: OpsCatalogBulkActionIn):
         updated = list(Product.objects.filter(id__in=payload.product_ids).values_list("id", flat=True))
         Product.objects.filter(id__in=updated).update(group=group, updated_at=timezone.now())
         _bump_listing_and_categories_cache()
+        reindex_products(updated)
         return OpsActionResultOut(ok=True, message="Group assigned", updated_ids=[int(x) for x in updated], failed_ids=[])
 
     value = action == "activate_products"
     updated = list(Product.objects.filter(id__in=payload.product_ids).values_list("id", flat=True))
     Product.objects.filter(id__in=updated).update(is_active=value, updated_at=timezone.now())
     _bump_listing_and_categories_cache()
+    reindex_products(updated)
     return OpsActionResultOut(ok=True, message="Catalog bulk action applied", updated_ids=[int(x) for x in updated], failed_ids=[])
