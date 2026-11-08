@@ -237,6 +237,27 @@ class OpsActivityTests(TestCase):
         self.assertEqual(res.status_code, 400)
 
 
+    def test_bulk_catalog_actions_reindex_products(self):
+        from unittest import mock
+
+        ids = [self.p_tent.id, self.p_boilie.id]
+        payloads = [
+            {"action": "assign_category", "category_id": self.carp_cat.id},
+            {"action": "assign_group", "group_id": None},
+            {"action": "deactivate_products"},
+        ]
+        for extra in payloads:
+            with mock.patch("checkout.ops.catalog.reindex_products") as reindex:
+                res = self.client.post(
+                    "/api/v1/ops/catalog/bulk-actions",
+                    data={"product_ids": ids, **extra},
+                    content_type="application/json",
+                    HTTP_HOST="ops.local",
+                )
+            self.assertEqual(res.status_code, 200, res.content[:300])
+            reindex.assert_called_once()
+            self.assertEqual(sorted(reindex.call_args.args[0]), sorted(ids))
+
 
 class SeedActivitiesUpdateTests(TestCase):
     def test_update_keeps_admin_exclusions_and_is_active(self):
