@@ -336,7 +336,7 @@ class OpsOrderSearchTests(TestCase):
 
         adjust = self.client.post(
             f"/api/v1/ops/inventory/items/{self.inventory_item.id}/adjust",
-            data={"delta": 1, "reason_code": "restock", "comment": "test"},
+            data={"delta": 1, "reason_code": "restock", "comment": "test", "confirm_remote": True},
             content_type="application/json",
             HTTP_HOST="ops.local",
         )
