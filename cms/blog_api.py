@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from django.db.models import Count, Q
+from django.db.models.functions import Greatest
 from django.utils import timezone
 from ninja.errors import HttpError
 
@@ -177,6 +178,9 @@ def blog_categories(request, language_code: str | None = None):
 @router.get("/blog/sitemap", response=list[BlogSitemapEntryOut])
 def blog_sitemap(request):
     shop = _shop(request)
-    rows = BlogPostTranslation.objects.filter(post__in=published_posts(shop)).values(
-        "language_code", "slug", "updated_at")
-    return list(rows)
+    rows = (
+        BlogPostTranslation.objects.filter(post__in=published_posts(shop))
+        .annotate(last_modified=Greatest("updated_at", "post__updated_at"))
+        .values("language_code", "slug", "last_modified")
+    )
+    return [{"language_code": r["language_code"], "slug": r["slug"], "updated_at": r["last_modified"]} for r in rows]
