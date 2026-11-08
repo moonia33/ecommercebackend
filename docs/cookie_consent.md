@@ -11,6 +11,8 @@ Juostą rodo storefront'as (bz_sveltefront). Backend'as teikia:
 - `POST /api/v1/analytics/cookie-consent` – sutikimo įrodymas, tik pridedami įrašai
   (`CookieConsentRecord`: anoniminis `consent_id`, versija, veiksmas, kategorijos, naršyklė, laikas).
   IP nesaugomas. Admin'e įrašai tik skaitomi.
+  Ribojimas: 30 įrašų per valandą vienam IP (`CONSENT_RATE_LIMIT`, Django cache/Redis), virš to 429.
+  IP imamas iš `CF-Connecting-IP` (`api.client_ip`), nes origin priima tik Cloudflare srautą.
 
 ```json
 {"consent_id": "uuid", "version": 1, "action": "accept_all|reject_all|custom",
