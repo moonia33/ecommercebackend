@@ -74,6 +74,7 @@ def _engine_browse(
     page,
     page_size,
     language_code,
+    activity=None,
 ):
     """Pilnas browse/search per Typesense → (ids, total_found).
 
@@ -190,6 +191,18 @@ def _canonical_csv(value: str | None) -> str | None:
     return ",".join(sorted({p.strip() for p in value.split(",") if p.strip()}))
 
 
+def _resolve_activity(code: str | None):
+    code = (code or "").strip().lower()
+    if not code:
+        return None
+    from catalog.models import Activity
+
+    obj = Activity.objects.filter(code=code, is_active=True).first()
+    if not obj:
+        raise HttpError(404, "Activity not found")
+    return obj
+
+
 @router.get("/products", response=ProductPageOut)
 def products(
     request,
@@ -206,6 +219,7 @@ def products(
     sort: str | None = None,
     in_stock_only: bool = False,
     collection: str | None = None,
+    activity: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -214,6 +228,7 @@ def products(
     )
     if language_code is None:
         language_code = get_request_language_code(request)
+    activity_obj = _resolve_activity(activity)
 
     visibility = _visibility_for_channel(channel)
     min_price_expr, max_price_expr = list_price_exprs()
@@ -244,6 +259,7 @@ def products(
             q, category_slug, brand_slug, group_code,
             _canonical_csv(feature), _canonical_csv(option), range, sort,
             bool(in_stock_only), collection, page, page_size,
+            activity_obj.code if activity_obj else None,
         )).encode()
     ).hexdigest()
     listing_ver = cache.get("catalog:listing:ver", 1)
@@ -280,6 +296,7 @@ def products(
         page=page,
         page_size=page_size,
         language_code=language_code,
+        activity=activity_obj,
     )
     if engine is not None:
         ids, found = engine
@@ -360,6 +377,11 @@ def products(
         from catalog.badges import live_badge_q
 
         qs = qs.filter(live_badge_q(collection))
+
+    if activity_obj:
+        from catalog.activities import activity_q
+
+        qs = qs.filter(activity_q(activity_obj))
 
     if channel == "outlet":
         qs = qs.filter(_min_offer_price__isnull=False)
@@ -488,12 +510,14 @@ def product_facets(
     feature: str | None = None,
     option: str | None = None,
     range: str | None = None,
+    activity: str | None = None,
 ):
     country_code, channel = _validate_country_and_channel(
         country_code=country_code, channel=channel
     )
     if language_code is None:
         language_code = get_request_language_code(request)
+    activity_obj = _resolve_activity(activity)
 
     shop = _shop_or_404_when_strict(request)
     shop_id = int(shop.id) if shop else None
@@ -510,6 +534,7 @@ def product_facets(
         "|".join(str(x) for x in (
             q, category_slug, brand_slug, group_code,
             _canonical_csv(feature), _canonical_csv(option), range,
+            activity_obj.code if activity_obj else None,
         )).encode()
     ).hexdigest()
     facets_ver = cache.get("catalog:facets:ver", 1)
@@ -554,6 +579,8 @@ def product_facets(
             if not group:
                 raise HttpError(404, "Product group not found")
             extra.append(f"group_id:={int(group.id)}")
+        if activity_obj:
+            extra.append(f"activities:=[`{activity_obj.code}`]")
 
         engine_counts = search_facet_counts(
             q=q,
@@ -582,6 +609,10 @@ def product_facets(
             brand_slug=brand_slug, language_code=language_code,
             group_code=group_code, feature=feature, option=option,
             range_filter=range)
+        if activity_obj:
+            from catalog.activities import activity_q
+
+            qs = qs.filter(activity_q(activity_obj))
         product_ids = qs.values_list("id", flat=True)
         # Stale-index guard: indeksas gali atsilikti nuo DB — jei ORM turi
         # prekių, bet counts tušti, facetai eitų tušti (klaidingai).
@@ -616,6 +647,10 @@ def product_facets(
             option=option,
             range_filter=range,
         )
+        if activity_obj:
+            from catalog.activities import activity_q
+
+            qs = qs.filter(activity_q(activity_obj))
         # Materializuojama vieną kartą: kitaip filtruotas subquery (su
         # Count anotacija) perskaičiuojamas kiekvienoje facet užklausoje.
         product_ids = list(qs.values_list("id", flat=True))
@@ -648,6 +683,7 @@ def category_products(
     range: str | None = None,
     sort: str | None = None,
     in_stock_only: bool = False,
+    activity: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -657,6 +693,7 @@ def category_products(
         channel=channel,
         language_code=language_code,
         q=q,
+        activity=activity,
         category_slug=slug,
         brand_slug=brand_slug,
         group_code=group_code,

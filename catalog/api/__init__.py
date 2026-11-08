@@ -2,6 +2,7 @@ from .shared import *  # noqa: F401,F403
 from .shared import router  # noqa: F401
 
 # Import endpoint modules for router registration side-effects.
+from . import activities  # noqa: F401
 from . import back_in_stock  # noqa: F401
 from . import products  # noqa: F401
 from . import recently_viewed  # noqa: F401

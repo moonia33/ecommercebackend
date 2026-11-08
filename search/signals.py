@@ -53,6 +53,27 @@ def _badge_signals():
         )
 
 
+def _activity_signals():
+    from catalog.models import Activity, ProductActivity
+
+    @receiver(post_save, sender=ProductActivity, dispatch_uid="search_product_activity_saved")
+    @receiver(post_delete, sender=ProductActivity, dispatch_uid="search_product_activity_deleted")
+    def product_activity_changed(sender, instance, **kwargs):
+        _enqueue(instance.product_id)
+
+    @receiver(post_save, sender=Activity, dispatch_uid="search_activity_saved")
+    def activity_saved(sender, instance, **kwargs):
+        if search_sync_suppressed():
+            return
+        from catalog.badges import reindex_products
+
+        ids = [instance.id, *instance.children.values_list("id", flat=True)]
+        reindex_products(
+            ProductActivity.objects.filter(activity_id__in=ids)
+            .values_list("product_id", flat=True).distinct()
+        )
+
+
 def search_sync_suppressed() -> bool:
     return getattr(_state, "suppressed", False)
 
@@ -242,3 +263,4 @@ def curation_changed(sender, **kwargs):
 
 
 _badge_signals()
+_activity_signals()
