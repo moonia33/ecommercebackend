@@ -113,7 +113,7 @@ class OrderLineInline(admin.TabularInline):
 class OrderConsentInline(admin.TabularInline):
     model = OrderConsent
     extra = 0
-    readonly_fields = ("kind", "document_version",
+    readonly_fields = ("kind", "document_version", "legal_version",
                        "accepted_at", "ip_address", "user_agent")
 
     def has_add_permission(self, request, obj=None):
@@ -929,7 +929,7 @@ class OrderConsentAdmin(admin.ModelAdmin):
                     "document_version", "accepted_at")
     list_filter = ("kind",)
     search_fields = ("order__id", "document_version")
-    readonly_fields = ("order", "kind", "document_version",
+    readonly_fields = ("order", "kind", "document_version", "legal_version",
                        "accepted_at", "ip_address", "user_agent")
 
 

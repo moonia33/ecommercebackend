@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from ninja import Schema
 
+from legal.schemas import LegalPendingOut
+
 
 class RegisterIn(Schema):
     email: str
@@ -100,6 +102,7 @@ class MeOut(Schema):
     customer_groups: list[CustomerGroupOut]
     primary_customer_group: CustomerGroupOut | None = None
     consents: list[ConsentOut]
+    legal_pending: list[LegalPendingOut] = []
     phones: list[PhoneOut]
     addresses: list[AddressOut]
     primary_pickup_point: PickupPointOut | None = None

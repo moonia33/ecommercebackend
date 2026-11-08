@@ -794,6 +794,9 @@ class OrderConsent(models.Model):
 
     kind = models.CharField(max_length=32, choices=Kind.choices)
     document_version = models.CharField(max_length=80)
+    legal_version = models.ForeignKey(
+        "legal.LegalDocumentVersion", null=True, blank=True,
+        on_delete=models.PROTECT, related_name="order_consents")
 
     accepted_at = models.DateTimeField(auto_now_add=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)

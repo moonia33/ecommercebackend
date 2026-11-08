@@ -48,13 +48,25 @@ def _pick_best_translation(
 
 
 @router.get("/pages/{slug}", response=CmsPageOut)
-def cms_page_detail(request, slug: str, language_code: str | None = None):
+def cms_page_detail(
+    request, slug: str, language_code: str | None = None, version: str | None = None,
+):
     if language_code is None:
         language_code = get_request_language_code(request)
 
     shop = get_request_shop(request)
     if shop_context_enabled() and shop_context_strict() and shop is None:
         raise HttpError(404, "Shop not resolved for host")
+
+    # Versioned legal documents (terms, privacy...) win over a plain page.
+    from legal.services import page_payload
+
+    try:
+        legal = page_payload(shop, slug, language_code, version=version)
+    except LookupError:
+        raise HttpError(404, "Version not found")
+    if legal is not None:
+        return legal
 
     page_qs = CmsPage.objects.filter(slug=slug, is_active=True)
     if shop is not None:

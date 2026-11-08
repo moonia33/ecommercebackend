@@ -196,6 +196,7 @@ INSTALLED_APPS = [
     "catalog.apps.CatalogConfig",
     "catalog_import",
     "cms.apps.CmsConfig",
+    "legal.apps.LegalConfig",
     "homebuilder.apps.HomebuilderConfig",
     "shipping",
     "payments",

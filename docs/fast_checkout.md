@@ -188,6 +188,10 @@ Body:
 }
 ```
 
+`document_version` imamas iš `GET /checkout/consents`. Versijos laikomos DB
+(`docs/legal_documents.md`). Jei per tą laiką įsigaliojo nauja redakcija, atsakymas
+yra 409: FE iš naujo užkrauna `/checkout/consents` ir paprašo pažymėti sutikimą dar kartą.
+
 ## Kurjerio kelias
 
 Jei pasirinktas `requires_pickup_point=false`, FE gali naudoti esamą checkout flow su address pasirinkimu/pildymu.
