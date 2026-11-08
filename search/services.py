@@ -101,6 +101,7 @@ SCHEMA = {
         {"name": "disc_normal", "type": "int32"},
         {"name": "disc_outlet", "type": "int32"},
         {"name": "badges", "type": "string[]", "facet": True, "optional": True},
+        {"name": "activities", "type": "string[]", "facet": True, "optional": True},
         {"name": "created_ts", "type": "int64"},
         {"name": "popularity", "type": "int32"},
     ],
@@ -518,10 +519,17 @@ def product_document(
         "disc_normal": _disc(price_normal),
         "disc_outlet": _disc(price_outlet),
         "badges": _live_badge_codes(p),
+        "activities": activity_codes_from_links(p.activity_links.all()),
         "created_ts": int(p.created_at.timestamp()) if p.created_at else 0,
         "popularity": int(popularity or 0),
         **numeric,
     }
+
+
+def activity_codes_from_links(links) -> list[str]:
+    from catalog.activities import activity_codes_from_links as _codes
+
+    return _codes(links)
 
 
 def _live_badge_codes(p) -> list[str]:
@@ -542,7 +550,9 @@ def _live_badge_codes(p) -> list[str]:
 
 
 _DOC_QS_SELECT = ("brand", "category")
-_DOC_QS_PREFETCH = ("variants", "badge_links", "badge_links__badge", "variants__inventory_items",
+_DOC_QS_PREFETCH = ("variants", "badge_links", "badge_links__badge",
+                    "activity_links", "activity_links__activity",
+                    "activity_links__activity__parent", "variants__inventory_items",
                     "variants__feature_values", "variants__feature_values__feature",
                     "variants__feature_values__feature_value",
                     "variants__feature_values__feature_value__groups",
@@ -816,6 +826,7 @@ def browse_products(
     sort: str | None = None,
     in_stock_only: bool = False,
     collection: str | None = None,
+    activity: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[int], int] | None:
@@ -892,6 +903,8 @@ def browse_products(
         filters.append(f"disc_{ch}:>0")
     elif collection:
         filters.append(f"badges:=[`{collection}`]")
+    if activity:
+        filters.append(f"activities:=[`{activity}`]")
 
     qv = (q or "").strip()
     if qv:

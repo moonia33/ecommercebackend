@@ -347,3 +347,12 @@ def apply_badge_rules_task():
         ).values_list("product_id", flat=True)
     )
     return {"added": result.added, "removed": result.removed}
+
+
+@shared_task
+def apply_activity_rules_task():
+    """Naktinis: veiklų taisyklės (naujos prekės iš importo gauna veiklas)."""
+    from catalog.activities import apply_activity_rules
+
+    result = apply_activity_rules()
+    return {"added": result.added, "removed": result.removed}

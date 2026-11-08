@@ -14,6 +14,10 @@ from api.admin_i18n import apply_language_code_choices
 from .widgets import TableEditorWidget, ToastUIMarkdownWidget
 
 from .models import (
+    Activity,
+    ActivityRule,
+    ActivityTranslation,
+    ProductActivity,
     Badge,
     BadgeRule,
     BadgeTranslation,
@@ -517,6 +521,14 @@ class ProductBadgeInline(admin.TabularInline):
     autocomplete_fields = ("badge",)
 
 
+class ProductActivityInline(admin.TabularInline):
+    model = ProductActivity
+    extra = 0
+    fields = ("activity", "source", "rule", "created_at")
+    readonly_fields = ("rule", "created_at")
+    autocomplete_fields = ("activity",)
+
+
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = ("sku", "product_group_code", "name", "brand", "category", "group", "is_active")
@@ -543,6 +555,7 @@ class ProductAdmin(admin.ModelAdmin):
         ProductFeatureValueInline,
         ProductOptionTypeInline,
         ProductBadgeInline,
+        ProductActivityInline,
         VariantInline,
     )
 
@@ -1335,6 +1348,84 @@ class BadgeRuleAdmin(admin.ModelAdmin):
         from catalog.badges import reindex_products
 
         ids = list(ProductBadge.objects.filter(rule__in=queryset).values_list("product_id", flat=True))
+        super().delete_queryset(request, queryset)
+        reindex_products(ids)
+
+    def delete_model(self, request, obj):
+        from catalog.badges import reindex_products
+
+        ids = list(obj.assignments.values_list("product_id", flat=True))
+        super().delete_model(request, obj)
+        reindex_products(ids)
+
+
+class ActivityTranslationInline(admin.StackedInline):
+    model = ActivityTranslation
+    extra = 0
+
+
+@admin.register(Activity)
+class ActivityAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "parent", "is_active", "sort_order", "min_products", "products")
+    list_filter = ("is_active", "parent")
+    search_fields = ("code", "name")
+    prepopulated_fields = {"code": ("name",)}
+    autocomplete_fields = ("parent",)
+    inlines = (ActivityTranslationInline,)
+
+    @admin.display(description="Prekės")
+    def products(self, obj):
+        from catalog.activities import activity_product_counts
+
+        return activity_product_counts().get(obj.id, 0)
+
+
+@admin.register(ActivityRule)
+class ActivityRuleAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "activity", "is_active", "sku_prefix", "pattern", "assigned", "updated_at")
+    list_filter = ("is_active", "activity")
+    search_fields = ("name", "pattern", "sku_prefix")
+    autocomplete_fields = ("activity", "categories", "exclude_categories", "brands", "product_group", "feature", "feature_value")
+    actions = ("run_selected_dry_run", "run_selected_apply")
+    fieldsets = (
+        (None, {"fields": ("name", "activity", "is_active")}),
+        ("Kur (sąraše – bet kuris; skirtingos sąlygos – visos)", {"fields": ("categories", "include_descendants", "exclude_categories", "brands", "product_group", "sku_prefix")}),
+        ("Feature", {"fields": ("feature", "feature_value")}),
+        ("Tekstas", {"fields": ("matcher_type", "pattern", "match_in_name", "match_in_description")}),
+    )
+
+    @admin.display(description="Priskirta")
+    def assigned(self, obj):
+        return obj.assignments.count()
+
+    def _run(self, request, queryset, *, dry_run: bool):
+        from catalog.activities import apply_activity_rules
+
+        result = apply_activity_rules(rule_ids=queryset.values_list("id", flat=True), dry_run=dry_run)
+        prefix = "Dry-run" if dry_run else "Pritaikyta"
+        self.message_user(
+            request,
+            f"{prefix}: atitinka {sum(result.matched.values())}, pridėtų {result.added}, nuimtų {result.removed}.",
+        )
+
+    @admin.action(description="Veiklų taisyklės: dry-run")
+    def run_selected_dry_run(self, request, queryset):
+        self._run(request, queryset, dry_run=True)
+
+    @admin.action(description="Veiklų taisyklės: pritaikyti")
+    def run_selected_apply(self, request, queryset):
+        self._run(request, queryset, dry_run=False)
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        from catalog.activities import apply_activity_rules
+
+        apply_activity_rules(rule_ids=[form.instance.id])
+
+    def delete_queryset(self, request, queryset):
+        from catalog.badges import reindex_products
+
+        ids = list(ProductActivity.objects.filter(rule__in=queryset).values_list("product_id", flat=True))
         super().delete_queryset(request, queryset)
         reindex_products(ids)
 

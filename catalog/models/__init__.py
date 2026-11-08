@@ -1,3 +1,4 @@
+from .activities import Activity, ActivityRule, ActivityTranslation, ProductActivity
 from .badges import Badge, BadgeRule, BadgeTranslation, ProductBadge
 from .content import ContentBlock, ContentBlockTranslation, ContentRule
 from .enrichment import EnrichmentMatch, EnrichmentRule, EnrichmentRun
@@ -38,6 +39,10 @@ from .taxonomy import (
 from .variants import ProductOptionType, Variant, VariantOptionValue
 
 __all__ = [
+    "Activity",
+    "ActivityRule",
+    "ActivityTranslation",
+    "ProductActivity",
     "AttributeDatatype",
     "BackInStockSubscription",
     "Badge",

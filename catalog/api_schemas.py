@@ -324,3 +324,40 @@ class BackInStockSubscribeIn(Schema):
 
 class BackInStockSubscribeOut(Schema):
     status: str
+
+
+class ActivityOut(Schema):
+    id: int
+    code: str
+    name: str
+    parent_code: str | None = None
+    short_description: str = ""
+    image_url: str | None = None
+    image_alt: str = ""
+    product_count: int = 0
+    visible: bool = True
+    children: list["ActivityOut"] = []
+
+
+class ActivityCategoryOut(Schema):
+    slug: str
+    name: str
+    product_count: int
+
+
+class ActivityBrandOut(Schema):
+    slug: str
+    name: str
+    product_count: int
+
+
+class ActivityDetailOut(ActivityOut):
+    content_json: dict | None = None
+    seo_title: str = ""
+    seo_description: str = ""
+    parent: ActivityOut | None = None
+    top_categories: list[ActivityCategoryOut] = []
+    top_brands: list[ActivityBrandOut] = []
+
+
+ActivityOut.model_rebuild()
