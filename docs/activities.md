@@ -34,6 +34,7 @@ Pavyzdys: „Palapinės + Fox/Trakker/Nash → Karpinė“ = `categories=[palapi
 
 ```bash
 manage.py seed_activities                       # pradinis medis + IŠJUNGTOS taisyklės (idempotentiška)
+manage.py seed_activities --update              # + esamoms taisyklėms perrašo kategorijas/gamintojus/tekstą
 manage.py apply_activity_rules --dry-run --verbose-rules   # kiek atitiktų kiekviena taisyklė
 manage.py apply_activity_rules [--rule-id N]    # įrašo ir perindeksuoja pakeistas prekes
 ```
