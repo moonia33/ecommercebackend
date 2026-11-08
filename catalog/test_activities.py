@@ -1,4 +1,5 @@
 import datetime
+from io import StringIO
 
 from django.test import TestCase, override_settings
 
@@ -156,3 +157,32 @@ class ActivityTests(TestCase):
         self.carp.is_active = False
         self.carp.save()
         self.assertNotIn(self.fishing.id, activity_product_counts())
+
+
+class SeedActivitiesUpdateTests(TestCase):
+    def test_update_keeps_admin_exclusions_and_is_active(self):
+        from django.core.management import call_command
+
+        from catalog.models import ActivityRule
+
+        Category.objects.create(name="Atsarginės dalys", slug="atsargines-dalys")
+        custom = Category.objects.create(name="Kita", slug="kita")
+        boilies = Category.objects.create(name="Boiliai", slug="boiliai")
+        call_command("seed_activities", stdout=StringIO())
+        rule = ActivityRule.objects.get(activity__code="karpine", name="Karpinės kategorijos")
+        rule.exclude_categories.add(custom)
+        rule.categories.clear()
+        rule.is_active = True
+        rule.save()
+
+        call_command("seed_activities", stdout=StringIO())
+        rule.refresh_from_db()
+        self.assertEqual(list(rule.categories.all()), [])
+
+        call_command("seed_activities", "--update", stdout=StringIO())
+        rule.refresh_from_db()
+        self.assertTrue(rule.is_active)
+        self.assertIn(boilies, rule.categories.all())
+        self.assertEqual(
+            set(rule.exclude_categories.values_list("slug", flat=True)), {"atsargines-dalys", "kita"}
+        )
