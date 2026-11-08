@@ -218,3 +218,22 @@ class LegacyCheckoutModeTests(TestCase):
         clear_legal()
         self.assertIsNone(services.checkout_definitions(None, "lt"))
         self.assertIsNone(services.validate_checkout_consents(None, "lt", {}))
+
+
+class ClientIpTests(TestCase):
+    def _req(self, **meta):
+        from django.test import RequestFactory
+        return RequestFactory().get("/", **meta)
+
+    def test_spoofed_forwarded_for_is_ignored(self):
+        req = self._req(HTTP_X_FORWARDED_FOR="1.2.3.4", HTTP_CF_CONNECTING_IP="198.51.100.7",
+                        REMOTE_ADDR="10.0.0.5")
+        self.assertEqual(services.client_ip(req), "198.51.100.7")
+
+    def test_falls_back_to_remote_addr(self):
+        req = self._req(HTTP_X_FORWARDED_FOR="1.2.3.4", REMOTE_ADDR="10.0.0.5")
+        self.assertEqual(services.client_ip(req), "10.0.0.5")
+
+    def test_invalid_header_value_ignored(self):
+        req = self._req(HTTP_CF_CONNECTING_IP="not-an-ip", REMOTE_ADDR="10.0.0.5")
+        self.assertEqual(services.client_ip(req), "10.0.0.5")

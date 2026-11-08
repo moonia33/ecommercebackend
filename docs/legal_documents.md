@@ -17,6 +17,8 @@ naujo sutikimo.
   `content_hash` (SHA-256 nuo pavadinimo ir teksto).
 - `LegalAcceptance`: įrašai tik pridedami: vartotojas, tiksli versija, užsakymas,
   šaltinis (`checkout`/`reconsent`/`account`), kalba, IP, naršyklė.
+  IP imamas `api.client_ip.client_ip()`: `CF-Connecting-IP` (nustatymas `CLIENT_IP_HEADER`),
+  kitaip `REMOTE_ADDR`; `X-Forwarded-For` nepatikimas ir neskaitomas.
 - `OrderConsent.legal_version`: FK į tikslią versiją (`document_version` lieka kaip tekstas).
 
 Galiojanti versija yra naujausia publikuota, kurios `effective_from <= now`. Publikuotą

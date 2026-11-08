@@ -6,6 +6,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
+from api.client_ip import client_ip  # noqa: F401  (re-export)
 from api.i18n import translation_fallback_chain
 
 from .models import (
@@ -14,11 +15,6 @@ from .models import (
     LegalDocumentVersion,
     LegalDocumentVersionTranslation,
 )
-
-
-def client_ip(request) -> str | None:
-    fwd = (request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
-    return fwd or request.META.get("REMOTE_ADDR") or None
 
 
 def documents_for_shop(shop) -> dict[str, LegalDocument]:
