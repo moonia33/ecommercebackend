@@ -558,6 +558,8 @@ def _save_post(post: BlogPost | None, payload: OpsBlogPostIn, user) -> BlogPost:
         post.shop_id = shop_id
         post.status = payload.status
         post.published_at = payload.published_at
+        if post.published_at is not None and timezone.is_naive(post.published_at):
+            post.published_at = timezone.make_aware(post.published_at)
         if post.status == BlogPost.Status.PUBLISHED and post.published_at is None:
             post.published_at = timezone.now()
         if payload.author_name.strip():
