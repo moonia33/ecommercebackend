@@ -242,3 +242,31 @@ def localized(activity: Activity, language_code: str | None) -> dict:
                         out[k] = v
                 break
     return out
+
+
+def set_manual_activity(product_ids: Iterable[int], activity: Activity, mode: str) -> list[int]:
+    """Rankinis veiklos priskyrimas (`add`), išėmimas (`exclude`) arba abiejų
+    nuėmimas (`clear`). Taisyklių (`rule`) ryšių neliečia. Grąžina prekių ID."""
+    if mode not in {"add", "exclude", "clear"}:
+        raise ValueError(f"unknown mode: {mode}")
+    ids = list(Product.objects.filter(id__in=list(product_ids)).values_list("id", flat=True))
+    if not ids:
+        return []
+    S = ProductActivity.Source
+    drop = {"add": [S.EXCLUDE], "exclude": [S.MANUAL], "clear": [S.MANUAL, S.EXCLUDE]}[mode]
+    with transaction.atomic():
+        ProductActivity.objects.filter(
+            product_id__in=ids, activity=activity, source__in=drop, rule__isnull=True
+        ).delete()
+        if mode != "clear":
+            source = S.MANUAL if mode == "add" else S.EXCLUDE
+            ProductActivity.objects.bulk_create(
+                [ProductActivity(product_id=pid, activity=activity, source=source) for pid in ids],
+                ignore_conflicts=True,
+            )
+    from .signals import _bump_catalog_facets_cache, bump_listing_ver
+
+    bump_listing_ver()
+    _bump_catalog_facets_cache()
+    reindex_products(ids)
+    return ids

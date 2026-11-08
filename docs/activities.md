@@ -67,3 +67,16 @@ tik pakeistas prekes).
 2. Kiekiai ir pavyzdžiai peržiūrimi, tada taisyklė įjungiama ir pritaikoma.
 3. Neaiškios prekės nepriskiriamos spėjant – geriau rankinis priskyrimas.
 4. Po pritaikymo patikrinti Typesense dokumentų skaičių ir `activities` reikšmes.
+
+## Ops API (ecommerceadmin)
+
+- `GET /api/v1/ops/catalog/lookups` → `activities`: veiklų medis (`depth` 0 = sritis, 1 = veikla).
+- `GET /api/v1/ops/catalog/products?activity_id=N`: prekės veikloje (srities ID apima jos veiklas,
+  `exclude` taikomas); `activity_id=0` – prekės be jokios veiklos.
+- `GET /api/v1/ops/catalog/products/{id}` → `activities`: visi prekės ryšiai su `source`
+  (`rule` / `manual` / `exclude`) ir `rule_name`.
+- `POST /api/v1/ops/catalog/bulk-actions` su `activity_id`:
+  - `add_activity` – rankinis priskyrimas (nuima to paties ryšio `exclude`);
+  - `exclude_activity` – rankinis išėmimas (nugali taisykles, nuima `manual`);
+  - `clear_activity` – nuima `manual` ir `exclude`, lieka tik taisyklių rezultatas.
+  Taisyklių (`rule`) ryšiai nekeičiami; prekės perindeksuojamos.

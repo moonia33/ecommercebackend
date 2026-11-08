@@ -4,6 +4,8 @@ from django.core.exceptions import ValidationError
 from django.utils.text import slugify
 from ninja.files import UploadedFile
 
+from catalog.models import Activity, ProductActivity
+
 from .shared import *
 
 
@@ -185,6 +187,19 @@ def _serialize_product_detail(product: Product) -> OpsCatalogProductDetailOut:
         videos=videos,
         variants=variants,
         offers=offers,
+        activities=[
+            OpsProductActivityOut(
+                activity_id=int(link.activity_id),
+                code=link.activity.code,
+                name=link.activity.name,
+                parent_code=(link.activity.parent.code if link.activity.parent_id else None),
+                source=link.source,
+                rule_name=(link.rule.name if link.rule_id else ""),
+            )
+            for link in product.activity_links.select_related("activity__parent", "rule").order_by(
+                "activity__parent__sort_order", "activity__sort_order", "source"
+            )
+        ],
     )
 
 
@@ -249,9 +264,9 @@ def ops_catalog_variant_search(
     if is_active.strip().lower() in {"true", "false"}:
         qs = qs.filter(is_active=is_active.strip().lower() == "true")
 
+    from catalog.models import InventoryItem
     from catalog.shop_pricing import resolve_shop_variant_price
     from checkout.services import get_vat_rate_for, money_from_net
-    from catalog.models import InventoryItem
 
     rows = list(qs.order_by("product__name", "id")[:limit])
     stock = {
@@ -300,6 +315,7 @@ def ops_catalog_products(
     category_id: int | None = None,
     group_id: int | None = None,
     brand_id: int | None = None,
+    activity_id: int | None = None,
     page: int = 1,
     page_size: int = 50,
 ):
@@ -338,6 +354,22 @@ def ops_catalog_products(
         qs = qs.filter(brand__isnull=True)
     elif brand_id is not None:
         qs = qs.filter(brand_id=int(brand_id))
+    if activity_id == 0:
+        qs = qs.exclude(
+            Exists(
+                ProductActivity.objects.filter(product_id=OuterRef("pk")).exclude(
+                    source=ProductActivity.Source.EXCLUDE
+                )
+            )
+        )
+    elif activity_id is not None:
+        act = Activity.objects.filter(id=int(activity_id)).first()
+        if act is not None:
+            from catalog.activities import activity_q
+
+            qs = qs.filter(activity_q(act))
+        else:
+            qs = qs.none()
     if is_active.strip().lower() in {"true", "false"}:
         qs = qs.filter(is_active=is_active.strip().lower() == "true")
 
@@ -439,6 +471,13 @@ def ops_catalog_lookups(request):
         OpsLookupOptionOut(id=int(g.id), name=(g.name or ""), code=(g.code or ""))
         for g in ProductGroup.objects.filter(is_active=True).order_by("name")
     ]
+    activities = []
+    for root in Activity.objects.filter(parent__isnull=True).prefetch_related("children"):
+        activities.append(OpsLookupOptionOut(id=int(root.id), name=root.name, code=root.code, depth=0))
+        activities.extend(
+            OpsLookupOptionOut(id=int(c.id), name=c.name, code=c.code, depth=1)
+            for c in root.children.all()
+        )
     tax_classes = [
         OpsLookupOptionOut(id=int(t.id), name=(t.name or t.code or ""), code=(t.code or ""))
         for t in TaxClass.objects.filter(is_active=True)
@@ -485,6 +524,7 @@ def ops_catalog_lookups(request):
         brands=brands,
         categories=categories,
         groups=groups,
+        activities=activities,
         tax_classes=tax_classes,
         features=features,
         option_types=option_types,
@@ -879,10 +919,22 @@ def ops_catalog_bulk_actions(request, payload: OpsCatalogBulkActionIn):
     _ensure_shop_context_if_strict(request)
     _require_ops_user(request)
     action = (payload.action or "").strip().lower()
-    if action not in {"activate_products", "deactivate_products", "assign_category", "assign_group"}:
+    activity_modes = {"add_activity": "add", "exclude_activity": "exclude", "clear_activity": "clear"}
+    if action not in {"activate_products", "deactivate_products", "assign_category", "assign_group", *activity_modes}:
         raise HttpError(400, "Unsupported catalog bulk action")
     if not payload.product_ids:
         raise HttpError(400, "product_ids cannot be empty")
+
+    if action in activity_modes:
+        if payload.activity_id is None:
+            raise HttpError(400, "activity_id is required")
+        activity = Activity.objects.filter(id=int(payload.activity_id)).first()
+        if activity is None:
+            raise HttpError(404, "Activity not found")
+        from catalog.activities import set_manual_activity
+
+        updated = set_manual_activity(payload.product_ids, activity, activity_modes[action])
+        return OpsActionResultOut(ok=True, message="Activity updated", updated_ids=[int(x) for x in updated], failed_ids=[])
 
     if action == "assign_category":
         category = None
