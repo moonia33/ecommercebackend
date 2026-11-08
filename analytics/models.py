@@ -123,3 +123,30 @@ class RecentlyViewedProduct(models.Model):
             models.Index(fields=["visitor_id", "last_viewed_at"]),
             models.Index(fields=["product", "last_viewed_at"]),
         ]
+
+
+class CookieConsentRecord(models.Model):
+    """Append-only proof of a visitor's cookie banner choice."""
+
+    class Action(models.TextChoices):
+        ACCEPT_ALL = "accept_all", "Priimti visus"
+        REJECT_ALL = "reject_all", "Atmesti visus"
+        CUSTOM = "custom", "Pasirinkta"
+
+    consent_id = models.UUIDField(db_index=True)
+    shop = models.ForeignKey(
+        "api.Shop", null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="cookie_consents")
+    version = models.PositiveIntegerField()
+    action = models.CharField(max_length=16, choices=Action.choices)
+    functional = models.BooleanField(default=False)
+    analytics = models.BooleanField(default=False)
+    marketing = models.BooleanField(default=False)
+    user_agent = models.CharField(max_length=500, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.consent_id} {self.action} v{self.version}"

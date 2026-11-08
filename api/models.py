@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import RegexValidator
 from django.db import models, transaction
 
 
@@ -199,6 +200,18 @@ class ShopConfig(models.Model):
     enable_checkout = models.BooleanField(default=True)
     enable_catalog = models.BooleanField(default=True)
     metadata = models.JSONField(blank=True, default=dict)
+
+    # Marketing tags, loaded by the storefront behind the cookie banner.
+    gtm_container_id = models.CharField(
+        max_length=32, blank=True, default="", help_text="GTM-XXXXXXX",
+        validators=[RegexValidator(r"^GTM-[A-Z0-9]+$")])
+    ga4_measurement_id = models.CharField(
+        max_length=32, blank=True, default="", help_text="G-XXXXXXXXXX",
+        validators=[RegexValidator(r"^G-[A-Z0-9]+$")])
+    meta_pixel_id = models.CharField(
+        max_length=32, blank=True, default="", validators=[RegexValidator(r"^[0-9]+$")])
+    cookie_consent_version = models.PositiveIntegerField(
+        default=1, help_text="Padidinus, visi lankytojai klausiami slapukų sutikimo iš naujo.")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

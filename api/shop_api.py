@@ -22,6 +22,10 @@ class ShopConfigOut(Schema):
     privacy_url: str = ""
     enable_checkout: bool = True
     enable_catalog: bool = True
+    gtm_container_id: str = ""
+    ga4_measurement_id: str = ""
+    meta_pixel_id: str = ""
+    cookie_consent_version: int = 1
 
 
 def shop_config_cache_key(shop_id: int | None) -> str:
@@ -50,6 +54,10 @@ def shop_config(request):
                 privacy_url=cfg.privacy_url,
                 enable_checkout=cfg.enable_checkout,
                 enable_catalog=cfg.enable_catalog,
+                gtm_container_id=cfg.gtm_container_id.strip(),
+                ga4_measurement_id=cfg.ga4_measurement_id.strip(),
+                meta_pixel_id=cfg.meta_pixel_id.strip(),
+                cookie_consent_version=cfg.cookie_consent_version,
             )
     data = ShopConfigOut(**out).dict()
     cache.set(key, data, CACHE_TTL)
