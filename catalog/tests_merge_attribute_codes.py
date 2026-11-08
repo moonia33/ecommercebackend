@@ -97,3 +97,16 @@ class MergeAttributeCodesTests(TestCase):
         self.assertTrue(OptionType.objects.filter(code="kabliuku-dydis").exists())
         self.assertTrue(CategoryFacet.objects.filter(code="kabliuku-dydis").exists())
         self.assertTrue(CategoryFacet.objects.filter(code="hook-size").exists())
+
+
+class LegacyAliasMapTests(TestCase):
+    def test_targets_are_canonical_kebab_codes_not_legacy(self):
+        import re
+
+        from catalog.attribute_aliases import LEGACY_ATTRIBUTE_CODES
+
+        for old, new in LEGACY_ATTRIBUTE_CODES.items():
+            self.assertRegex(new, r"^[a-z0-9]+(-[a-z0-9]+)*$", old)
+            self.assertNotIn(new, LEGACY_ATTRIBUTE_CODES, f"{old} -> {new} yra grandinė")
+            self.assertNotEqual(old, new)
+        self.assertTrue(all(re.fullmatch(r"[a-z0-9-]+", k) for k in LEGACY_ATTRIBUTE_CODES))
