@@ -227,6 +227,7 @@ PRESET_URLS = {
     "gift_cards": "/katalogas",
     "help": "/pagalba",
     "stores": "/parduotuves",
+    "activities": "/veiklos",
     "favorites": "/megstamos",
     "account": "/paskyra",
     "cart": "/krepselis",
@@ -269,7 +270,7 @@ def _serialize_nav_item(item, *, language_code: str, langs: list[str], lang_rank
     if kind == MenuItem.Kind.LINK:
         url = item.link_url or ""
     elif kind == MenuItem.Kind.PRESET:
-        url = PRESET_URLS.get(item.preset or "", "")
+        url = PRESET_URLS.get(item.preset or "", "") or item.link_url or ""
     elif kind == MenuItem.Kind.CATEGORY and item.category_id:
         loc = localize_category(item.category, language_code=language_code)
         url = f"/k/{loc['slug']}"

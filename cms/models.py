@@ -171,6 +171,7 @@ class MenuItem(MPTTModel):
         GIFT_CARDS = "gift_cards", "Dovanų kortelės"
         HELP = "help", "Pagalba / Help center"
         STORES = "stores", "Parduotuvės / Stores"
+        ACTIVITIES = "activities", "Pagal veiklą / Activities"
         FAVORITES = "favorites", "Mėgstamiausi / Favorites"
         ACCOUNT = "account", "Paskyra / Account"
         CART = "cart", "Krepšelis / Cart"
