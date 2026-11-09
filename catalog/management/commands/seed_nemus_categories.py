@@ -28,6 +28,10 @@ TREE = [
     ("vandens-sportas", "kajakai", "Kajakai", []),
     (None, "pramoginiai-laivai", "Pramoginiai laivai", []),
     (None, "zvejybiniai-kateriai", "Žvejybiniai kateriai", []),
+    (None, "laivu-aksesuarai", "Laivų aksesuarai", [
+        ("laivu-laikikliai", "Laikikliai", []),
+        ("laivu-priedai", "Priedai", []),
+    ]),
     ("echolotai", "echolotu-priedai", "Echolotų priedai", [
         ("ethernet-tinklo-iranga", "Ethernet tinklo įranga", []),
         ("sonarai", "Sonarai", []),

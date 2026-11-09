@@ -19,7 +19,7 @@ class SeedNemusCategoriesTests(TestCase):
         out = StringIO()
         call_command("seed_nemus_categories", "--dry-run", stdout=out)
         self.assertEqual(Category.objects.count(), 4)
-        self.assertIn("Būtų sukurta: 24", out.getvalue())
+        self.assertIn("Būtų sukurta: 27", out.getvalue())
 
     def test_creates_missing_once_and_keeps_existing(self):
         self._parents()
@@ -30,11 +30,13 @@ class SeedNemusCategoriesTests(TestCase):
         call_command("seed_nemus_categories", stdout=StringIO())
         kept.refresh_from_db()
         self.assertEqual(kept.name, "Mano kajakai")
-        self.assertEqual(Category.objects.count(), 4 + 24)
+        self.assertEqual(Category.objects.count(), 4 + 27)
         vest = Category.objects.get(slug="vyriskos-liemenes")
         self.assertEqual(vest.parent.slug, "liemenes")
         self.assertEqual(vest.parent.parent.slug, "vandens-sportas")
         self.assertIsNone(Category.objects.get(slug="pramoginiai-laivai").parent)
+        boat = Category.objects.get(slug="laivu-laikikliai").parent
+        self.assertEqual((boat.slug, boat.parent), ("laivu-aksesuarai", None))
         motors = Category.objects.get(slug="valciu-varikliai")
         for slug in ("propeleriai", "gale-pakabinami-varikliai"):
             self.assertTrue(Category.objects.get(slug=slug).is_descendant_of(motors))
