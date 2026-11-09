@@ -35,6 +35,12 @@ class SeedNemusCategoriesTests(TestCase):
         self.assertEqual(vest.parent.slug, "liemenes")
         self.assertEqual(vest.parent.parent.slug, "vandens-sportas")
         self.assertIsNone(Category.objects.get(slug="pramoginiai-laivai").parent)
+        motors = Category.objects.get(slug="valciu-varikliai")
+        for slug in ("propeleriai", "gale-pakabinami-varikliai"):
+            self.assertTrue(Category.objects.get(slug=slug).is_descendant_of(motors))
+        sonar = Category.objects.get(slug="sonarai")
+        self.assertTrue(sonar.is_descendant_of(Category.objects.get(slug="echolotai")))
+        self.assertFalse(sonar.is_descendant_of(motors))
 
     def test_missing_parent_stops(self):
         with self.assertRaises(CommandError):

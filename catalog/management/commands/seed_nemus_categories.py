@@ -79,6 +79,8 @@ class Command(BaseCommand):
         created.append(slug)
         if dry_run:
             return Category(slug=slug, name=name, parent=parent)
+        if parent is not None:
+            parent.refresh_from_db()  # MPTT lft/rght pasikeičia po kiekvieno įterpimo
         node = Category.objects.create(slug=slug, name=name, parent=parent)
         existing[slug] = node
         return node
