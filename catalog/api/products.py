@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import Case, Count, IntegerField, Min, Q, Value, When
+from django.db.models import Case, Count, F, IntegerField, Min, Q, Value, When
 from ninja.errors import HttpError
 
 from .shared import (
