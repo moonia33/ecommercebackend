@@ -59,6 +59,8 @@ class CategoryOut(Schema):
     # Fallback nuotraukos iš kategorijos prekių (iki 4; tėvams — iš
     # palikuonių). Tik /catalog/categories endpoint'as.
     image_urls: list[str] = []
+    # Aktyvių prekių skaičius medyje (su palikuonimis).
+    product_count: int = 0
 
     seo_title: str = ""
     seo_description: str = ""

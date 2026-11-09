@@ -124,6 +124,33 @@ def categories(request):
             if cid is not None:
                 _gather(cid)
 
+        # Prekių kiekis per kategoriją, agreguota per medį (su palikuonimis).
+        prod_counts: dict[int, int] = {}
+        for cid, n in (
+            scoped_ids.values_list("category_id")
+            .annotate(n=Count("id"))
+            .values_list("category_id", "n")
+        ):
+            if cid:
+                prod_counts[int(cid)] = n
+
+        count_cache: dict[int, int] = {}
+
+        def _count(cid: int) -> int:
+            if cid in count_cache:
+                return count_cache[cid]
+            total = prod_counts.get(cid, 0)
+            for kid in children_of.get(cid, []):
+                total += _count(kid)
+            count_cache[cid] = total
+            return total
+
+        for cid in children_of:
+            if cid is not None:
+                _count(cid)
+    else:
+        count_cache = {}
+
     # Medžio tvarka (tree_id, lft) — admin'e vilkimas DraggableMPTTAdmin
     # valdo mega-meniu rikiavimą; order_insertion_by=["name"] tik numatyta
     # naujų kategorijų padėtis kol jas perrikiuoja.
@@ -149,6 +176,7 @@ def categories(request):
                 "menu_icon_url": (c.menu_icon_url_resolved or None),
                 "card_image_url": (c.card_url or None),
                 "image_urls": img_urls.get(c.id, []),
+                "product_count": count_cache.get(c.id, 0),
                 "seo_title": loc["seo_title"],
                 "seo_description": loc["seo_description"],
                 "seo_keywords": loc["seo_keywords"],
