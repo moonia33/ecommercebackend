@@ -167,7 +167,7 @@ def build_product_detail_payload(
                 w = ii.warehouse
                 if getattr(w, "kind", "local") != "local":
                     continue
-                if w.code in store_codes:
+                if w.code in store_codes or w.code == "store":
                     store.append(ii)
                 else:
                     named.setdefault(w.id, (w, []))[1].append(ii)
