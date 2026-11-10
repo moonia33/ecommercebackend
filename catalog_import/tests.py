@@ -557,9 +557,11 @@ class StockImportTestCase(TestCase):
         out = VariantStateOut(**variant_state(["p1-v"], "main")[0]).dict()
         self.assertEqual(out["offer"]["discount_percent"], 20)
         InventoryItem.objects.all().delete()
-        out = VariantStateOut(**variant_state(["p1-v"], "main")[0]).dict()
+        out = VariantStateOut(**variant_state(["p1-v"], "main")[0]).dict(exclude_unset=True)
         self.assertIn("offer", out)
         self.assertIsNone(out["offer"])
+        out = VariantStateOut(**variant_state(["p1-v"])[0]).dict(exclude_unset=True)
+        self.assertNotIn("offer", out)
 
     def test_stock_dry_run(self):
         InventoryItem.objects.create(
