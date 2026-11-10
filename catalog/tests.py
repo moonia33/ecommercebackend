@@ -179,6 +179,40 @@ class ProductDetailVideoTests(TestCase):
         self.assertEqual(urls, ["https://youtu.be/generic", "https://youtu.be/lt"])
 
 
+class ProductDetailStockLinesTests(TestCase):
+    def test_store_line_and_named_local_warehouses(self):
+        from catalog.models import InventoryItem, Warehouse
+
+        tax_class, _ = TaxClass.objects.get_or_create(code="standard", defaults={"name": "Standard"})
+        TaxRate.objects.create(
+            tax_class=tax_class, country_code="LT", rate="0.21", valid_from=datetime.date(2020, 1, 1), is_active=True
+        )
+        product = Product.objects.create(sku="WH-1", name="P", slug="wh-p", tax_class=tax_class, is_active=True)
+        variant = Variant.objects.create(product=product, sku="WH-1-A", name="A", price_eur="10.00", is_active=True)
+        wh = {
+            code: Warehouse.objects.update_or_create(
+                code=code, defaults={"name": name, "kind": kind, "country_code": "LT", "sort_order": order}
+            )[0]
+            for code, name, kind, order in [
+                ("default", "Default", "local", 0),
+                ("local", "Parduotuvė (local)", "local", 1),
+                ("albatros", "Centrinis sandėlis", "local", 2),
+                ("fox", "Fox", "remote", 3),
+            ]
+        }
+        for code, qty in [("default", 1), ("local", 2), ("albatros", 7), ("fox", 9)]:
+            InventoryItem.objects.create(variant=variant, warehouse=wh[code], qty_on_hand=qty)
+
+        payload = build_product_detail_payload(
+            product=product, shop_id=None, country_code="LT", channel="normal", language_code="lt"
+        )
+        v = payload["variants"][0]
+        lines = [(x["code"], x["name"], x["is_store"], x["qty"]) for x in v["stock_lines"]]
+        self.assertEqual(lines, [("default", "", True, 3), ("albatros", "Centrinis sandėlis", False, 7)])
+        self.assertEqual(v["stock_local"]["qty"], 10)
+        self.assertEqual(v["stock_remote"]["qty"], 9)
+
+
 class FeatureValueGroupTests(TestCase):
     def setUp(self):
         self.feature = Feature.objects.create(
