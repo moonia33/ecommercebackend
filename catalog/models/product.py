@@ -407,6 +407,12 @@ class ProductImage(models.Model):
             and hasattr(self.image, "file")
             and not getattr(self, "_skip_image_processing", False)
         )
+        if self.pk and not self.image and self.ingest_status == self.INGEST_ERROR:
+            old_url = type(self).objects.filter(pk=self.pk).values_list("image_url", flat=True).first()
+            if old_url is not None and old_url != self.image_url:
+                # Pakeistas URL po klaidos – vėl į ingest eilę (ingest_pending_images).
+                self.ingest_status = self.INGEST_PENDING
+                self.ingest_error = ""
         super().save(*args, **kwargs)
         if is_new_upload:
             from django.db import transaction
