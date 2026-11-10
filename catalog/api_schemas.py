@@ -44,6 +44,19 @@ class BrandRefOut(Schema):
     logo_thumb_url: str | None = None
 
 
+class ImageSourceOut(Schema):
+    url: str
+    width: int
+
+
+class CategoryImageOut(Schema):
+    url: str
+    width: int = 0
+    height: int = 0
+    avif_srcset: list[ImageSourceOut] = []
+    webp_srcset: list[ImageSourceOut] = []
+
+
 class CategoryOut(Schema):
     id: int
     slug: str
@@ -56,6 +69,9 @@ class CategoryOut(Schema):
     hero_image_url: str | None = None
     menu_icon_url: str | None = None
     card_image_url: str | None = None
+    # AVIF/WebP srcset'ai (hero_image_url/card_image_url = optimizuotas WebP).
+    hero_image: CategoryImageOut | None = None
+    card_image: CategoryImageOut | None = None
     # Fallback nuotraukos iš kategorijos prekių (iki 4; tėvams — iš
     # palikuonių). Tik /catalog/categories endpoint'as.
     image_urls: list[str] = []
@@ -72,10 +88,6 @@ class CategoryRefOut(Schema):
     slug: str
     name: str
 
-
-class ImageSourceOut(Schema):
-    url: str
-    width: int
 
 
 class ProductImageOut(Schema):

@@ -265,6 +265,16 @@ def process_product_image_task(product_image_id: int):
 
 
 @shared_task
+def process_category_images_task(category_id: int):
+    from .models import Category
+    from .services.category_images import process_category
+
+    category = Category.objects.filter(pk=category_id).first()
+    if category is not None:
+        process_category(category)
+
+
+@shared_task
 def ingest_pending_images_task():
     """Cron job: nuotraukų ingest backlog'as (post-import)."""
     from django.core.management import call_command

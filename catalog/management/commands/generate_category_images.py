@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 from io import BytesIO
 from pathlib import Path
@@ -263,11 +264,12 @@ class Command(BaseCommand):
                         keep_alpha=keep_alpha,
                     )
                 img_field = getattr(c, field)
-                # file_overwrite=False storage'e — ištrinti seną failą,
-                # kad vardas liktų <slug>.<ext> be random sufikso.
+                # Senas failas trinamas; naujo varde turinio hash'as, nes CDN
+                # failus kešuoja metams (tas pats vardas rodytų seną vaizdą).
                 if img_field:
                     img_field.delete(save=False)
-                img_field.save(f"{c.slug}.{out_format}", ContentFile(out), save=True)
+                digest = hashlib.sha1(out).hexdigest()[:8]
+                img_field.save(f"{c.slug}-{digest}.{out_format}", ContentFile(out), save=True)
                 done += 1
                 self.stdout.write(f"  OK {c.slug}" + (" [fallback]" if fb else ""))
             except Exception as e:

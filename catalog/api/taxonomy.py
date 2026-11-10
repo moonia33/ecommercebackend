@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from catalog.services.category_images import category_images as _category_images
+
 from django.db.models import Count
 from ninja.errors import HttpError
 
@@ -172,9 +174,8 @@ def categories(request):
                 "parent_id": c.parent_id,
                 "list_template": c.list_template,
                 "description": loc["description"],
-                "hero_image_url": (c.hero_url or None),
+                **_category_images(c),
                 "menu_icon_url": (c.menu_icon_url_resolved or None),
-                "card_image_url": (c.card_url or None),
                 "image_urls": img_urls.get(c.id, []),
                 "product_count": count_cache.get(c.id, 0),
                 "seo_title": loc["seo_title"],
@@ -206,7 +207,7 @@ def category_detail(request, slug: str, language_code: str | None = None):
         "parent_id": c.parent_id,
         "list_template": c.list_template,
         "description": loc["description"],
-        "hero_image_url": (c.hero_url or None),
+        **_category_images(c),
         "menu_icon_url": (c.menu_icon_url_resolved or None),
         "seo_title": loc["seo_title"],
         "seo_description": loc["seo_description"],

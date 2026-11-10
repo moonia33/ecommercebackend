@@ -1093,3 +1093,83 @@ class ProductImageUrlTests(TestCase):
         img.save()
         img.refresh_from_db()
         self.assertEqual((img.ingest_status, img.ingest_error), (ProductImage.INGEST_PENDING, ""))
+
+
+@override_settings(MEDIA_ROOT="/tmp/catimg-test-media")
+class CategoryImageRenditionTests(TestCase):
+    def _png(self, w=2000, h=625):
+        from io import BytesIO
+
+        from PIL import Image
+
+        buf = BytesIO()
+        Image.new("RGB", (w, h), (10, 80, 160)).save(buf, "PNG")
+        return buf.getvalue()
+
+    def test_renditions_built_and_exposed(self):
+        from django.core.files.base import ContentFile
+
+        from catalog.services.category_images import category_images, process_category
+
+        c = Category.objects.create(name="Hero kat", slug="hero-kat")
+        c.hero_image.save("hero.png", ContentFile(self._png()), save=True)
+        out = category_images(c)
+        # Kol rendition'ų nėra – originalas.
+        self.assertTrue(out["hero_image_url"].endswith(".png"))
+        self.assertEqual(process_category(c), ["hero"])
+        c.refresh_from_db()
+        out = category_images(c)
+        self.assertEqual([s["width"] for s in out["hero_image"]["webp_srcset"]], [640, 960, 1280, 1600])
+        self.assertEqual(len(out["hero_image"]["avif_srcset"]), 4)
+        self.assertTrue(out["hero_image_url"].endswith("_1600.webp"))
+        self.assertEqual(out["hero_image"]["width"], 2000)
+        self.assertIsNone(out["card_image"])
+        self.assertEqual(process_category(c), [])
+
+    def test_stale_task_does_not_overwrite_newer_source(self):
+        from unittest import mock
+
+        from django.core.files.base import ContentFile
+
+        from catalog.services import category_images as ci
+
+        c = Category.objects.create(name="Race kat", slug="race-kat")
+        c.hero_image.save("old.png", ContentFile(self._png()), save=True)
+        real_build = ci.build_renditions
+
+        def build_then_newer_upload(category, kind):
+            out = real_build(category, kind)
+            Category.objects.filter(pk=category.pk).update(hero_image="category-hero/newer.png")
+            return out
+
+        with mock.patch.object(ci, "build_renditions", side_effect=build_then_newer_upload):
+            self.assertEqual(ci.process_category(c), [])
+        c.refresh_from_db()
+        self.assertNotIn("hero", c.image_renditions)
+
+    def test_external_url_must_be_public(self):
+        from catalog.services.category_images import _check_public_url
+
+        for url in ("http://127.0.0.1/x.png", "http://10.0.0.5/x.png", "http://[::1]/x.png", "file:///etc/passwd"):
+            with self.assertRaises(ValueError):
+                _check_public_url(url)
+        _check_public_url("http://93.184.215.14/x.png")
+
+    def test_small_source_not_upscaled_and_source_change_rebuilds(self):
+        from django.core.files.base import ContentFile
+
+        from catalog.services.category_images import category_images, process_category
+
+        c = Category.objects.create(name="Card kat", slug="card-kat")
+        c.card_image.save("card.png", ContentFile(self._png(500, 400)), save=True)
+        process_category(c)
+        c.refresh_from_db()
+        widths = [s["width"] for s in category_images(c)["card_image"]["webp_srcset"]]
+        self.assertEqual(widths, [320, 480, 500])
+        c.card_image.save("card2.png", ContentFile(self._png(1200, 960)), save=True)
+        # Šaltinis pasikeitė – senos rendition'os nebenaudojamos.
+        self.assertTrue(category_images(c)["card_image_url"].endswith(".png"))
+        self.assertEqual(process_category(c), ["card"])
+        c.refresh_from_db()
+        widths = [s["width"] for s in category_images(c)["card_image"]["webp_srcset"]]
+        self.assertEqual(widths, [320, 480, 720, 960])

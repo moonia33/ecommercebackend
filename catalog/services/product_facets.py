@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from catalog.services.category_images import category_images as _category_images
+
 from catalog.api_schemas import FeatureOut, OptionTypeOut
 from catalog.localization import (
     localize_brand,
@@ -111,7 +113,7 @@ def build_facets_payload(
                     "parent_id": c.parent_id,
                     "list_template": c.list_template,
                     "description": category_loc["description"],
-                    "hero_image_url": (c.hero_url or None),
+                    **_category_images(c),
                     "menu_icon_url": (c.menu_icon_url_resolved or None),
                     "seo_title": category_loc["seo_title"],
                     "seo_description": category_loc["seo_description"],

@@ -62,6 +62,8 @@ class Category(MPTTModel):
     )
     card_image_url = models.URLField(blank=True, default="")
     card_image_alt = models.CharField(max_length=255, blank=True)
+    # AVIF/WebP rendition'os hero/card nuotraukoms (catalog.services.category_images).
+    image_renditions = models.JSONField(default=dict, blank=True, editable=False)
 
     # SEO
     seo_title = models.CharField(max_length=255, blank=True)
@@ -84,6 +86,26 @@ class Category(MPTTModel):
 
     def __str__(self) -> str:
         return self.name
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "image_renditions" in update_fields:
+            return
+        from catalog.services.category_images import KINDS, needs_renditions
+
+        if any(needs_renditions(self, k) for k in KINDS):
+            from django.db import transaction
+
+            pk = self.pk
+
+            def _dispatch(pk=pk):
+                from catalog.tasks import process_category_images_task
+                from config.celery import safe_delay
+
+                safe_delay(process_category_images_task, pk)
+
+            transaction.on_commit(_dispatch)
 
     @property
     def hero_url(self) -> str:
