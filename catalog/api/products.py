@@ -469,8 +469,9 @@ def product_suggest(
     for p in ordered:
         product_loc = localize_product(p, language_code=language_code)
         h = html_by_id.get(p.id) or {}
-        first = sorted(
-            list(p.images.all()), key=lambda i: (i.sort_order, i.id))[:1]
+        first = [
+            i for i in sorted(p.images.all(), key=lambda i: (i.sort_order, i.id)) if i.url
+        ][:1]
         img = image_out(first[0], context="listing") if first else None
         price = (
             _money_out(

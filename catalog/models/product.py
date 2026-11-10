@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from django.core.exceptions import ValidationError
 from django.db import models
 
@@ -196,6 +198,11 @@ class ProductVideo(models.Model):
         return f"{self.product_id}:{self.video_type} {self.url}"
 
 
+_PERMANENT_INGEST_ERROR = re.compile(
+    r"HTTP Error (400|403|404|410)\b|unsupported content-type|too small to be an image|unsupported url scheme"
+)
+
+
 class ProductImage(models.Model):
     product = models.ForeignKey(
         Product, on_delete=models.CASCADE, related_name="images")
@@ -303,7 +310,17 @@ class ProductImage(models.Model):
                 return self.image.url
             except Exception:
                 return ""
+        if self.ingest_failed_permanently:
+            # Tiekėjo URL nebeegzistuoja (404 ir pan.) – sugadintos nuotraukos nerodom.
+            return ""
         return self.image_url
+
+    @property
+    def ingest_failed_permanently(self) -> bool:
+        # Tik 4xx (nėra / draudžiama); timeout ar storage klaida – laikina, URL rodomas.
+        return self.ingest_status == self.INGEST_ERROR and bool(
+            _PERMANENT_INGEST_ERROR.search(self.ingest_error or "")
+        )
 
     @property
     def avif_url(self) -> str:
@@ -392,6 +409,12 @@ class ProductImage(models.Model):
             and hasattr(self.image, "file")
             and not getattr(self, "_skip_image_processing", False)
         )
+        if self.pk and not self.image and self.ingest_status == self.INGEST_ERROR:
+            old_url = type(self).objects.filter(pk=self.pk).values_list("image_url", flat=True).first()
+            if old_url is not None and old_url != self.image_url:
+                # Pakeistas URL po klaidos – vėl į ingest eilę (ingest_pending_images).
+                self.ingest_status = self.INGEST_PENDING
+                self.ingest_error = ""
         super().save(*args, **kwargs)
         if is_new_upload:
             from django.db import transaction
