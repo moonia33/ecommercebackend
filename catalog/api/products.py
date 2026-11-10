@@ -6,11 +6,13 @@ from django.db.models import Case, Count, F, IntegerField, Min, Q, Value, When
 from ninja.errors import HttpError
 
 from .shared import (
+    _discount_percent,
     _money_out,
     _shop_or_404_when_strict,
     _validate_country_and_channel,
     _visibility_for_channel,
     apply_catalog_filters,
+    apply_promo_to_unit_net,
     apply_products_sorting,
     apply_shop_product_scope,
     build_facets_payload,
@@ -426,6 +428,7 @@ def product_suggest(
 
     hits = search_suggest(q=q, shop_id=shop_id, channel=channel, limit=8)
 
+    offer_price_expr, offer_filter = offer_price_exprs(_visibility_for_channel(channel))
     qs_base = (
         Product.objects.filter(is_active=True)
         .select_related("brand", "tax_class")
@@ -433,7 +436,8 @@ def product_suggest(
         .annotate(
             _min_variant_price=Min(
                 "variants__price_eur", filter=Q(variants__is_active=True)
-            )
+            ),
+            _min_offer_price=Min(offer_price_expr, filter=offer_filter),
         )
     )
     if hits is not None:
@@ -473,15 +477,29 @@ def product_suggest(
             i for i in sorted(p.images.all(), key=lambda i: (i.sort_order, i.id)) if i.url
         ][:1]
         img = image_out(first[0], context="listing") if first else None
-        price = (
-            _money_out(
-                currency="EUR",
-                unit_net=Decimal(p._min_variant_price),
-                vat_rate=_rate(p),
+        price = compare_at_price = discount_percent = None
+        if p._min_variant_price is not None:
+            list_net = Decimal(p._min_variant_price)
+            base_net = (
+                Decimal(p._min_offer_price) if p._min_offer_price is not None else list_net
             )
-            if p._min_variant_price is not None
-            else None
-        )
+            discounted_offer = bool(base_net and list_net and base_net < list_net)
+            sale_net, _rule = apply_promo_to_unit_net(
+                base_unit_net=base_net,
+                channel=channel,
+                category_id=p.category_id,
+                brand_id=p.brand_id,
+                product_id=p.id,
+                variant_id=None,
+                customer_group_id=None,
+                allow_additional_promotions=not discounted_offer,
+                is_discounted_offer=discounted_offer,
+            )
+            rate = _rate(p)
+            price = _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate)
+            discount_percent = _discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
+            if discount_percent is not None:
+                compare_at_price = _money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
         out.append(SuggestItemOut(
             id=p.id,
             slug=product_loc["slug"],
@@ -495,6 +513,8 @@ def product_suggest(
             ),
             image_url=(img or {}).get("url"),
             price=price,
+            compare_at_price=compare_at_price,
+            discount_percent=discount_percent,
         ))
     return out
 

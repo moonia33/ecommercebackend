@@ -307,6 +307,8 @@ class SuggestItemOut(Schema):
     brand_name: str = ""
     image_url: str | None = None
     price: MoneyOut | None = None
+    compare_at_price: MoneyOut | None = None
+    discount_percent: int | None = None
 
 
 class CatalogFacetsOut(Schema):
