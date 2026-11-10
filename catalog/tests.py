@@ -1008,6 +1008,10 @@ class ProductImageUrlTests(TestCase):
         self.assertEqual(pending.url, "https://s/a.jpg")
         self.assertEqual(failed.url, "")
         self.assertEqual(timeout.url, "https://s/a.jpg")
+        html = ProductImage(
+            image_url="https://s/a.jpg", ingest_status=ProductImage.INGEST_ERROR, ingest_error="unsupported content-type 'text/html'"
+        )
+        self.assertEqual(html.url, "")
 
     def test_changed_url_after_error_is_pending_again(self):
         from catalog.models import ProductImage

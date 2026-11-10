@@ -198,7 +198,9 @@ class ProductVideo(models.Model):
         return f"{self.product_id}:{self.video_type} {self.url}"
 
 
-_PERMANENT_INGEST_ERROR = re.compile(r"HTTP Error (400|403|404|410)\b")
+_PERMANENT_INGEST_ERROR = re.compile(
+    r"HTTP Error (400|403|404|410)\b|unsupported content-type|too small to be an image|unsupported url scheme"
+)
 
 
 class ProductImage(models.Model):
