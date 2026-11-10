@@ -40,15 +40,35 @@ def needs_renditions(category, kind: str) -> bool:
     return (current.get("src") or "") != src
 
 
+def _check_public_url(url: str) -> None:
+    """SSRF apsauga: tik http(s) į viešus adresus."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("unsupported url")
+    for info in socket.getaddrinfo(parts.hostname, parts.port or None, proto=socket.IPPROTO_TCP):
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            raise ValueError(f"non-public host {parts.hostname}")
+
+
 def _download(url: str) -> bytes:
     import urllib.request
 
+    class _CheckedRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            _check_public_url(newurl)
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
     max_bytes = int(getattr(settings, "IMAGE_INGEST_MAX_BYTES", 8 * 1024 * 1024))
     timeout = int(getattr(settings, "IMAGE_INGEST_TIMEOUT", 20))
-    if not url.startswith(("http://", "https://")):
-        raise ValueError("unsupported url scheme")
+    _check_public_url(url)
+    opener = urllib.request.build_opener(_CheckedRedirect)
     req = urllib.request.Request(url, headers={"User-Agent": "catalog-image-ingest/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with opener.open(req, timeout=timeout) as resp:
         ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if ctype and not ctype.startswith("image/"):
             raise ValueError(f"unsupported content-type '{ctype}'")
@@ -106,9 +126,11 @@ def build_renditions(category, kind: str) -> dict:
     return out
 
 
-def _delete_files(entry: dict) -> None:
+def _delete_files(entry: dict, keep: set[str]) -> None:
     for ext in ("avif", "webp"):
         for name, _w in entry.get(ext) or []:
+            if name in keep:
+                continue
             try:
                 default_storage.delete(name)
             except Exception:
@@ -117,27 +139,47 @@ def _delete_files(entry: dict) -> None:
 
 def process_category(category, *, force: bool = False) -> list[str]:
     """Atnaujina pasikeitusias rendition'as. Grąžina atnaujintus `kind`'us."""
-    renditions = dict(category.image_renditions or {})
-    changed: list[str] = []
+    from django.db import transaction
+
+    built: dict[str, dict] = {}
     for kind in KINDS:
         if not force and not needs_renditions(category, kind):
             continue
-        old = renditions.get(kind) or {}
         try:
-            new = build_renditions(category, kind)
+            built[kind] = build_renditions(category, kind)
         except Exception as exc:
             logger.warning("category %s %s renditions failed: %s", category.pk, kind, exc)
             # Šaltinis pažymimas, kad nebandytume kas kartą; API grąžins originalą.
-            new = {"src": rendition_source(category, kind), "error": str(exc)[:200]}
-        _delete_files(old)
-        if new:
-            renditions[kind] = new
-        else:
-            renditions.pop(kind, None)
-        changed.append(kind)
-    if changed:
-        category.image_renditions = renditions
-        category.save(update_fields=["image_renditions"])
+            built[kind] = {"src": rendition_source(category, kind), "error": str(exc)[:200]}
+    if not built:
+        return []
+
+    changed: list[str] = []
+    stale: list[dict] = []
+    with transaction.atomic():
+        # Lygiagretus task'as galėjo apdoroti naujesnį šaltinį – rašom tik
+        # tas rendition'as, kurių šaltinis vis dar sutampa su DB.
+        current = type(category).objects.select_for_update().get(pk=category.pk)
+        renditions = dict(current.image_renditions or {})
+        for kind, new in built.items():
+            if (new.get("src") or "") != rendition_source(current, kind):
+                stale.append(new)
+                continue
+            old = renditions.get(kind) or {}
+            if old.get("src") and old is not new:
+                stale.append(old)
+            if new.get("src"):
+                renditions[kind] = new
+            else:
+                renditions.pop(kind, None)
+            changed.append(kind)
+        if changed:
+            current.image_renditions = renditions
+            current.save(update_fields=["image_renditions"])
+    category.image_renditions = current.image_renditions
+    keep = {n for e in renditions.values() for ext in ("avif", "webp") for n, _w in e.get(ext) or []}
+    for entry in stale:
+        _delete_files(entry, keep)
     return changed
 
 

@@ -1126,6 +1126,35 @@ class CategoryImageRenditionTests(TestCase):
         self.assertIsNone(out["card_image"])
         self.assertEqual(process_category(c), [])
 
+    def test_stale_task_does_not_overwrite_newer_source(self):
+        from unittest import mock
+
+        from django.core.files.base import ContentFile
+
+        from catalog.services import category_images as ci
+
+        c = Category.objects.create(name="Race kat", slug="race-kat")
+        c.hero_image.save("old.png", ContentFile(self._png()), save=True)
+        real_build = ci.build_renditions
+
+        def build_then_newer_upload(category, kind):
+            out = real_build(category, kind)
+            Category.objects.filter(pk=category.pk).update(hero_image="category-hero/newer.png")
+            return out
+
+        with mock.patch.object(ci, "build_renditions", side_effect=build_then_newer_upload):
+            self.assertEqual(ci.process_category(c), [])
+        c.refresh_from_db()
+        self.assertNotIn("hero", c.image_renditions)
+
+    def test_external_url_must_be_public(self):
+        from catalog.services.category_images import _check_public_url
+
+        for url in ("http://127.0.0.1/x.png", "http://10.0.0.5/x.png", "http://[::1]/x.png", "file:///etc/passwd"):
+            with self.assertRaises(ValueError):
+                _check_public_url(url)
+        _check_public_url("http://93.184.215.14/x.png")
+
     def test_small_source_not_upscaled_and_source_change_rebuilds(self):
         from django.core.files.base import ContentFile
 
