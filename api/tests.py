@@ -3548,6 +3548,22 @@ class PromoRuleScopeTests(TestCase):
             Decimal(item["price"]["net"]),
             Decimal(item["compare_at_price"]["net"]))
 
+    def test_suggest_shows_promo_discount(self):
+        """Paieškos pasiūlymuose: akcijos kaina, compare_at ir nuolaidos %."""
+        from unittest.mock import patch
+
+        self._make_rule()
+        with patch("search.services.search_suggest", return_value=None):
+            res = self.client.get("/api/v1/catalog/suggest",
+                                  {"q": "Promo"}, HTTP_HOST="ops.local")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        item = next(i for i in res.json() if i["slug"] == "promo-preke")
+        self.assertIsNotNone(item["compare_at_price"], msg=str(item)[:400])
+        self.assertGreater(item["discount_percent"], 0)
+        self.assertLess(
+            Decimal(item["price"]["net"]),
+            Decimal(item["compare_at_price"]["net"]))
+
 
 @override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True, SHOP_CONTEXT_STRICT=True)
 class ReverseChargeCheckoutTests(TestCase):
