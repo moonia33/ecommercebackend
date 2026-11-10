@@ -381,6 +381,14 @@ if MEDIA_STORAGE == "s3":
                 "querystring_auth": AWS_QUERYSTRING_AUTH,
                 "addressing_style": AWS_S3_ADDRESSING_STYLE,
                 "file_overwrite": False,
+                # Vardai unikalūs (file_overwrite=False, rendition'ų hash'ai) –
+                # CDN/naršyklė gali kešuoti metams.
+                "object_parameters": {
+                    "CacheControl": env(
+                        "AWS_S3_CACHE_CONTROL",
+                        default="public, max-age=31536000, immutable",
+                    ),
+                },
             },
         },
         "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},

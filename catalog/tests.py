@@ -1093,3 +1093,54 @@ class ProductImageUrlTests(TestCase):
         img.save()
         img.refresh_from_db()
         self.assertEqual((img.ingest_status, img.ingest_error), (ProductImage.INGEST_PENDING, ""))
+
+
+@override_settings(MEDIA_ROOT="/tmp/catimg-test-media")
+class CategoryImageRenditionTests(TestCase):
+    def _png(self, w=2000, h=625):
+        from io import BytesIO
+
+        from PIL import Image
+
+        buf = BytesIO()
+        Image.new("RGB", (w, h), (10, 80, 160)).save(buf, "PNG")
+        return buf.getvalue()
+
+    def test_renditions_built_and_exposed(self):
+        from django.core.files.base import ContentFile
+
+        from catalog.services.category_images import category_images, process_category
+
+        c = Category.objects.create(name="Hero kat", slug="hero-kat")
+        c.hero_image.save("hero.png", ContentFile(self._png()), save=True)
+        out = category_images(c)
+        # Kol rendition'ų nėra – originalas.
+        self.assertTrue(out["hero_image_url"].endswith(".png"))
+        self.assertEqual(process_category(c), ["hero"])
+        c.refresh_from_db()
+        out = category_images(c)
+        self.assertEqual([s["width"] for s in out["hero_image"]["webp_srcset"]], [640, 960, 1280, 1600])
+        self.assertEqual(len(out["hero_image"]["avif_srcset"]), 4)
+        self.assertTrue(out["hero_image_url"].endswith("_1600.webp"))
+        self.assertEqual(out["hero_image"]["width"], 2000)
+        self.assertIsNone(out["card_image"])
+        self.assertEqual(process_category(c), [])
+
+    def test_small_source_not_upscaled_and_source_change_rebuilds(self):
+        from django.core.files.base import ContentFile
+
+        from catalog.services.category_images import category_images, process_category
+
+        c = Category.objects.create(name="Card kat", slug="card-kat")
+        c.card_image.save("card.png", ContentFile(self._png(500, 400)), save=True)
+        process_category(c)
+        c.refresh_from_db()
+        widths = [s["width"] for s in category_images(c)["card_image"]["webp_srcset"]]
+        self.assertEqual(widths, [320, 480, 500])
+        c.card_image.save("card2.png", ContentFile(self._png(1200, 960)), save=True)
+        # Šaltinis pasikeitė – senos rendition'os nebenaudojamos.
+        self.assertTrue(category_images(c)["card_image_url"].endswith(".png"))
+        self.assertEqual(process_category(c), ["card"])
+        c.refresh_from_db()
+        widths = [s["width"] for s in category_images(c)["card_image"]["webp_srcset"]]
+        self.assertEqual(widths, [320, 480, 720, 960])
