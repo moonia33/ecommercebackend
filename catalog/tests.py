@@ -1001,6 +1001,10 @@ class ProductImageUrlTests(TestCase):
         from catalog.models import ProductImage
 
         pending = ProductImage(image_url="https://s/a.jpg", ingest_status=ProductImage.INGEST_PENDING)
-        failed = ProductImage(image_url="https://s/a.jpg", ingest_status=ProductImage.INGEST_ERROR)
+        failed = ProductImage(
+            image_url="https://s/a.jpg", ingest_status=ProductImage.INGEST_ERROR, ingest_error="HTTP Error 404: Not Found"
+        )
+        timeout = ProductImage(image_url="https://s/a.jpg", ingest_status=ProductImage.INGEST_ERROR, ingest_error="timed out")
         self.assertEqual(pending.url, "https://s/a.jpg")
         self.assertEqual(failed.url, "")
+        self.assertEqual(timeout.url, "https://s/a.jpg")

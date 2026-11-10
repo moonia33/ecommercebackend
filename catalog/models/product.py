@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from django.core.exceptions import ValidationError
 from django.db import models
 
@@ -196,6 +198,9 @@ class ProductVideo(models.Model):
         return f"{self.product_id}:{self.video_type} {self.url}"
 
 
+_PERMANENT_INGEST_ERROR = re.compile(r"HTTP Error (400|403|404|410)\b")
+
+
 class ProductImage(models.Model):
     product = models.ForeignKey(
         Product, on_delete=models.CASCADE, related_name="images")
@@ -303,10 +308,17 @@ class ProductImage(models.Model):
                 return self.image.url
             except Exception:
                 return ""
-        if self.ingest_status == self.INGEST_ERROR:
-            # Tiekėjo URL neparsisiuntė (pvz. 404) – sugadintos nuotraukos nerodom.
+        if self.ingest_failed_permanently:
+            # Tiekėjo URL nebeegzistuoja (404 ir pan.) – sugadintos nuotraukos nerodom.
             return ""
         return self.image_url
+
+    @property
+    def ingest_failed_permanently(self) -> bool:
+        # Tik 4xx (nėra / draudžiama); timeout ar storage klaida – laikina, URL rodomas.
+        return self.ingest_status == self.INGEST_ERROR and bool(
+            _PERMANENT_INGEST_ERROR.search(self.ingest_error or "")
+        )
 
     @property
     def avif_url(self) -> str:
