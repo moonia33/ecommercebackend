@@ -303,6 +303,9 @@ class ProductImage(models.Model):
                 return self.image.url
             except Exception:
                 return ""
+        if self.ingest_status == self.INGEST_ERROR:
+            # Tiekėjo URL neparsisiuntė (pvz. 404) – sugadintos nuotraukos nerodom.
+            return ""
         return self.image_url
 
     @property

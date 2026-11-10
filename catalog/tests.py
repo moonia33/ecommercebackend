@@ -994,3 +994,13 @@ class CategoryTranslationAdminLanguageTests(TestCase):
 
         new = CategoryTranslationInline.Form()
         self.assertEqual([c for c, _ in new.fields["language_code"].choices], ["pl", "en"])
+
+
+class ProductImageUrlTests(TestCase):
+    def test_failed_ingest_hides_supplier_url(self):
+        from catalog.models import ProductImage
+
+        pending = ProductImage(image_url="https://s/a.jpg", ingest_status=ProductImage.INGEST_PENDING)
+        failed = ProductImage(image_url="https://s/a.jpg", ingest_status=ProductImage.INGEST_ERROR)
+        self.assertEqual(pending.url, "https://s/a.jpg")
+        self.assertEqual(failed.url, "")
