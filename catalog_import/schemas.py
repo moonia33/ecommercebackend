@@ -199,12 +199,20 @@ class VariantStateIn(Schema):
     warehouse_code: str = ""
 
 
+class WarehouseOfferStateOut(Schema):
+    price_net: Decimal | None = None
+    cost_net: Decimal | None = None
+    discount_percent: int | None = None
+
+
 class VariantStateOut(Schema):
     code: str
     is_active: bool
     price_net: Decimal
     cost_net: Decimal | None = None
     qty: int | None = None
+    # Tik su warehouse_code; None = sandėlyje dar nėra InventoryItem.
+    offer: WarehouseOfferStateOut | None = None
 
 
 class ImportRunOut(Schema):
