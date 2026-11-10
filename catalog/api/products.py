@@ -30,6 +30,7 @@ from ..localization import localize_brand, localize_product
 from ..services.catalog_core import parse_range_pairs
 from ..services.image_out import image_out
 from pricing.services import get_vat_rate
+from promotions.services import load_active_promo_rules
 from ..api_schemas import CatalogFacetsOut, ProductDetailOut, ProductPageOut, SuggestItemOut
 
 
@@ -457,6 +458,7 @@ def product_suggest(
         html_by_id = {}
 
     vat_cache: dict[int, Decimal] = {}
+    promo_rules = load_active_promo_rules(channel=channel, shop_id=shop_id) if ordered else []
 
     def _rate(p: Product) -> Decimal:
         key = int(p.tax_class_id or 0)
@@ -494,6 +496,8 @@ def product_suggest(
                 customer_group_id=None,
                 allow_additional_promotions=not discounted_offer,
                 is_discounted_offer=discounted_offer,
+                rules=promo_rules,
+                shop_id=shop_id,
             )
             rate = _rate(p)
             price = _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate)
