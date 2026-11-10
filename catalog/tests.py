@@ -208,7 +208,7 @@ class ProductDetailStockLinesTests(TestCase):
         )
         v = payload["variants"][0]
         lines = [(x["code"], x["name"], x["is_store"], x["qty"]) for x in v["stock_lines"]]
-        self.assertEqual(lines, [("store", "", True, 3), ("albatros", "Centrinis sandėlis", False, 7)])
+        self.assertEqual(lines, [("default", "", True, 3), ("albatros", "Centrinis sandėlis", False, 7)])
         self.assertEqual(v["stock_local"]["qty"], 10)
         self.assertEqual(v["stock_remote"]["qty"], 9)
 

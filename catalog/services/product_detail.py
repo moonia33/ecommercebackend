@@ -79,7 +79,8 @@ def build_product_detail_payload(
     delivery_window_out = None
     best_delivery_min = None
     promo_rules = load_active_promo_rules(channel=channel, shop_id=shop_id)
-    store_codes = set(getattr(settings, "STORE_WAREHOUSE_CODES", ("default", "local")))
+    store_code_list = tuple(getattr(settings, "STORE_WAREHOUSE_CODES", ("default", "local"))) or ("default",)
+    store_codes = set(store_code_list)
     for v in variants_qs:
         inv_all = list(v.inventory_items.all())
         visibility = InventoryItem.OfferVisibility.OUTLET if channel == "outlet" else InventoryItem.OfferVisibility.NORMAL
@@ -167,11 +168,11 @@ def build_product_detail_payload(
                 w = ii.warehouse
                 if getattr(w, "kind", "local") != "local":
                     continue
-                if w.code in store_codes or w.code == "store":
+                if w.code in store_codes:
                     store.append(ii)
                 else:
                     named.setdefault(w.id, (w, []))[1].append(ii)
-            lines = [{"code": "store", "name": "", "is_store": True, **_stock_line("local", store)}]
+            lines = [{"code": store_code_list[0], "name": "", "is_store": True, **_stock_line("local", store)}]
             for w, items in sorted(named.values(), key=lambda r: (r[0].sort_order, r[0].code)):
                 lines.append({"code": w.code, "name": w.name, "is_store": False, **_stock_line("local", items)})
             return lines
