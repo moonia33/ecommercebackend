@@ -16,7 +16,7 @@ from catalog.localization import (
     localize_option_value,
     localize_product,
 )
-from catalog.models import InventoryItem
+from catalog.models import InventoryItem, Warehouse
 from catalog.shop_pricing import resolve_shop_variant_price
 from catalog.services.image_out import image_out
 from catalog.services.money import discount_percent, effective_offer_unit_net, money_out
@@ -81,6 +81,13 @@ def build_product_detail_payload(
     promo_rules = load_active_promo_rules(channel=channel, shop_id=shop_id)
     store_code_list = tuple(getattr(settings, "STORE_WAREHOUSE_CODES", ("default", "local"))) or ("default",)
     store_codes = set(store_code_list)
+    # Visi naudojami vietiniai sandėliai rodomi kiekviename variante (ir su 0).
+    shown_local = list(
+        Warehouse.objects.filter(kind="local", is_active=True, inventory_items__isnull=False)
+        .exclude(code__in=store_codes)
+        .distinct()
+        .order_by("sort_order", "code")
+    )
     for v in variants_qs:
         inv_all = list(v.inventory_items.all())
         visibility = InventoryItem.OfferVisibility.OUTLET if channel == "outlet" else InventoryItem.OfferVisibility.NORMAL
@@ -163,14 +170,14 @@ def build_product_detail_payload(
         # pagal pavadinimą (pvz. „Centrinis sandėlis").
         def _local_stock_lines() -> list[dict]:
             store: list = []
-            named: dict[int, tuple] = {}
+            named: dict[int, tuple] = {w.id: (w, []) for w in shown_local}
             for ii in inv:
                 w = ii.warehouse
                 if getattr(w, "kind", "local") != "local":
                     continue
                 if w.code in store_codes:
                     store.append(ii)
-                else:
+                elif w.is_active:
                     named.setdefault(w.id, (w, []))[1].append(ii)
             lines = [{"code": store_code_list[0], "name": "", "is_store": True, **_stock_line("local", store)}]
             for w, items in sorted(named.values(), key=lambda r: (r[0].sort_order, r[0].code)):

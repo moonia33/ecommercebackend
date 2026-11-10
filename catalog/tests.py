@@ -212,6 +212,38 @@ class ProductDetailStockLinesTests(TestCase):
         self.assertEqual(v["stock_local"]["qty"], 10)
         self.assertEqual(v["stock_remote"]["qty"], 9)
 
+    def test_used_local_warehouses_shown_with_zero(self):
+        from catalog.models import InventoryItem, Warehouse
+
+        tax_class, _ = TaxClass.objects.get_or_create(code="standard", defaults={"name": "Standard"})
+        TaxRate.objects.create(
+            tax_class=tax_class, country_code="LT", rate="0.21", valid_from=datetime.date(2020, 1, 1), is_active=True
+        )
+        product = Product.objects.create(sku="WH-2", name="P", slug="wh-p2", tax_class=tax_class, is_active=True)
+        a = Variant.objects.create(product=product, sku="WH-2-A", name="A", price_eur="10.00", is_active=True)
+        b = Variant.objects.create(product=product, sku="WH-2-B", name="B", price_eur="10.00", is_active=True)
+        wh = {
+            code: Warehouse.objects.update_or_create(
+                code=code, defaults={"name": name, "kind": "local", "country_code": "LT", "is_active": active}
+            )[0]
+            for code, name, active in [
+                ("default", "Default", True),
+                ("albatros", "Centrinis sandėlis", True),
+                ("main", "Main", True),
+                ("old", "Senas", False),
+            ]
+        }
+        InventoryItem.objects.create(variant=a, warehouse=wh["albatros"], qty_on_hand=4)
+        InventoryItem.objects.create(variant=a, warehouse=wh["old"], qty_on_hand=0)
+        InventoryItem.objects.create(variant=b, warehouse=wh["default"], qty_on_hand=1)
+
+        payload = build_product_detail_payload(
+            product=product, shop_id=None, country_code="LT", channel="normal", language_code="lt"
+        )
+        by_sku = {v["sku"]: [(x["code"], x["qty"]) for x in v["stock_lines"]] for v in payload["variants"]}
+        self.assertEqual(by_sku["WH-2-A"], [("default", 0), ("albatros", 4)])
+        self.assertEqual(by_sku["WH-2-B"], [("default", 1), ("albatros", 0)])
+
 
 class FeatureValueGroupTests(TestCase):
     def setUp(self):
