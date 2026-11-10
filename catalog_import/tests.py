@@ -546,6 +546,23 @@ class StockImportTestCase(TestCase):
         self.assertEqual(row["offer"]["discount_percent"], 20)
         self.assertNotIn("offer", variant_state(["p1-v"])[0])
 
+    def test_variant_state_api_keeps_offer(self):
+        from .schemas import VariantStateOut
+        from .services import variant_state
+
+        InventoryItem.objects.create(
+            variant=self.variant, warehouse=self.warehouse, qty_on_hand=2,
+            offer_discount_percent=20,
+        )
+        out = VariantStateOut(**variant_state(["p1-v"], "main")[0]).dict()
+        self.assertEqual(out["offer"]["discount_percent"], 20)
+        InventoryItem.objects.all().delete()
+        out = VariantStateOut(**variant_state(["p1-v"], "main")[0]).dict(exclude_unset=True)
+        self.assertIn("offer", out)
+        self.assertIsNone(out["offer"])
+        out = VariantStateOut(**variant_state(["p1-v"])[0]).dict(exclude_unset=True)
+        self.assertNotIn("offer", out)
+
     def test_stock_dry_run(self):
         InventoryItem.objects.create(
             variant=self.variant, warehouse=self.warehouse, qty_on_hand=2

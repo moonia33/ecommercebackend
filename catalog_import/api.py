@@ -115,7 +115,9 @@ def import_prices(
     return _serialize_run(run)
 
 
-@router.post("/variant-state", response=list[VariantStateOut], auth=_auth)
+@router.post(
+    "/variant-state", response=list[VariantStateOut], auth=_auth, exclude_unset=True
+)
 def get_variant_state(request, payload: VariantStateIn):
     """Esama kaina/savikaina/likutis pagal SKU – normalyzer'io delta sinchronizacijai."""
     _require_ops_user(request)
