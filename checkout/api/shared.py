@@ -714,7 +714,7 @@ def _serialize_cart_items(
         variant_name = v.name or " / ".join(o.option_value_label for o in options_out)
 
         v_imgs = sorted(v.variant_images.all(), key=lambda i: (i.sort_order, i.id))
-        p_imgs = [] if not v.product_id else list(v.product.images.all()[:1])
+        p_imgs = [] if not v.product_id else [i for i in v.product.images.all() if i.url][:1]
         img = v_imgs[0] if v_imgs else (p_imgs[0] if p_imgs else None)
         image = image_out(img, context="listing") if img else None
 

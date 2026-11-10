@@ -1008,3 +1008,18 @@ class ProductImageUrlTests(TestCase):
         self.assertEqual(pending.url, "https://s/a.jpg")
         self.assertEqual(failed.url, "")
         self.assertEqual(timeout.url, "https://s/a.jpg")
+
+    def test_changed_url_after_error_is_pending_again(self):
+        from catalog.models import ProductImage
+
+        product = Product.objects.create(sku="IMG-1", name="X", slug="img-1", is_active=True)
+        img = ProductImage.objects.create(
+            product=product, image_url="https://s/a.jpg", ingest_status=ProductImage.INGEST_ERROR, ingest_error="HTTP Error 404"
+        )
+        img.alt_text = "x"
+        img.save()
+        self.assertEqual(img.ingest_status, ProductImage.INGEST_ERROR)
+        img.image_url = "https://s/b.jpg"
+        img.save()
+        img.refresh_from_db()
+        self.assertEqual((img.ingest_status, img.ingest_error), (ProductImage.INGEST_PENDING, ""))
