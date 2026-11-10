@@ -133,6 +133,8 @@ class VariantOut(Schema):
     # Sandėlių išskirstymas pagal Warehouse.kind (local=mine, remote=tiekėjo).
     stock_local: "StockLineOut | None" = None
     stock_remote: "StockLineOut | None" = None
+    # Vietiniai sandėliai atskirai: is_store=True – parduotuvė, kiti – `name`.
+    stock_lines: list["WarehouseStockLineOut"] = []
 
 
 class BadgeOut(Schema):
@@ -194,6 +196,12 @@ class DeliveryWindowOut(Schema):
 class StockLineOut(Schema):
     qty: int
     delivery_window: DeliveryWindowOut | None = None
+
+
+class WarehouseStockLineOut(StockLineOut):
+    code: str
+    name: str = ""
+    is_store: bool = False
 
 
 class ContentBlockOut(Schema):

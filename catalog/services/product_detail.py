@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from django.conf import settings
 from django.utils import timezone
 from ninja.errors import HttpError
 
@@ -78,6 +79,7 @@ def build_product_detail_payload(
     delivery_window_out = None
     best_delivery_min = None
     promo_rules = load_active_promo_rules(channel=channel, shop_id=shop_id)
+    store_codes = set(getattr(settings, "STORE_WAREHOUSE_CODES", ("default", "local")))
     for v in variants_qs:
         inv_all = list(v.inventory_items.all())
         visibility = InventoryItem.OfferVisibility.OUTLET if channel == "outlet" else InventoryItem.OfferVisibility.NORMAL
@@ -119,12 +121,13 @@ def build_product_detail_payload(
 
         # Sandėlių išskirstymas pagal Warehouse.kind: qty + ETA per
         # „geriausią" (priority) available offer'ą tame sandėlyje.
-        def _stock_line(kind: str) -> dict:
-            items = [
-                ii
-                for ii in inv
-                if getattr(ii.warehouse, "kind", "local") == kind
-            ]
+        def _stock_line(kind: str, items: list | None = None) -> dict:
+            if items is None:
+                items = [
+                    ii
+                    for ii in inv
+                    if getattr(ii.warehouse, "kind", "local") == kind
+                ]
             qty = sum(int(ii.qty_available) for ii in items)
             kind_offer = None
             avail = [ii for ii in items if ii.qty_available > 0]
@@ -154,6 +157,24 @@ def build_product_detail_payload(
                         "source": dw.source,
                     }
             return {"qty": qty, "delivery_window": dw_out}
+
+        # Vietiniai sandėliai: parduotuvė (STORE_WAREHOUSE_CODES) + kiti
+        # pagal pavadinimą (pvz. „Centrinis sandėlis").
+        def _local_stock_lines() -> list[dict]:
+            store: list = []
+            named: dict[int, tuple] = {}
+            for ii in inv:
+                w = ii.warehouse
+                if getattr(w, "kind", "local") != "local":
+                    continue
+                if w.code in store_codes:
+                    store.append(ii)
+                else:
+                    named.setdefault(w.id, (w, []))[1].append(ii)
+            lines = [{"code": "store", "name": "", "is_store": True, **_stock_line("local", store)}]
+            for w, items in sorted(named.values(), key=lambda r: (r[0].sort_order, r[0].code)):
+                lines.append({"code": w.code, "name": w.name, "is_store": False, **_stock_line("local", items)})
+            return lines
 
         price_res = resolve_shop_variant_price(
             variant=v,
@@ -241,6 +262,7 @@ def build_product_detail_payload(
                 ),
                 "stock_local": _stock_line("local"),
                 "stock_remote": _stock_line("remote"),
+                "stock_lines": _local_stock_lines(),
                 "options": [
                     {
                         "option_type_code": r.option_type.code,
