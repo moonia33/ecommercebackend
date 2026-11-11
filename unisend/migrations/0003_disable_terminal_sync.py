@@ -17,7 +17,7 @@ class Migration(migrations.Migration):
         ("unisend", "0002_rename_unisend_ter_country_5bd6f0_idx_unisend_uni_country_83fd41_idx_and_more"),
         ("api", "0004_seed_periodic_tasks"),
         ("django_celery_beat", "0019_alter_periodictasks_options"),
-        ("shipping", "0002_seed_defaults"),
+        ("shipping", "0009_shopshippingmethodpolicy"),
     ]
 
     operations = [migrations.RunPython(disable, migrations.RunPython.noop)]
