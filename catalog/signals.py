@@ -53,6 +53,9 @@ def _bump_catalog_facets_cache(**kwargs):
     """Facets endpoint'o cache versija — feature/option/facet konfigūracijos
     ir prekių priskyrimų pakeitimai matomi iškart, ne per TTL."""
     _incr_version("catalog:facets:ver")
+    from .services.facets_warm import schedule_facets_warm
+
+    schedule_facets_warm()
 
 
 def bump_listing_ver(**kwargs):
@@ -129,6 +132,16 @@ def inventory_item_listing_bump(sender, instance, update_fields=None, **kwargs):
     }:
         return
     bump_listing_ver()
+    # Facets (outlet) nepriklauso nuo kainų – kainų importas cache negriauna.
+    if update_fields is None or not set(update_fields) <= _OFFER_PRICE_FIELDS:
+        _bump_catalog_facets_cache()
+
+
+_OFFER_PRICE_FIELDS = {
+    "qty_on_hand", "qty_reserved", "updated_at",
+    "offer_price_override_eur", "offer_discount_percent", "cost_eur",
+    "never_discount",
+}
 
 
 for _sender in (Category, Product):

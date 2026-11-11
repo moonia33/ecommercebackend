@@ -275,6 +275,14 @@ def process_category_images_task(category_id: int):
 
 
 @shared_task
+def warm_catalog_facets_task():
+    """Kategorijų facets cache užpildymas (cron + po katalogo pakeitimų)."""
+    from .services.facets_warm import warm_catalog_facets
+
+    return warm_catalog_facets()
+
+
+@shared_task
 def ingest_pending_images_task():
     """Cron job: nuotraukų ingest backlog'as (post-import)."""
     from django.core.management import call_command

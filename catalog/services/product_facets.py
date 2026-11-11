@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from catalog.services.category_images import category_images as _category_images
 
+from django.db.models import Prefetch
+
 from catalog.api_schemas import FeatureOut, OptionTypeOut
 from catalog.localization import (
     localize_brand,
@@ -16,7 +18,9 @@ from catalog.models import (
     Category,
     CategoryFacet,
     Feature,
+    FeatureValue,
     OptionType,
+    OptionValue,
     Product,
     ProductFeatureValue,
     ProductGroup,
@@ -138,15 +142,13 @@ def build_facets_payload(
             code, _, val = key.partition(":")
             if code:
                 feature_pairs.setdefault(code, set()).add(val)
-        features_qs = Feature.objects.filter(
+        feature_base = Feature.objects.filter(
             is_active=True, is_filterable=True,
             code__in=set(feature_pairs),
-        ).prefetch_related(
-            "translations", "values", "values__translations", "values__groups",
-        ).order_by("sort_order", "code")
+        )
         used_vals_by_feature: dict[int, set[str]] = {
-            int(f.id): set(feature_pairs.get(f.code, set()))
-            for f in features_qs
+            int(fid): set(feature_pairs.get(code, set()))
+            for fid, code in feature_base.values_list("id", "code")
         }
     else:
         feature_ids = set(
@@ -158,7 +160,7 @@ def build_facets_payload(
             .values_list("feature_id", flat=True)
             .distinct()
         )
-        features_qs = Feature.objects.filter(is_active=True, is_filterable=True, id__in=feature_ids).prefetch_related("translations", "values", "values__translations", "values__groups").order_by("sort_order", "code")
+        feature_base = Feature.objects.filter(is_active=True, is_filterable=True, id__in=feature_ids)
         # Single grouped query for all feature values used by the filtered products —
         # product-level rows plus variant-level rows (values differ per variant).
         used_vals_by_feature = {}
@@ -174,6 +176,19 @@ def build_facets_payload(
             .distinct()
         ):
             used_vals_by_feature.setdefault(int(fid), set()).add(val)
+    # Prefetch'inamos tik naudojamos reikšmės: pilnas `values` prefetch
+    # (dydžiai, spalvos – tūkstančiai reikšmių su vertimais ir grupėmis)
+    # buvo ~90 % facets laiko.
+    used_feature_vals = set().union(*used_vals_by_feature.values())
+    features_qs = feature_base.prefetch_related(
+        "translations",
+        Prefetch(
+            "values",
+            queryset=FeatureValue.objects.filter(
+                is_active=True, value__in=used_feature_vals
+            ).prefetch_related("translations", "groups"),
+        ),
+    ).order_by("sort_order", "code")
     features_out: list[FeatureOut] = []
     # Per canonical code numeric bounds across used values — feeds the
     # 'range' widget facets (CategoryFacet config).
@@ -228,7 +243,6 @@ def build_facets_payload(
         .values_list("option_type_id", flat=True)
         .distinct()
     )
-    option_types_qs = OptionType.objects.filter(is_active=True, id__in=option_type_ids).prefetch_related("translations", "values", "values__translations", "values__groups").order_by("sort_order", "code")
     used_codes_by_type: dict[int, set[str]] = {}
     for tid, code in (
         VariantOptionValue.objects.filter(variant__product_id__in=product_ids)
@@ -236,6 +250,18 @@ def build_facets_payload(
         .distinct()
     ):
         used_codes_by_type.setdefault(int(tid), set()).add(code)
+    used_option_codes = set().union(*used_codes_by_type.values())
+    option_types_qs = OptionType.objects.filter(
+        is_active=True, id__in=option_type_ids
+    ).prefetch_related(
+        "translations",
+        Prefetch(
+            "values",
+            queryset=OptionValue.objects.filter(
+                is_active=True, code__in=used_option_codes
+            ).prefetch_related("translations", "groups"),
+        ),
+    ).order_by("sort_order", "code")
     option_types_out: list[OptionTypeOut] = []
     for t in option_types_qs:
         used_codes = used_codes_by_type.get(int(t.id), set())

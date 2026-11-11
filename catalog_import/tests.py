@@ -622,8 +622,9 @@ class SearchSyncTestCase(TestCase):
             run = execute_run(self._catalog_run())
         self.assertEqual(run.status, ImportRun.Status.DONE)
         product = Product.objects.get(sku="sync-p")
-        mock_on_commit.assert_called_once()
-        dispatch = mock_on_commit.call_args[0][0]
+        calls = _search_sync_calls(mock_on_commit)
+        self.assertEqual(len(calls), 1)
+        dispatch = calls[0][0][0]
         chunks = dispatch.__defaults__[0] if dispatch.__defaults__ else None
         self.assertEqual(chunks, [[product.id]])
 
@@ -634,7 +635,14 @@ class SearchSyncTestCase(TestCase):
         ) as mock_on_commit:
             run = execute_run(self._catalog_run(options={"dry_run": True}))
         self.assertEqual(run.status, ImportRun.Status.DONE)
-        mock_on_commit.assert_not_called()
+        self.assertEqual(_search_sync_calls(mock_on_commit), [])
+
+
+def _search_sync_calls(mock_on_commit):
+    """on_commit kvietimai be facets warm (catalog.services.facets_warm)."""
+    from catalog.services.facets_warm import _enqueue_warm
+
+    return [c for c in mock_on_commit.call_args_list if c[0][0] is not _enqueue_warm]
 
 
 class AsyncApplyTestCase(TestCase):

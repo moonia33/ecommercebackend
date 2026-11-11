@@ -1173,3 +1173,38 @@ class CategoryImageRenditionTests(TestCase):
         c.refresh_from_db()
         widths = [s["width"] for s in category_images(c)["card_image"]["webp_srcset"]]
         self.assertEqual(widths, [320, 480, 720, 960])
+
+
+class FacetsWarmTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()
+
+    def test_warm_fills_cache_for_category_pages(self):
+        from unittest import mock
+
+        from api.models import Shop
+        from catalog.api import products as products_api
+        from catalog.services.facets_warm import warm_catalog_facets
+
+        shop = Shop.objects.create(code="warm", name="Warm", primary_domain="warm.test")
+        Category.objects.create(name="Rites", slug="rites-warm")
+        result = warm_catalog_facets()
+        self.assertGreaterEqual(result["warmed"], 1)
+        self.assertEqual(result["failed"], 0)
+        with mock.patch.object(products_api, "build_facets_payload") as build:
+            products_api.cached_product_facets(
+                shop_id=shop.id, language_code="lt", category_slug="rites-warm")
+            build.assert_not_called()
+
+    def test_schedule_is_debounced(self):
+        from unittest import mock
+
+        from catalog.services.facets_warm import schedule_facets_warm
+
+        with mock.patch("catalog.tasks.warm_catalog_facets_task.apply_async") as enqueue:
+            with self.captureOnCommitCallbacks(execute=True):
+                schedule_facets_warm()
+                schedule_facets_warm()
+            self.assertEqual(enqueue.call_count, 1)
