@@ -68,5 +68,6 @@ def _enqueue_warm() -> None:
     try:
         warm_catalog_facets_task.apply_async(countdown=WARM_DEBOUNCE_SECONDS)
     except Exception:
-        cache.delete(WARM_SCHEDULED_KEY)
+        # Lock paliekamas: brokerio gedimo metu nekartojam bandymų kiekvienam
+        # commit'ui; cache užpildys periodinis task'as.
         logger.exception("facets warm enqueue failed")
