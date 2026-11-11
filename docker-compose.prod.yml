@@ -15,12 +15,15 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: config.settings_prod
       RUN_MIGRATIONS: "1"
+    cpu_shares: 2048
     expose:
       - "8000"
 
   worker:
     <<: *app
     command: celery -A config worker -l info -Q celery,default
+    cpus: 2
+    mem_limit: 2g
     healthcheck:
       test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME --timeout 10 | grep -q pong"]
       interval: 60s
@@ -31,6 +34,8 @@ services:
   worker_imports:
     <<: *app
     command: celery -A config worker -l info -Q imports -c 2 -n imports@%h
+    cpus: 1.5
+    mem_limit: 2g
     healthcheck:
       test: ["CMD-SHELL", "celery -A config inspect ping -d imports@$$HOSTNAME --timeout 10 | grep -q pong"]
       interval: 60s
@@ -40,6 +45,7 @@ services:
 
   beat:
     <<: *app
+    mem_limit: 512m
     command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(b'beat' not in open('/proc/1/cmdline', 'rb').read())"]
