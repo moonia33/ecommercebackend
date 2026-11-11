@@ -546,8 +546,31 @@ def product_facets(
     activity_obj = _resolve_activity(activity)
 
     shop = _shop_or_404_when_strict(request)
-    shop_id = int(shop.id) if shop else None
+    return cached_product_facets(
+        shop_id=int(shop.id) if shop else None,
+        language_code=language_code, country_code=country_code,
+        channel=channel, q=q, category_slug=category_slug,
+        brand_slug=brand_slug, group_code=group_code, feature=feature,
+        option=option, range=range, activity_obj=activity_obj,
+    )
 
+
+def cached_product_facets(
+    *,
+    shop_id: int | None,
+    language_code: str,
+    country_code: str = "LT",
+    channel: str = "normal",
+    q: str | None = None,
+    category_slug: str | None = None,
+    brand_slug: str | None = None,
+    group_code: str | None = None,
+    feature: str | None = None,
+    option: str | None = None,
+    range: str | None = None,
+    activity_obj=None,
+):
+    """Facets payload su TTL cache (endpoint'as ir warm_catalog_facets)."""
     # Facets skaičiavimas be filtrų brangus (visos feature/option reikšmės
     # per visą katalogą ~2.7s/300KB) — TTL cache pagal visus parametrus.
     # Ne real-time jautrus: naujos prekės/facet'ai atsiranda per TTL.
@@ -689,7 +712,7 @@ def product_facets(
     )
     cache.set(
         cache_key, payload,
-        int(getattr(dj_settings, "FACETS_CACHE_SECONDS", 600)),
+        int(getattr(dj_settings, "FACETS_CACHE_SECONDS", 6 * 3600)),
     )
     return payload
 

@@ -53,6 +53,9 @@ def _bump_catalog_facets_cache(**kwargs):
     """Facets endpoint'o cache versija — feature/option/facet konfigūracijos
     ir prekių priskyrimų pakeitimai matomi iškart, ne per TTL."""
     _incr_version("catalog:facets:ver")
+    from .services.facets_warm import schedule_facets_warm
+
+    schedule_facets_warm()
 
 
 def bump_listing_ver(**kwargs):

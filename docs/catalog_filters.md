@@ -136,7 +136,7 @@ katalogo endpoint'as (~2.7s/300KB virš viso katalogo ORM keliu), todėl:
   atsilikęs (visi counts tušti, bet ORM turi prekių) — fallback į ORM.
 - Su `feature`/`option`/`range` filtrais visada ORM — Typesense `filter_by`
   negali tiksliai išreikšti group-code ir range semantikos.
-- Atsakymas dar cache'uojamas (`FACETS_CACHE_SECONDS`, default 600s) pagal
+- Atsakymas dar cache'uojamas (`FACETS_CACHE_SECONDS`, default 6 h; kategorijų puslapiai be filtrų užpildomi iš anksto `catalog.tasks.warm_catalog_facets_task`: kas 4 h ir praėjus 5 min po katalogo pakeitimų) pagal
   parametrų hash + shop + kalba + `catalog:facets:ver` versiją (bump'inama
   Product/Feature/Option/CategoryFacet save/delete signalų — matoma iškart,
   ne per TTL).
