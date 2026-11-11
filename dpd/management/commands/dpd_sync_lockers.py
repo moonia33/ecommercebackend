@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from dpd.client import DpdApiError, DpdClient
 from dpd.models import DpdLocker
@@ -30,7 +30,7 @@ class Command(BaseCommand):
         try:
             items = DpdClient().list_lockers(params=params)
         except DpdApiError as e:
-            raise SystemExit(str(e))
+            raise CommandError(str(e))
 
         seen_ids: set[str] = set()
         created = 0

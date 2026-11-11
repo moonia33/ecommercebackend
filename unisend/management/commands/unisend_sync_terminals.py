@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from unisend.client import UnisendApiError, UnisendClient
 from unisend.models import UnisendTerminal
@@ -24,14 +24,14 @@ class Command(BaseCommand):
         try:
             raw = UnisendClient().list_terminals(receiver_country_code=country_code, size=limit)
         except UnisendApiError as e:
-            raise SystemExit(str(e))
+            raise CommandError(str(e))
 
         items = raw
         if isinstance(raw, dict) and isinstance(raw.get("items"), list):
             items = raw.get("items")
 
         if not isinstance(items, list):
-            raise SystemExit("Unisend terminals sync: unexpected response")
+            raise CommandError("Unisend terminals sync: unexpected response")
 
         seen_ids: set[str] = set()
         created = 0
