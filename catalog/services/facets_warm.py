@@ -52,18 +52,21 @@ def warm_catalog_facets() -> dict:
 def schedule_facets_warm() -> None:
     """Debounce: po katalogo pakeitimų (importo metu – tūkstančiai signalų)
     vienas warm per WARM_DEBOUNCE_SECONDS."""
-    from django.core.cache import cache
     from django.db import transaction
 
+    transaction.on_commit(_enqueue_warm)
+
+
+def _enqueue_warm() -> None:
+    from django.core.cache import cache
+
+    from catalog.tasks import warm_catalog_facets_task
+
+    # Lock tik po commit'o: rollback'as neužblokuoja kito warm.
     if not cache.add(WARM_SCHEDULED_KEY, 1, WARM_DEBOUNCE_SECONDS):
         return
-
-    def _enqueue():
-        from catalog.tasks import warm_catalog_facets_task
-
-        try:
-            warm_catalog_facets_task.apply_async(countdown=WARM_DEBOUNCE_SECONDS)
-        except Exception:
-            logger.exception("facets warm enqueue failed")
-
-    transaction.on_commit(_enqueue)
+    try:
+        warm_catalog_facets_task.apply_async(countdown=WARM_DEBOUNCE_SECONDS)
+    except Exception:
+        cache.delete(WARM_SCHEDULED_KEY)
+        logger.exception("facets warm enqueue failed")

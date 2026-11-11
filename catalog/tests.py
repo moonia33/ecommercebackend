@@ -1203,7 +1203,8 @@ class FacetsWarmTests(TestCase):
 
         from catalog.services.facets_warm import schedule_facets_warm
 
-        with mock.patch("django.db.transaction.on_commit") as on_commit:
-            schedule_facets_warm()
-            schedule_facets_warm()
-            self.assertEqual(on_commit.call_count, 1)
+        with mock.patch("catalog.tasks.warm_catalog_facets_task.apply_async") as enqueue:
+            with self.captureOnCommitCallbacks(execute=True):
+                schedule_facets_warm()
+                schedule_facets_warm()
+            self.assertEqual(enqueue.call_count, 1)

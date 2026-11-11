@@ -132,6 +132,8 @@ def inventory_item_listing_bump(sender, instance, update_fields=None, **kwargs):
     }:
         return
     bump_listing_ver()
+    # Offer'io kanalas/visibility keičia outlet ir kt. facets.
+    _bump_catalog_facets_cache()
 
 
 for _sender in (Category, Product):
