@@ -132,9 +132,16 @@ def inventory_item_listing_bump(sender, instance, update_fields=None, **kwargs):
     }:
         return
     bump_listing_ver()
-    # Facets (outlet) priklauso tik nuo offer_visibility, ne nuo kainų.
-    if update_fields is None or "offer_visibility" in update_fields:
+    # Facets (outlet) nepriklauso nuo kainų – kainų importas cache negriauna.
+    if update_fields is None or not set(update_fields) <= _OFFER_PRICE_FIELDS:
         _bump_catalog_facets_cache()
+
+
+_OFFER_PRICE_FIELDS = {
+    "qty_on_hand", "qty_reserved", "updated_at",
+    "offer_price_override_eur", "offer_discount_percent", "cost_eur",
+    "never_discount",
+}
 
 
 for _sender in (Category, Product):
