@@ -34,7 +34,7 @@ def money_from_net(*, currency: str, unit_net: Decimal, vat_rate: Decimal, qty: 
     )
 
 
-def get_shipping_net(*, shipping_method: str, country_code: str) -> Decimal:
+def get_shipping_net(*, shipping_method: str, country_code: str, allow_legacy: bool = False) -> Decimal:
     from shipping.models import ShippingRate
 
     shipping_method = (shipping_method or "").strip()
@@ -58,8 +58,8 @@ def get_shipping_net(*, shipping_method: str, country_code: str) -> Decimal:
     if rate:
         return Decimal(rate.net_eur)
 
-    # Backward-compatible fallback for older setups.
-    if shipping_method in {"lpexpress", "unisend_pickup"}:
+    # Tik senų užsakymų perskaičiavimui; checkout'e išjungtas būdas atmetamas.
+    if allow_legacy and shipping_method in {"lpexpress", "unisend_pickup"}:
         return Decimal(str(getattr(settings, "LPEXPRESS_SHIPPING_NET_EUR", "0.00")))
 
     raise ValueError("Unsupported shipping_method")

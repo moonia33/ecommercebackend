@@ -378,6 +378,7 @@ class Order(models.Model):
                 shipping_net = get_shipping_net(
                     shipping_method=self.shipping_method,
                     country_code=self.country_code,
+                    allow_legacy=True,
                 )
             except ValueError:
                 shipping_net = Decimal("0.00")

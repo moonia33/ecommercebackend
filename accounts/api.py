@@ -108,23 +108,9 @@ def _pickup_snapshot_from_dpd(*, pickup_point_id: str):
     }
 
 
-def _pickup_snapshot_from_unisend(*, pickup_point_id: str):
-    from unisend.models import UnisendTerminal
-
-    t = UnisendTerminal.objects.filter(terminal_id=pickup_point_id, is_active=True).first()
-    if not t:
-        raise HttpError(400, "Invalid pickup_point_id")
-    return {
-        "pickup_point_name": str(t.name or "").strip(),
-        "pickup_point_raw": t.raw or {},
-        "country_code": str(t.country_code or "").strip().upper(),
-    }
-
 
 PICKUP_POINT_SNAPSHOT_RESOLVERS = {
     "dpd": _pickup_snapshot_from_dpd,
-    "unisend": _pickup_snapshot_from_unisend,
-    "lpexpress": _pickup_snapshot_from_unisend,
 }
 
 

@@ -111,7 +111,7 @@ class CheckoutPreviewIn(Schema):
     # Optional: digital-only carts (gift cards) don't ship — backend
     # falls back to the user's default billing/shipping address.
     shipping_address_id: int | None = None
-    shipping_method: str = "unisend_pickup"
+    shipping_method: str = ""
     pickup_point_id: str | None = None
     payment_method: str = "bank_transfer"
     channel: str = "normal"
@@ -160,7 +160,7 @@ class ConsentDefinitionOut(Schema):
 class CheckoutConfirmIn(Schema):
     # Optional for digital-only carts; otherwise required.
     shipping_address_id: int | None = None
-    shipping_method: str = "unisend_pickup"
+    shipping_method: str = ""
     pickup_point_id: str | None = None
     payment_method: str = "bank_transfer"
     # Montonio: banko kodas (preferredProvider, pvz. "HABALT22")

@@ -11,7 +11,6 @@ from catalog_import.api import router as catalog_import_router
 from payments.api import router as payments_router
 from pricing.api import router as pricing_router
 from dpd.api import router as dpd_router
-from unisend.api import router as unisend_router
 from cms.api import router as cms_router
 from legal.api import router as legal_router
 from homebuilder.api import router as home_router
@@ -39,7 +38,6 @@ api.add_router("/ops", checkout_ops_router)
 api.add_router("/ops/imports", catalog_import_router)
 api.add_router("/payments", payments_router)
 api.add_router("/dpd", dpd_router)
-api.add_router("/unisend", unisend_router)
 api.add_router("/cms", cms_router)
 api.add_router("/legal", legal_router)
 from notifications.api import router as newsletter_router

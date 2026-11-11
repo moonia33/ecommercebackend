@@ -181,8 +181,10 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
 
     shipping_method = (
         "digital" if is_digital
-        else (payload.shipping_method or "").strip() or "unisend_pickup"
+        else (payload.shipping_method or "").strip()
     )
+    if not shipping_method:
+        raise HttpError(400, "shipping_method is required")
     payment_method = (getattr(payload, "payment_method", "") or "").strip() or "bank_transfer"
     channel = (getattr(payload, "channel", "normal") or "normal").strip().lower()
     if channel not in {"normal", "outlet"}:
@@ -444,8 +446,10 @@ def checkout_confirm(request, payload: CheckoutConfirmIn):
 
     shipping_method = (
         "digital" if is_digital
-        else (payload.shipping_method or "").strip() or "unisend_pickup"
+        else (payload.shipping_method or "").strip()
     )
+    if not shipping_method:
+        raise HttpError(400, "shipping_method is required")
     pickup_point_id = (
         None if is_digital
         else _maybe_fill_pickup_point_id_from_user(

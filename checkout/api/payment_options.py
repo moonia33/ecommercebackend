@@ -383,7 +383,6 @@ def shipping_methods(request, country_code: str = "LT"):
         if m.id in rates:
             shipping_net = Decimal(rates[m.id].net_eur)
         else:
-            # Backward-compatible fallback: allow lpexpress via env even without DB config.
             try:
                 shipping_net = get_shipping_net(
                     shipping_method=m.code, country_code=country_code
@@ -412,10 +411,6 @@ def shipping_methods(request, country_code: str = "LT"):
                 if carrier == "dpd":
                     pickup_points_url = request.build_absolute_uri(
                         f"/api/v1/dpd/lockers?country_code={country_code}"
-                    )
-                elif carrier in {"unisend", "lpexpress"}:
-                    pickup_points_url = request.build_absolute_uri(
-                        f"/api/v1/unisend/terminals?country_code={country_code}"
                     )
         except Exception:
             pickup_points_url = ""

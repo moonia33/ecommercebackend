@@ -425,36 +425,16 @@ def _resolve_pickup_dpd(*, pickup_point_id: str, country_code: str):
     return locker, None
 
 
-def _resolve_pickup_unisend(*, pickup_point_id: str, country_code: str):
-    from unisend.models import UnisendTerminal
-
-    terminal = UnisendTerminal.objects.filter(terminal_id=pickup_point_id, is_active=True).first()
-    if not terminal:
-        raise HttpError(400, "Invalid pickup_point_id")
-    if terminal.country_code and country_code and terminal.country_code.upper() != country_code:
-        raise HttpError(400, "pickup_point_id country mismatch")
-
-    snapshot = {
-        "pickup_point_id": str(terminal.terminal_id or "").strip(),
-        "pickup_point_name": str(terminal.name or "").strip(),
-        "pickup_point_raw": terminal.raw or {},
-    }
-
-    # For Unisend we don't have a dedicated FK on Order yet (pickup_locker points to dpd.DpdLocker).
-    return None, snapshot
-
 
 PICKUP_POINT_RESOLVERS = {
     "dpd": _resolve_pickup_dpd,
-    "unisend": _resolve_pickup_unisend,
-    "lpexpress": _resolve_pickup_unisend,
 }
 
 
 def _validate_and_resolve_pickup(*, shipping_method: str, pickup_point_id: str | None, country_code: str):
     from shipping.models import ShippingMethod
 
-    shipping_method = (shipping_method or "").strip() or "unisend_pickup"
+    shipping_method = (shipping_method or "").strip()
     pickup_point_id = (pickup_point_id or "").strip() or None
     country_code = (country_code or "").strip().upper()
 
