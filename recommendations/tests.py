@@ -10,19 +10,31 @@ from accounts.jwt_utils import issue_access_token
 from analytics.models import RecentlyViewedProduct
 from api.models import Shop, ShopLanguage
 from catalog.models import (
+    Activity,
     Category,
     Feature,
     FeatureValue,
     InventoryItem,
     Product,
+    ProductActivity,
     ProductFeatureValue,
     TaxClass,
     Variant,
     Warehouse,
 )
 from checkout.models import Cart, CartItem, Order, OrderLine
-from recommendations.models import ProductCooccur, ProductRelation
-from recommendations.services import rebuild_cooccurrence
+from recommendations.models import (
+    ProductCooccur,
+    ProductMomentum,
+    ProductRelation,
+    SeasonalBoost,
+)
+from recommendations.services import (
+    context_multipliers,
+    popular_product_ids,
+    rebuild_cooccurrence,
+    rebuild_momentum,
+)
 
 User = get_user_model()
 
@@ -318,3 +330,151 @@ class CooccurrenceRebuildTests(RecommendationBase):
         stats = rebuild_cooccurrence()
         self.assertEqual(stats["pairs"], 0)
         self.assertEqual(ProductCooccur.objects.count(), 0)
+
+
+class ScoringTests(RecommendationBase):
+    def test_rebuild_computes_weight_and_score(self):
+        user = User.objects.create_user(
+            email="s@example.com", password="pass1234")
+        a = self._product("A", category=self.cat_carp)
+        b = self._product("B", category=self.cat_carp)
+        c = self._product("C", category=self.cat_spin)
+
+        self._paid_order(user, a, b)
+        self._paid_order(user, a, b, c)
+
+        rebuild_cooccurrence()
+        ab = ProductCooccur.objects.get(product_a=a, product_b=b)
+        # orders: a=2, b=2, c=1 (visi ~w=1, švieži) → score=2/sqrt(2*2)=1.0
+        self.assertEqual(ab.order_count, 2)
+        self.assertAlmostEqual(ab.weight, 2.0, places=2)
+        self.assertAlmostEqual(ab.score, 1.0, places=2)
+        ac = ProductCooccur.objects.get(product_a=a, product_b=c)
+        self.assertAlmostEqual(ac.score, 1 / (2 ** 0.5), places=2)
+
+    def test_score_normalization_demotes_bestseller(self):
+        # HOT bendrai perkama su viskuo → žemas score nepaisant aukšto count.
+        src = self._product("A", category=self.cat_carp)
+        hot = self._product("HOT", category=self.cat_spin)
+        niche = self._product("NIC", category=self.cat_spin)
+        ProductCooccur.objects.create(
+            product_a=src, product_b=hot, order_count=10, score=0.05)
+        ProductCooccur.objects.create(
+            product_a=src, product_b=niche, order_count=2, score=0.9)
+
+        res = self._get(f"/products/{src.slug}")
+        ids = [p["slug"] for p in res.json()]
+        self.assertLess(ids.index(niche.slug), ids.index(hot.slug))
+
+    def test_time_decay_old_order_weighs_less(self):
+        user = User.objects.create_user(
+            email="d@example.com", password="pass1234")
+        a = self._product("A", category=self.cat_carp)
+        b = self._product("B", category=self.cat_carp)
+        c = self._product("C", category=self.cat_spin)
+
+        fresh = self._paid_order(user, a, b)
+        old = self._paid_order(user, a, c)
+        Order.objects.filter(id=old.id).update(
+            created_at=timezone.now() - timezone.timedelta(days=120))
+
+        rebuild_cooccurrence(lookback_days=180)
+        ab = ProductCooccur.objects.get(product_a=a, product_b=b)
+        ac = ProductCooccur.objects.get(product_a=a, product_b=c)
+        self.assertAlmostEqual(ab.weight, 1.0, places=2)
+        # 120 d. / 60 d. half-life → 0.5^2 = 0.25
+        self.assertAlmostEqual(ac.weight, 0.25, places=2)
+
+
+class MomentumAndBoostTests(RecommendationBase):
+    def setUp(self):
+        super().setUp()
+        self.activity_ice = Activity.objects.create(
+            code="poledine", name="Poledinė žūklė")
+        self.activity_spin = Activity.objects.create(
+            code="spiningine", name="Spiningavimas")
+
+    def _link_activity(self, product, activity):
+        return ProductActivity.objects.create(
+            product=product, activity=activity, source="manual")
+
+    def test_momentum_recent_spike_clamped_high(self):
+        user = User.objects.create_user(
+            email="m@example.com", password="pass1234")
+        hot = self._product("HOT", category=self.cat_carp)
+        steady = self._product("STD", category=self.cat_carp)
+
+        # steady: pardavimai baseline lange (prieš 30 d.), jokių recent
+        o = self._paid_order(user, steady)
+        Order.objects.filter(id=o.id).update(
+            created_at=timezone.now() - timezone.timedelta(days=30))
+        # hot: tik recent pardavimai
+        self._paid_order(user, hot)
+        self._paid_order(user, hot)
+
+        stats = rebuild_momentum()
+        self.assertEqual(stats["products"], 2)
+        m_hot = ProductMomentum.objects.get(product=hot)
+        m_std = ProductMomentum.objects.get(product=steady)
+        self.assertGreater(m_hot.momentum, 1.0)
+        self.assertLess(m_std.momentum, 1.0)
+        self.assertEqual(m_hot.sales_recent, 2)
+
+    def test_manual_boost_lifts_activity_products(self):
+        src = self._product("A", category=self.cat_carp)
+        same_cat = self._product("S", category=self.cat_carp)
+        ice = self._product("ICE", category=self.cat_spin)
+        self._link_activity(ice, self.activity_ice)
+
+        SeasonalBoost.objects.create(
+            name="Atšalo — ledas", mode="manual",
+            activity=self.activity_ice, boost="2.00", is_active=True)
+
+        res = self._get(f"/products/{src.slug}")
+        ids = [p["slug"] for p in res.json()]
+        # Be boost'o same_cat (ta pati kategorija) eitų pirma fallback'e;
+        # boost ×2 iškelia ICE aukščiau.
+        self.assertEqual(ids[0], ice.slug)
+
+    def test_manual_boost_expired_is_inactive(self):
+        b = SeasonalBoost(
+            name="Stintos", mode="manual",
+            activity=self.activity_ice, boost="2.00", is_active=True,
+            expires_at=timezone.now() - timezone.timedelta(hours=1))
+        self.assertFalse(b.is_currently_active())
+
+    def test_scheduled_window_wraps_year(self):
+        ice_boost = SeasonalBoost(
+            name="Žiema", mode="scheduled",
+            activity=self.activity_ice, boost="2.00",
+            start_mmdd="12-15", end_mmdd="02-28", is_active=True)
+        import datetime
+
+        jan = timezone.make_aware(datetime.datetime(2026, 1, 10))
+        jul = timezone.make_aware(datetime.datetime(2026, 7, 10))
+        self.assertTrue(ice_boost.is_currently_active(now=jan))
+        self.assertFalse(ice_boost.is_currently_active(now=jul))
+
+    def test_context_multipliers_combines_boost_and_momentum(self):
+        p = self._product("P", category=self.cat_carp)
+        self._link_activity(p, self.activity_ice)
+        SeasonalBoost.objects.create(
+            name="Ledas", mode="manual",
+            activity=self.activity_ice, boost="2.00", is_active=True)
+        ProductMomentum.objects.create(
+            product=p, momentum=1.5, sales_recent=3, baseline_daily=0.1)
+
+        mult = context_multipliers([p.id])
+        self.assertAlmostEqual(mult[p.id], 3.0, places=2)
+
+    def test_popular_prefers_recent_sellers(self):
+        user = User.objects.create_user(
+            email="p@example.com", password="pass1234")
+        seller = self._product("SEL", category=self.cat_carp)
+        stale = self._product("STL", category=self.cat_carp)
+        self._paid_order(user, seller)
+        self._paid_order(user, seller)
+
+        ids = popular_product_ids(
+            shop_id=self.shop.id, channel="normal", limit=10)
+        self.assertLess(ids.index(seller.id), ids.index(stale.id))

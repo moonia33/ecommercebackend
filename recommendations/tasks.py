@@ -3,6 +3,8 @@ from celery import shared_task
 
 @shared_task
 def rebuild_product_cooccurrence_task() -> dict:
-    from .services import rebuild_cooccurrence
+    from .services import rebuild_cooccurrence, rebuild_momentum
 
-    return rebuild_cooccurrence()
+    stats = rebuild_cooccurrence()
+    stats["momentum"] = rebuild_momentum()
+    return stats

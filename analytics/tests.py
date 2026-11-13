@@ -5,7 +5,7 @@ import uuid
 
 from django.test import TestCase, override_settings
 
-from analytics.models import CookieConsentRecord
+from analytics.models import AnalyticsEvent, CookieConsentRecord
 from api.models import Shop, ShopConfig
 
 
@@ -72,6 +72,53 @@ class CookieConsentTests(TestCase):
             data=json.dumps({"consent_id": "x", "version": 1, "action": "custom"}),
             content_type="application/json")
         self.assertEqual(res.status_code, 422)
+
+
+@override_settings(ALLOWED_HOSTS=["*"])
+class RecEventsTests(TestCase):
+    def test_impression_and_click_recorded(self):
+        res = self.client.post(
+            "/api/v1/analytics/rec-events",
+            data=json.dumps({"events": [
+                {"name": "recommendation_impression", "kind": "cross_sell",
+                 "placement": "pdp", "seed": "slug-a", "nonce": "n1",
+                 "items": [{"product_id": 11, "position": 0},
+                           {"product_id": 12, "position": 1}]},
+                {"name": "recommendation_click", "kind": "cross_sell",
+                 "placement": "pdp", "product_id": 12, "position": 1,
+                 "nonce": "c1"},
+            ]}),
+            content_type="application/json")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.json()["accepted"], 2)
+
+        imp = AnalyticsEvent.objects.get(name="recommendation_impression")
+        self.assertEqual(imp.payload["kind"], "cross_sell")
+        self.assertEqual(len(imp.payload["items"]), 2)
+        click = AnalyticsEvent.objects.get(name="recommendation_click")
+        self.assertEqual(click.object_type, "product")
+        self.assertEqual(click.object_id, 12)
+
+    def test_unknown_name_rejected(self):
+        res = self.client.post(
+            "/api/v1/analytics/rec-events",
+            data=json.dumps({"events": [{"name": "purchase"}]}),
+            content_type="application/json")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["accepted"], 0)
+        self.assertEqual(AnalyticsEvent.objects.count(), 0)
+
+    def test_same_nonce_deduped(self):
+        body = json.dumps({"events": [
+            {"name": "recommendation_click", "product_id": 5, "nonce": "dup"},
+            {"name": "recommendation_click", "product_id": 5, "nonce": "dup"},
+        ]})
+        res = self.client.post("/api/v1/analytics/rec-events",
+                               data=body, content_type="application/json")
+        self.assertEqual(res.json()["accepted"], 2)
+        self.assertEqual(
+            AnalyticsEvent.objects.filter(
+                name="recommendation_click").count(), 1)
 
 
 @override_settings(ALLOWED_HOSTS=["*"], SHOP_CONTEXT_ENABLED=True)
