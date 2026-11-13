@@ -145,6 +145,26 @@ Visi endpoint'ai grąžina `ProductListOut[]` — tą pačią produkto kortelę 
 
 Bendri parametrai: `country_code` (default `LT`), `channel` (`normal`/`outlet`), `limit` (max 24). Visos rekomendacijos rodo tik in-stock prekes dabartiniame shop kontekste.
 
+#### Rekomendacijų tracking'as (impressions/clicks)
+
+`POST /api/v1/analytics/rec-events` — siunčia rekomendacijų rodymų ir paspaudimų įvykius (reikalingas `analytics` cookie consent). Batch'as — iki 10 event'ų per request'ą:
+
+```json
+{"events": [
+  {"name": "recommendation_impression", "kind": "cross_sell",
+   "placement": "pdp", "seed": "slug-prekes", "nonce": "unik-1",
+   "items": [{"product_id": 11, "position": 0}, {"product_id": 12, "position": 1}]},
+  {"name": "recommendation_click", "kind": "cross_sell",
+   "placement": "pdp", "product_id": 12, "position": 1, "nonce": "unik-2"}
+]}
+```
+
+- `impression` — **vienas event'as per sąrašą** su `items` (max 24) — siųsti kai blokas realiai matomas (IntersectionObserver), ne vieną kartą per prekę.
+- `click` — per paspaudimą, su `product_id` ir `position`.
+- `nonce` — kliento generuojamas unikalus ID per įvykį: deduplikuoja FE double-fire (StrictMode, remount). Tas pats nonce → įrašomas vieną kartą.
+- `placement` — laisvas tekstas iki 32 simbolių (`pdp`, `cart`, `home`, `order-confirm`...), `kind` — rekomendacijų tipas, `seed` — PDP slug arba tuščia.
+- Rate limit: 240 request'ų/IP/val.; viršijus — `429`.
+
 ## 5. Checkout srautas (privalomas)
 
 ### Cart

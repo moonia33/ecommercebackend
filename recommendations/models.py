@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
+from django.utils import timezone
 
 
 class ProductRelation(models.Model):
@@ -74,6 +75,11 @@ class ProductCooccur(models.Model):
 
     product_a_id < product_b_id is enforced by convention (CheckConstraint).
     Rebuilt periodically from paid OrderLine data.
+
+    `order_count` — žalias porų kiekis (admin matomumui).
+    `weight` — time-decay svertas (half-life iš RECOMMENDATION_HALF_LIFE_DAYS).
+    `score` — cosine-lift normalizacija: weight / sqrt(orders_a * orders_b),
+    kad bestseller'iai nedomintų visų rekomendacijų.
     """
 
     product_a = models.ForeignKey(
@@ -87,10 +93,12 @@ class ProductCooccur(models.Model):
         related_name="cooccur_b",
     )
     order_count = models.PositiveIntegerField(default=0)
+    weight = models.FloatField(default=0)
+    score = models.FloatField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["-order_count"]
+        ordering = ["-score", "-order_count"]
         constraints = [
             models.UniqueConstraint(
                 fields=["product_a", "product_b"],
@@ -102,9 +110,167 @@ class ProductCooccur(models.Model):
             ),
         ]
         indexes = [
-            models.Index(fields=["product_a", "-order_count"]),
-            models.Index(fields=["product_b", "-order_count"]),
+            models.Index(fields=["product_a", "-score"]),
+            models.Index(fields=["product_b", "-score"]),
         ]
 
     def __str__(self) -> str:
         return f"{self.product_a_id} <> {self.product_b_id} ({self.order_count})"
+
+
+class ProductMomentum(models.Model):
+    """Trumpalaikis pardavimų pagreitis — sezoninių šuolių gaudymui.
+
+    momentum = paskutinių REC_MOMENTUM_RECENT_DAYS pardavimų santykis su
+    baseline (REC_MOMENTUM_BASELINE_DAYS langu) vidurkiu, su clamp ribomis.
+    Staiga atšalus poledinės įrangos momentum iššoka per kelias dienas —
+    rekomendacijos pasislenka be jokio admin'o įsikišimo.
+    """
+
+    product = models.OneToOneField(
+        "catalog.Product",
+        on_delete=models.CASCADE,
+        related_name="momentum",
+    )
+    momentum = models.FloatField(default=1.0)
+    sales_recent = models.PositiveIntegerField(default=0)
+    baseline_daily = models.FloatField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-momentum"]
+
+    def __str__(self) -> str:
+        return f"{self.product_id} momentum={self.momentum:.2f}"
+
+
+class SeasonalBoost(models.Model):
+    """Sezoninis rekomendacijų boost/demote kontekstas.
+
+    Dvi formos:
+      - SCHEDULED: kasmet kartojamas MM-DD langukas (neršto draudimai,
+        tipiniai sezonai) — užpildoma kartą, kartojasi kasmet;
+      - MANUAL: admin'o trigger'is („pasirodė stintos", „susidarė ledas")
+        su `expires_at` TTL — nereikia nieko išjunginėti.
+
+    Taikoma kaip score multiplikatorius Tier 2/3 kandidatams ir
+    popular_product_ids — request metu, efektas iškart. boost < 1
+    demote'ina (draudimai — žmonės perka ir sezonui iš anksto, todėl
+    ne slepiam, o numušam žemyn).
+    """
+
+    class Mode(models.TextChoices):
+        SCHEDULED = "scheduled", "Scheduled (annual MM-DD window)"
+        MANUAL = "manual", "Manual trigger"
+
+    name = models.CharField(max_length=128)
+    activity = models.ForeignKey(
+        "catalog.Activity",
+        null=True, blank=True,
+        on_delete=models.CASCADE,
+        related_name="seasonal_boosts",
+        help_text="Veikla (poledinė žūklė, stintos...). Sritis apima ir vaikus.",
+    )
+    category = models.ForeignKey(
+        "catalog.Category",
+        null=True, blank=True,
+        on_delete=models.CASCADE,
+        related_name="+",
+        help_text="Alternatyva veiklos targeting'ui (su MPTT vaikais).",
+    )
+    boost = models.DecimalField(
+        max_digits=5, decimal_places=2, default=1.5,
+        help_text=">1 boost'ina (pvz. 2.0), <1 demote'ina (pvz. 0.4).",
+    )
+    mode = models.CharField(max_length=16, choices=Mode.choices, default=Mode.SCHEDULED)
+    start_mmdd = models.CharField(
+        max_length=5, blank=True,
+        help_text="SCHEDULED: 'MM-DD', pvz. '12-15'.",
+    )
+    end_mmdd = models.CharField(
+        max_length=5, blank=True,
+        help_text="SCHEDULED: 'MM-DD'; jei < start — langas per metų ribą.",
+    )
+    is_active = models.BooleanField(default=True)
+    expires_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="MANUAL: auto-išsijungia po šio laiko (TTL).",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["mode", "name"]
+        indexes = [
+            models.Index(fields=["is_active", "mode"]),
+        ]
+
+    def clean(self):
+        super().clean()
+        import re
+
+        if not self.activity_id and not self.category_id:
+            raise ValidationError(
+                "Reikia activity arba category target'o — kitaip boost'as nieko nepataikys."
+            )
+        if self.mode == self.Mode.SCHEDULED:
+            for f in ("start_mmdd", "end_mmdd"):
+                v = getattr(self, f) or ""
+                if not re.fullmatch(r"(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])", v):
+                    raise ValidationError({f: "Reikalingas 'MM-DD' formatas."})
+
+    def is_currently_active(self, *, now=None) -> bool:
+        if not self.is_active:
+            return False
+        now = now or timezone.now()
+        if self.expires_at and self.expires_at <= now:
+            return False
+        if self.mode == self.Mode.MANUAL:
+            return True
+        if not self.start_mmdd or not self.end_mmdd:
+            return False
+        today = now.strftime("%m-%d")
+        if self.start_mmdd <= self.end_mmdd:
+            return self.start_mmdd <= today <= self.end_mmdd
+        return today >= self.start_mmdd or today <= self.end_mmdd
+
+    def __str__(self) -> str:
+        return f"{self.name} (×{self.boost})"
+
+
+class RecommendationSnapshot(models.Model):
+    """Precomputed kandidatų sąrašas per seed prekę × kind.
+
+    Naktinis task'as skaičiuoja pilną waterfall'ą (manual→cooccur→fallback)
+    su limit=REC_SNAPSHOT_SIZE, diversify=False ir be konteksto
+    (apply_context=False — sezoniniai boost'ai/momentum taikomi request
+    metu, kad admin'o trigger'iai veiktų iškart).
+
+    Globalus pool'as (be shop scope): request metu Tier 1 manual
+    perskaitomas live, tail'as filtruojamas per in-stock/shop-scope —
+    scope/outlet taisyklės lieka tikslios.
+    """
+
+    seed_product = models.ForeignKey(
+        "catalog.Product",
+        on_delete=models.CASCADE,
+        related_name="recommendation_snapshots",
+    )
+    kind = models.CharField(max_length=20, choices=ProductRelation.Kind.choices)
+    ranked_ids = models.JSONField(default=list)
+    computed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["seed_product_id", "kind"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["seed_product", "kind"],
+                name="uniq_rec_snapshot_seed_kind",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["seed_product", "kind"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.seed_product_id} ({self.kind}): {len(self.ranked_ids or [])} ids"

@@ -12,9 +12,18 @@ from catalog.api.shared import list_price_exprs, offer_price_exprs
 from catalog.models import InventoryItem, Product, ProductFeatureValue
 from catalog.shop_scope import apply_shop_product_scope
 
-from .models import ProductCooccur, ProductRelation
+from .models import (
+    ProductCooccur,
+    ProductMomentum,
+    ProductRelation,
+    RecommendationSnapshot,
+    SeasonalBoost,
+)
 
 DEFAULT_KINDS = (ProductRelation.Kind.CROSS_SELL,)
+
+_BOOST_CACHE_KEY = "recs:boosts:v1"
+_BOOST_CACHE_SECONDS = 30
 
 
 def _visibility_for_channel(channel: str) -> str:
@@ -92,7 +101,7 @@ def _manual_relation_ids(*, seed_ids, kinds) -> list[int]:
 def _cooccur_scores(*, seed_ids) -> Counter:
     rows = ProductCooccur.objects.filter(
         Q(product_a_id__in=seed_ids) | Q(product_b_id__in=seed_ids)
-    ).values("product_a_id", "product_b_id", "order_count")
+    ).values("product_a_id", "product_b_id", "score", "order_count")
     scores: Counter = Counter()
     for r in rows:
         other = (
@@ -101,8 +110,111 @@ def _cooccur_scores(*, seed_ids) -> Counter:
             else r["product_a_id"]
         )
         if other not in seed_ids:
-            scores[other] += r["order_count"]
+            # `score` (cosine-lift) dominuoja; `order_count` — fallback
+            # eilutėms, sukurtoms prieš score backfill'ą.
+            scores[other] += r["score"] or r["order_count"]
     return scores
+
+
+def _active_boosts() -> list[SeasonalBoost]:
+    """Aktyvios sezoninės taisyklės (scheduled langas arba manual trigger).
+
+    Cache ~30s — admin'o manual trigger'iai („pasirodė stintos") beveik
+    akimirksniu persikelia į ranking'ą be jokio rebuild'o.
+    """
+    from django.core.cache import cache
+
+    rows = cache.get(_BOOST_CACHE_KEY)
+    if rows is None:
+        rows = [
+            b for b in SeasonalBoost.objects.filter(is_active=True)
+            .select_related("activity", "category")
+            if b.is_currently_active()
+        ]
+        cache.set(_BOOST_CACHE_KEY, rows, _BOOST_CACHE_SECONDS)
+    return list(rows)
+
+
+def invalidate_boost_cache(**kwargs) -> None:
+    from django.core.cache import cache
+
+    cache.delete(_BOOST_CACHE_KEY)
+
+
+def context_multipliers(product_ids) -> dict[int, float]:
+    """Sezoninių boost'ų × momentum multiplikatoriai kandidatams.
+
+    Grąžina {product_id: multiplier} — tik tie, kurie != 1.0. Taikoma
+    request-time re-rank'e (Tier 2/3 + popular), tad manual trigger'io
+    efektas matomas iškart, ne po naktinio rebuild'o.
+    """
+    ids = list(dict.fromkeys(int(i) for i in product_ids if i))
+    if not ids:
+        return {}
+
+    boosts = _active_boosts()
+    momentum = {
+        int(m.product_id): float(m.momentum)
+        for m in ProductMomentum.objects.filter(product_id__in=ids)
+    }
+    if not boosts and not momentum:
+        return {}
+
+    act_of: dict[int, set[int]] = {}
+    parent_of: dict[int, int | None] = {}
+    prod_cat: dict[int, tuple] = {}
+    boost_cat_coords: dict[int, tuple] = {}
+
+    if boosts:
+        from catalog.models import Activity, Category, ProductActivity
+
+        for pid, aid in ProductActivity.objects.filter(
+            product_id__in=ids
+        ).values_list("product_id", "activity_id"):
+            act_of.setdefault(int(pid), set()).add(int(aid))
+
+        needed_acts = {a for s in act_of.values() for a in s}
+        needed_acts |= {b.activity_id for b in boosts if b.activity_id}
+        for a in Activity.objects.filter(id__in=needed_acts).only("id", "parent_id"):
+            parent_of[int(a.id)] = a.parent_id
+
+        boost_cats = {b.category_id for b in boosts if b.category_id}
+        if boost_cats:
+            for cid, tid, lft, rght in Category.objects.filter(
+                id__in=boost_cats
+            ).values_list("id", "tree_id", "lft", "rght"):
+                boost_cat_coords[int(cid)] = (int(tid), int(lft), int(rght))
+            for pid, tid, lft, rght in Product.objects.filter(
+                id__in=ids, category__isnull=False
+            ).values_list("id", "category__tree_id", "category__lft",
+                          "category__rght"):
+                prod_cat[int(pid)] = (int(tid), int(lft), int(rght))
+
+    def _matches(pid: int, b: SeasonalBoost) -> bool:
+        if b.activity_id:
+            prod_acts = act_of.get(pid) or set()
+            if int(b.activity_id) in prod_acts:
+                return True
+            # Boost'as ant srities (parent) apima visas jos veiklas.
+            if any(parent_of.get(a) == int(b.activity_id) for a in prod_acts):
+                return True
+        if b.category_id:
+            bc = boost_cat_coords.get(int(b.category_id))
+            pc = prod_cat.get(pid)
+            if bc and pc and pc[0] == bc[0] and pc[1] >= bc[1] and pc[2] <= bc[2]:
+                return True
+        return False
+
+    out: dict[int, float] = {}
+    for pid in ids:
+        mult = 1.0
+        for b in boosts:
+            if _matches(pid, b):
+                mult *= float(b.boost)
+        mult *= momentum.get(pid, 1.0)
+        if mult != 1.0:
+            out[pid] = mult
+    return out
 
 
 def _fallback_scored_ids(*, seeds, seed_ids, exclude, shop_id, channel, limit) -> list[int]:
@@ -180,6 +292,20 @@ def _fallback_scored_ids(*, seeds, seed_ids, exclude, shop_id, channel, limit) -
     return _ranked(base)
 
 
+def _snapshot_for_request(*, seeds, kinds) -> list[int] | None:
+    """Precomputed tail'as PDP keliui: tik 1 seed × 1 kind.
+
+    Multi-seed (cart/for-you) ir multi-kind (post-purchase) keliai lieka
+    live — jie personalizuoti ir nėra hot-path kaip PDP.
+    """
+    if len(seeds) != 1 or len(kinds) != 1:
+        return None
+    row = RecommendationSnapshot.objects.filter(
+        seed_product_id=seeds[0].id, kind=kinds[0],
+    ).values_list("ranked_ids", flat=True).first()
+    return list(row) if row else None
+
+
 def recommend_product_ids(
     *,
     seed_products,
@@ -189,8 +315,13 @@ def recommend_product_ids(
     limit: int,
     exclude_ids=(),
     diversify: bool = True,
+    apply_context: bool = True,
 ) -> list[int]:
-    """Ranked product ids: manual relations -> co-purchase -> feature fallback."""
+    """Ranked product ids: manual relations -> co-purchase -> feature fallback.
+
+    `apply_context=False` naudojamas snapshot build'e — žalieji ranking'ai
+    be sezoninių boost'ų, kurie taikomi request-time re-rank'e.
+    """
     seeds = list(seed_products or [])
     seed_ids = {int(p.id) for p in seeds}
     exclude = set(int(i) for i in exclude_ids) | seed_ids
@@ -243,19 +374,45 @@ def recommend_product_ids(
     take(_in_stock_ids_ordered(manual_ids, shop_id=shop_id, channel=channel),
          apply_cap=False)
 
-    # Tier 2: purchase co-occurrence
+    # Tier 2/3: snapshot tail'as (PDP kelias) arba live waterfall'as
+    snap_ids = _snapshot_for_request(seeds=seeds, kinds=kinds) \
+        if len(picked) < limit else None
+
+    if snap_ids is not None:
+        if apply_context:
+            mult = context_multipliers(snap_ids)
+            if mult:
+                snap_ids = sorted(
+                    snap_ids, key=lambda pid: -mult.get(pid, 1.0))
+        take(_in_stock_ids_ordered(
+            snap_ids, shop_id=shop_id, channel=channel))
+        return picked
+
+    # Tier 2: purchase co-occurrence × sezoninis kontekstas
     if len(picked) < limit:
         scores = _cooccur_scores(seed_ids=seed_ids)
+        if apply_context and scores:
+            mult = context_multipliers(list(scores))
+            if mult:
+                for pid in list(scores):
+                    scores[pid] *= mult.get(pid, 1.0)
         co_ids = [pid for pid, _ in scores.most_common()]
         take(_in_stock_ids_ordered(co_ids, shop_id=shop_id, channel=channel))
 
-    # Tier 3: feature/group/category/brand fallback
+    # Tier 3: feature/group/category/brand fallback × sezoninis kontekstas
     if len(picked) < limit:
         fallback = _fallback_scored_ids(
             seeds=seeds, seed_ids=seed_ids,
             exclude=picked_set, shop_id=shop_id,
             channel=channel, limit=limit,
         )
+        if apply_context:
+            mult = context_multipliers(fallback)
+            if mult:
+                # Stabilus sort'as: boost'intos prekės kyla fallback eilėje,
+                # lygūs multiplikatoriai išsaugo originalų ranking'ą.
+                fallback = sorted(
+                    fallback, key=lambda pid: -mult.get(pid, 1.0))
         take(fallback)
         # Relax the cap if still short
         if len(picked) < limit:
@@ -271,16 +428,56 @@ def _in_stock_ids_ordered(ids, *, shop_id, channel) -> list[int]:
     return [int(i) for i in ids if int(i) in avail]
 
 
+def _recent_sales_map(*, days: int) -> dict[int, int]:
+    """Parduotų vnt. per produktą per `days` dienų (paid užsakymai)."""
+    from checkout.models import Order, OrderLine
+
+    since = timezone.now() - timezone.timedelta(days=days)
+    rows = (
+        OrderLine.objects
+        .filter(
+            order__status=Order.Status.PAID,
+            order__created_at__gte=since,
+            variant__isnull=False,
+        )
+        .values("variant__product_id")
+        .annotate(q=Sum("qty"))
+    )
+    return {int(r["variant__product_id"]): int(r["q"] or 0) for r in rows}
+
+
 def popular_product_ids(*, shop_id, channel, limit, exclude_ids=()) -> list[int]:
-    """Cold-start list: globally most co-purchased in-stock products."""
+    """Cold-start list: dabartinės paklausos in-stock prekės.
+
+    Ranking'as: paskutinių RECOMMENDATION_POPULAR_LOOKBACK_DAYS pardavimai
+    × sezoninis kontekstas, tiebreak'as — bendras co-purchase score
+    (× kontekstas). Anksčiau pildyta abėcėlės tvarka — rodė nieko
+    nenusakančias prekes.
+    """
     exclude = {int(i) for i in exclude_ids}
-    scores: Counter = Counter()
+    lookback = int(getattr(
+        settings, "RECOMMENDATION_POPULAR_LOOKBACK_DAYS", 30))
+
+    co_scores: Counter = Counter()
     for r in ProductCooccur.objects.values(
-        "product_a_id", "product_b_id", "order_count"
+        "product_a_id", "product_b_id", "score", "order_count"
     ):
-        scores[r["product_a_id"]] += r["order_count"]
-        scores[r["product_b_id"]] += r["order_count"]
-    ordered = [pid for pid, _ in scores.most_common() if pid not in exclude]
+        w = r["score"] or r["order_count"]
+        co_scores[r["product_a_id"]] += w
+        co_scores[r["product_b_id"]] += w
+
+    sales = _recent_sales_map(days=lookback)
+    mult = context_multipliers(set(co_scores) | set(sales))
+
+    pool = (set(co_scores) | set(sales)) - exclude
+    ordered = sorted(
+        pool,
+        key=lambda pid: (
+            -(sales.get(pid, 0) * mult.get(pid, 1.0)),
+            -(co_scores.get(pid, 0) * mult.get(pid, 1.0)),
+            pid,
+        ),
+    )
     out = _in_stock_ids_ordered(ordered, shop_id=shop_id, channel=channel)[:limit]
     if len(out) < limit:
         qs = _base_product_qs(shop_id=shop_id).exclude(
@@ -295,6 +492,14 @@ def popular_product_ids(*, shop_id, channel, limit, exclude_ids=()) -> list[int]
 def rebuild_cooccurrence(*, lookback_days: int | None = None) -> dict:
     """Rebuild the co-purchase matrix from paid orders (order-level pairs).
 
+    Kiekvienas užsakymas sveriamas eksponentiniu time decay
+    (0.5^(amžius/RECOMMENDATION_HALF_LIFE_DAYS)) — švieži sezoniniai
+    trendai nugali senus. Poros gauna tris matus:
+      - order_count: žalias porų kiekis (admin matomumui),
+      - weight: decay'd intas bendras co-purchase svoris,
+      - score: cosine-lift = weight / sqrt(orders_a * orders_b) —
+        normalizuoja bestseller bias (populiari prekė kartu su viskuo).
+
     Also refreshes auto ProductRelation(cross_sell) rows: top-N co-purchased
     neighbours per product become visible/editable in admin.
     """
@@ -303,6 +508,8 @@ def rebuild_cooccurrence(*, lookback_days: int | None = None) -> dict:
     if lookback_days is None:
         lookback_days = int(getattr(
             settings, "RECOMMENDATION_LOOKBACK_DAYS", 180))
+    half_life = float(getattr(
+        settings, "RECOMMENDATION_HALF_LIFE_DAYS", 60) or 60)
     since = timezone.now() - timezone.timedelta(days=lookback_days)
 
     rows = (
@@ -312,31 +519,56 @@ def rebuild_cooccurrence(*, lookback_days: int | None = None) -> dict:
             order__created_at__gte=since,
             variant__isnull=False,
         )
-        .values("order_id", "variant__product_id")
+        .values("order_id", "order__created_at", "variant__product_id")
         .distinct()
     )
+    now = timezone.now()
+    order_weight: dict[int, float] = {}
     products_per_order: dict[int, set[int]] = {}
     for r in rows:
-        products_per_order.setdefault(r["order_id"], set()).add(
+        oid = r["order_id"]
+        w = order_weight.get(oid)
+        if w is None:
+            age_days = max(
+                0.0, (now - r["order__created_at"]).total_seconds() / 86400)
+            w = 0.5 ** (age_days / half_life)
+            order_weight[oid] = w
+        products_per_order.setdefault(oid, set()).add(
             r["variant__product_id"])
 
     pair_counts: Counter = Counter()
-    for products in products_per_order.values():
+    pair_weight: Counter = Counter()
+    product_orders: Counter = Counter()
+    for oid, products in products_per_order.items():
+        w = order_weight[oid]
+        for pid in products:
+            product_orders[pid] += w
         if len(products) < 2:
             continue
         for a, b in combinations(sorted(products), 2):
             pair_counts[(a, b)] += 1
+            pair_weight[(a, b)] += w
+
+    pair_score: dict[tuple[int, int], float] = {}
+    for (a, b), w in pair_weight.items():
+        denom = (product_orders[a] * product_orders[b]) ** 0.5
+        pair_score[(a, b)] = w / denom if denom else 0.0
 
     neighbours: dict[int, Counter] = {}
-    for (a, b), cnt in pair_counts.items():
-        neighbours.setdefault(a, Counter())[b] = cnt
-        neighbours.setdefault(b, Counter())[a] = cnt
+    for (a, b), sc in pair_score.items():
+        neighbours.setdefault(a, Counter())[b] = sc
+        neighbours.setdefault(b, Counter())[a] = sc
 
     with transaction.atomic():
         ProductCooccur.objects.all().delete()
         ProductCooccur.objects.bulk_create([
-            ProductCooccur(product_a_id=a, product_b_id=b, order_count=cnt)
-            for (a, b), cnt in pair_counts.items()
+            ProductCooccur(
+                product_a_id=a, product_b_id=b,
+                order_count=pair_counts[(a, b)],
+                weight=pair_weight[(a, b)],
+                score=pair_score[(a, b)],
+            )
+            for (a, b) in pair_counts
         ])
 
         ProductRelation.objects.filter(
@@ -344,13 +576,14 @@ def rebuild_cooccurrence(*, lookback_days: int | None = None) -> dict:
         auto_relations = []
         top_n = int(getattr(settings, "RECOMMENDATION_AUTO_TOP_N", 20))
         for src_id, nbrs in neighbours.items():
-            for tgt_id, cnt in nbrs.most_common(top_n):
+            for tgt_id, _sc in nbrs.most_common(top_n):
                 auto_relations.append(ProductRelation(
                     source_product_id=src_id,
                     target_product_id=tgt_id,
                     kind=ProductRelation.Kind.CROSS_SELL,
                     source=ProductRelation.Source.AUTO,
-                    weight=cnt,
+                    # Žalias count'as — admin matomumas („kartu pirkta N kartų").
+                    weight=pair_counts[tuple(sorted((src_id, tgt_id)))],
                 ))
         ProductRelation.objects.bulk_create(
             auto_relations, ignore_conflicts=True)
@@ -369,4 +602,138 @@ def rebuild_cooccurrence(*, lookback_days: int | None = None) -> dict:
         "pairs": len(pair_counts),
         "auto_relations": len(auto_relations),
         "lookback_days": lookback_days,
+        "half_life_days": half_life,
     }
+
+
+def rebuild_momentum(*, recent_days: int | None = None,
+                     baseline_days: int | None = None) -> dict:
+    """Perproduktinis pardavimų momentum — sezoninių šuolių detektorius.
+
+    momentum = (recent + 1) / (expected + 1), kur expected =
+    baseline_daily × recent_days; clamp'intas [MIN, MAX]. Prekės be jokių
+    pardavimų lange neturi eilutės → lookup'e skaitoma 1.0 (neutralu).
+
+    „Staiga atšalo → ledas" scenarijus: poledinės įrangos pardavimai
+    iššoka per kelias dienas, momentum pakyla iki MAX ir Tier 2/3 bei
+    popular re-rank'as pasislenka be admin'o įsikišimo.
+    """
+    from checkout.models import Order, OrderLine
+
+    if recent_days is None:
+        recent_days = int(getattr(settings, "REC_MOMENTUM_RECENT_DAYS", 14))
+    if baseline_days is None:
+        baseline_days = int(getattr(settings, "REC_MOMENTUM_BASELINE_DAYS", 76))
+    lo = float(getattr(settings, "REC_MOMENTUM_MIN", 0.5))
+    hi = float(getattr(settings, "REC_MOMENTUM_MAX", 4.0))
+
+    now = timezone.now()
+    recent_since = now - timezone.timedelta(days=recent_days)
+    window_since = now - timezone.timedelta(days=recent_days + baseline_days)
+
+    rows = (
+        OrderLine.objects
+        .filter(
+            order__status=Order.Status.PAID,
+            order__created_at__gte=window_since,
+            variant__isnull=False,
+        )
+        .annotate(
+            _recent=Case(
+                When(order__created_at__gte=recent_since, then=Value(1)),
+                default=Value(0), output_field=IntegerField(),
+            )
+        )
+        .values("variant__product_id", "_recent")
+        .annotate(q=Sum("qty"))
+    )
+
+    recent: Counter = Counter()
+    baseline: Counter = Counter()
+    for r in rows:
+        pid = int(r["variant__product_id"])
+        if r["_recent"]:
+            recent[pid] += int(r["q"] or 0)
+        else:
+            baseline[pid] += int(r["q"] or 0)
+
+    objs = []
+    for pid in set(recent) | set(baseline):
+        baseline_daily = baseline[pid] / max(1, baseline_days)
+        expected = baseline_daily * recent_days
+        raw = (recent[pid] + 1.0) / (expected + 1.0)
+        objs.append(ProductMomentum(
+            product_id=pid,
+            momentum=min(hi, max(lo, raw)),
+            sales_recent=recent[pid],
+            baseline_daily=baseline_daily,
+        ))
+
+    with transaction.atomic():
+        ProductMomentum.objects.all().delete()
+        ProductMomentum.objects.bulk_create(objs)
+
+    return {
+        "products": len(objs),
+        "recent_days": recent_days,
+        "baseline_days": baseline_days,
+        "boosted": sum(1 for o in objs if o.momentum > 1.0),
+        "demoted": sum(1 for o in objs if o.momentum < 1.0),
+    }
+
+
+def build_snapshots(*, kinds=None, limit=None, flush_size=2000) -> dict:
+    """Naktinis snapshot'ų rebuild visoms aktyvioms prekėms × kind.
+
+    Saugo tik Tier 2/3 tail'ą (manual reliacijos nuimamos — request metu
+    jos vis tiek skaitomos live, o ištrinta reliacija neliktų snapshot'e
+    iki kito rebuild'o). Globalus pool'as (shop_id=None): shop-scope ir
+    in-stock filtrai taikomi request-time.
+
+    chunked iterator + update_conflicts upsert — senos eilutės išlaikomos
+    kol perrenkamos, PDP netampa tuščias rebuild'o metu.
+    """
+    kinds = kinds or [k.value for k in ProductRelation.Kind]
+    limit = int(getattr(settings, "REC_SNAPSHOT_SIZE", 100))
+
+    products = (
+        Product.objects.filter(is_active=True)
+        .only("id", "category", "brand", "group")
+        .iterator(chunk_size=500)
+    )
+
+    buffer: list[RecommendationSnapshot] = []
+    stats = {"products": 0, "snapshots": 0, "empty": 0}
+
+    def _flush():
+        if not buffer:
+            return
+        RecommendationSnapshot.objects.bulk_create(
+            buffer,
+            update_conflicts=True,
+            update_fields=["ranked_ids"],
+            unique_fields=["seed_product", "kind"],
+        )
+        buffer.clear()
+
+    for p in products:
+        stats["products"] += 1
+        manual = set(_manual_relation_ids(
+            seed_ids={int(p.id)}, kinds=tuple(kinds)))
+        for kind in kinds:
+            ids = recommend_product_ids(
+                seed_products=[p], kinds=(kind,),
+                shop_id=None, channel="normal",
+                limit=limit, diversify=False,
+                apply_context=False,
+            )
+            tail = [i for i in ids if i not in manual]
+            if not tail:
+                stats["empty"] += 1
+            buffer.append(RecommendationSnapshot(
+                seed_product_id=int(p.id), kind=kind, ranked_ids=tail))
+            stats["snapshots"] += 1
+        if len(buffer) >= flush_size:
+            _flush()
+    _flush()
+    return stats

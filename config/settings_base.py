@@ -29,6 +29,12 @@ env = environ.Env(
     RECENTLY_VIEWED_MAX=(int, 12),
     RECOMMENDATION_LOOKBACK_DAYS=(int, 180),
     RECOMMENDATION_AUTO_TOP_N=(int, 20),
+    RECOMMENDATION_HALF_LIFE_DAYS=(int, 60),
+    RECOMMENDATION_POPULAR_LOOKBACK_DAYS=(int, 30),
+    REC_MOMENTUM_RECENT_DAYS=(int, 14),
+    REC_MOMENTUM_BASELINE_DAYS=(int, 76),
+    REC_SNAPSHOT_SIZE=(int, 100),
+    REC_EVENTS_RETENTION_DAYS=(int, 90),
     TYPESENSE_HOST=(str, ""),
     TYPESENSE_PORT=(str, "8108"),
     TYPESENSE_PROTOCOL=(str, "http"),
@@ -140,6 +146,17 @@ LISTING_CACHE_SECONDS = env.int("LISTING_CACHE_SECONDS", default=60)
 
 RECOMMENDATION_LOOKBACK_DAYS = env.int("RECOMMENDATION_LOOKBACK_DAYS", default=180)
 RECOMMENDATION_AUTO_TOP_N = env.int("RECOMMENDATION_AUTO_TOP_N", default=20)
+# Co-purchase time decay: užsakymas sveriamas 0.5^(amžius_dienos/half_life)
+RECOMMENDATION_HALF_LIFE_DAYS = env.int("RECOMMENDATION_HALF_LIFE_DAYS", default=60)
+# "Populiaru"/cold-start demand langas
+RECOMMENDATION_POPULAR_LOOKBACK_DAYS = env.int("RECOMMENDATION_POPULAR_LOOKBACK_DAYS", default=30)
+# Momentum: recent langas vs baseline langas (base = recent+baseline atgal)
+REC_MOMENTUM_RECENT_DAYS = env.int("REC_MOMENTUM_RECENT_DAYS", default=14)
+REC_MOMENTUM_BASELINE_DAYS = env.int("REC_MOMENTUM_BASELINE_DAYS", default=76)
+# Snapshot kandidatų pool'o dydis per seed×kind (naktinis precompute)
+REC_SNAPSHOT_SIZE = env.int("REC_SNAPSHOT_SIZE", default=100)
+# Recommendation impression/click event'ų retention dienomis
+REC_EVENTS_RETENTION_DAYS = env.int("REC_EVENTS_RETENTION_DAYS", default=90)
 
 TYPESENSE_HOST = env("TYPESENSE_HOST")
 TYPESENSE_PORT = env("TYPESENSE_PORT")
