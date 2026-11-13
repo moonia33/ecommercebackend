@@ -33,6 +33,7 @@ env = environ.Env(
     RECOMMENDATION_POPULAR_LOOKBACK_DAYS=(int, 30),
     REC_MOMENTUM_RECENT_DAYS=(int, 14),
     REC_MOMENTUM_BASELINE_DAYS=(int, 76),
+    REC_SNAPSHOT_SIZE=(int, 100),
     REC_EVENTS_RETENTION_DAYS=(int, 90),
     TYPESENSE_HOST=(str, ""),
     TYPESENSE_PORT=(str, "8108"),
@@ -152,6 +153,8 @@ RECOMMENDATION_POPULAR_LOOKBACK_DAYS = env.int("RECOMMENDATION_POPULAR_LOOKBACK_
 # Momentum: recent langas vs baseline langas (base = recent+baseline atgal)
 REC_MOMENTUM_RECENT_DAYS = env.int("REC_MOMENTUM_RECENT_DAYS", default=14)
 REC_MOMENTUM_BASELINE_DAYS = env.int("REC_MOMENTUM_BASELINE_DAYS", default=76)
+# Snapshot kandidatų pool'o dydis per seed×kind (naktinis precompute)
+REC_SNAPSHOT_SIZE = env.int("REC_SNAPSHOT_SIZE", default=100)
 # Recommendation impression/click event'ų retention dienomis
 REC_EVENTS_RETENTION_DAYS = env.int("REC_EVENTS_RETENTION_DAYS", default=90)
 

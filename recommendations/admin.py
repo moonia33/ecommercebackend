@@ -4,6 +4,7 @@ from .models import (
     ProductCooccur,
     ProductMomentum,
     ProductRelation,
+    RecommendationSnapshot,
     SeasonalBoost,
 )
 
@@ -82,3 +83,20 @@ class SeasonalBoostAdmin(admin.ModelAdmin):
         }),
         ("Meta", {"fields": ("created_at", "updated_at")}),
     )
+
+
+@admin.register(RecommendationSnapshot)
+class RecommendationSnapshotAdmin(admin.ModelAdmin):
+    list_display = ("seed_product", "kind", "ids_count", "computed_at")
+    list_filter = ("kind",)
+    search_fields = ("seed_product__name", "seed_product__sku")
+
+    @admin.display(description="Kandidatų")
+    def ids_count(self, obj):
+        return len(obj.ranked_ids or [])
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

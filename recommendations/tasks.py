@@ -8,3 +8,11 @@ def rebuild_product_cooccurrence_task() -> dict:
     stats = rebuild_cooccurrence()
     stats["momentum"] = rebuild_momentum()
     return stats
+
+
+@shared_task
+def build_recommendation_snapshots_task() -> dict:
+    """Naktinis snapshot'ų rebuild — po cooccur/momentum rebuild'o."""
+    from .services import build_snapshots
+
+    return build_snapshots()

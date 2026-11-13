@@ -236,3 +236,41 @@ class SeasonalBoost(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} (×{self.boost})"
+
+
+class RecommendationSnapshot(models.Model):
+    """Precomputed kandidatų sąrašas per seed prekę × kind.
+
+    Naktinis task'as skaičiuoja pilną waterfall'ą (manual→cooccur→fallback)
+    su limit=REC_SNAPSHOT_SIZE, diversify=False ir be konteksto
+    (apply_context=False — sezoniniai boost'ai/momentum taikomi request
+    metu, kad admin'o trigger'iai veiktų iškart).
+
+    Globalus pool'as (be shop scope): request metu Tier 1 manual
+    perskaitomas live, tail'as filtruojamas per in-stock/shop-scope —
+    scope/outlet taisyklės lieka tikslios.
+    """
+
+    seed_product = models.ForeignKey(
+        "catalog.Product",
+        on_delete=models.CASCADE,
+        related_name="recommendation_snapshots",
+    )
+    kind = models.CharField(max_length=20, choices=ProductRelation.Kind.choices)
+    ranked_ids = models.JSONField(default=list)
+    computed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["seed_product_id", "kind"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["seed_product", "kind"],
+                name="uniq_rec_snapshot_seed_kind",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["seed_product", "kind"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.seed_product_id} ({self.kind}): {len(self.ranked_ids or [])} ids"

@@ -27,9 +27,11 @@ from recommendations.models import (
     ProductCooccur,
     ProductMomentum,
     ProductRelation,
+    RecommendationSnapshot,
     SeasonalBoost,
 )
 from recommendations.services import (
+    build_snapshots,
     context_multipliers,
     popular_product_ids,
     rebuild_cooccurrence,
@@ -478,3 +480,108 @@ class MomentumAndBoostTests(RecommendationBase):
         ids = popular_product_ids(
             shop_id=self.shop.id, channel="normal", limit=10)
         self.assertLess(ids.index(seller.id), ids.index(stale.id))
+
+
+class SnapshotTests(RecommendationBase):
+    def test_snapshot_tail_used_for_pdp(self):
+        src = self._product("A", category=self.cat_carp)
+        snap_pick = self._product("SNAP", category=self.cat_spin)
+        not_in_snap = self._product("OUT", category=self.cat_carp)
+        RecommendationSnapshot.objects.create(
+            seed_product=src, kind="cross_sell",
+            ranked_ids=[snap_pick.id])
+
+        res = self._get(f"/products/{src.slug}")
+        ids = [p["slug"] for p in res.json()]
+        # Snapshot tail'as nugali live waterfall'ą — prekės už jo ribų nerodomos.
+        self.assertEqual(ids, [snap_pick.slug])
+
+    def test_snapshot_missing_falls_back_to_live(self):
+        src = self._product("A", category=self.cat_carp)
+        same_cat = self._product("S", category=self.cat_carp)
+
+        res = self._get(f"/products/{src.slug}")
+        ids = [p["slug"] for p in res.json()]
+        self.assertIn(same_cat.slug, ids)
+
+    def test_snapshot_manual_tier_still_live(self):
+        # Manual reliacija, sukurta PO snapshot build'o, matoma iškart —
+        # Tier 1 visada live, snapshot'e jos nėra.
+        src = self._product("A", category=self.cat_carp)
+        snap_pick = self._product("SNAP", category=self.cat_spin)
+        manual = self._product("M", category=self.cat_spin)
+        RecommendationSnapshot.objects.create(
+            seed_product=src, kind="cross_sell",
+            ranked_ids=[snap_pick.id])
+        ProductRelation.objects.create(
+            source_product=src, target_product=manual,
+            kind="cross_sell", source="manual", weight=1)
+
+        res = self._get(f"/products/{src.slug}")
+        ids = [p["slug"] for p in res.json()]
+        self.assertEqual(ids[0], manual.slug)
+        self.assertIn(snap_pick.slug, ids)
+
+    def test_cart_multi_seed_ignores_snapshot(self):
+        user = User.objects.create_user(
+            email="cart2@example.com", password="pass1234")
+        self.client.cookies["access_token"] = issue_access_token(
+            user_id=user.id)
+        in_cart = self._product("IN", category=self.cat_carp)
+        in_cart2 = self._product("IN2", category=self.cat_carp)
+        snap_pick = self._product("SNAP", category=self.cat_spin)
+        live_co = self._product("LIVE", category=self.cat_spin)
+
+        cart = Cart.objects.create(user=user, shop=self.shop)
+        for p in (in_cart, in_cart2):
+            CartItem.objects.create(
+                cart=cart, variant=p.variants.first(), qty=1)
+        RecommendationSnapshot.objects.create(
+            seed_product=in_cart, kind="cross_sell",
+            ranked_ids=[snap_pick.id])
+        ProductCooccur.objects.create(
+            product_a=in_cart, product_b=live_co, order_count=3, score=0.9)
+
+        res = self._get("/cart")
+        slugs = [p["slug"] for p in res.json()]
+        # Multi-seed kelias — snapshot'as netaikomas, live cooccur laimi.
+        self.assertEqual(slugs[0], live_co.slug)
+
+    def test_build_snapshots_stores_non_manual_tail(self):
+        src = self._product("A", category=self.cat_carp)
+        manual = self._product("M", category=self.cat_spin)
+        same_cat = self._product("S", category=self.cat_carp)
+        ProductRelation.objects.create(
+            source_product=src, target_product=manual,
+            kind="cross_sell", source="manual", weight=1)
+
+        stats = build_snapshots(kinds=["cross_sell"], limit=10)
+        self.assertGreaterEqual(stats["snapshots"], 3)
+
+        snap = RecommendationSnapshot.objects.get(
+            seed_product=src, kind="cross_sell")
+        # Manual prekė nepatenka į tail'ą — ji visada live Tier 1.
+        self.assertNotIn(manual.id, snap.ranked_ids)
+        self.assertIn(same_cat.id, snap.ranked_ids)
+        # Neaktyvus seed snapshot'ų negauna.
+        self.assertEqual(
+            RecommendationSnapshot.objects.filter(kind="upsell").count(), 0)
+
+    def test_snapshot_context_multiplier_resorts(self):
+        # Snapshot žalieji id'ai, bet boost'as request metu juos perrikiuoja.
+        src = self._product("A", category=self.cat_carp)
+        first = self._product("F", category=self.cat_spin)
+        boosted = self._product("B", category=self.cat_spin)
+        act = Activity.objects.create(code="ice2", name="Poledinė 2")
+        ProductActivity.objects.create(
+            product=boosted, activity=act, source="manual")
+        SeasonalBoost.objects.create(
+            name="Ledas2", mode="manual", activity=act,
+            boost="3.00", is_active=True)
+        RecommendationSnapshot.objects.create(
+            seed_product=src, kind="cross_sell",
+            ranked_ids=[first.id, boosted.id])
+
+        res = self._get(f"/products/{src.slug}")
+        ids = [p["slug"] for p in res.json()]
+        self.assertEqual(ids[0], boosted.slug)

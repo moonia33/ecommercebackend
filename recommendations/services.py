@@ -16,6 +16,7 @@ from .models import (
     ProductCooccur,
     ProductMomentum,
     ProductRelation,
+    RecommendationSnapshot,
     SeasonalBoost,
 )
 
@@ -291,6 +292,20 @@ def _fallback_scored_ids(*, seeds, seed_ids, exclude, shop_id, channel, limit) -
     return _ranked(base)
 
 
+def _snapshot_for_request(*, seeds, kinds) -> list[int] | None:
+    """Precomputed tail'as PDP keliui: tik 1 seed × 1 kind.
+
+    Multi-seed (cart/for-you) ir multi-kind (post-purchase) keliai lieka
+    live — jie personalizuoti ir nėra hot-path kaip PDP.
+    """
+    if len(seeds) != 1 or len(kinds) != 1:
+        return None
+    row = RecommendationSnapshot.objects.filter(
+        seed_product_id=seeds[0].id, kind=kinds[0],
+    ).values_list("ranked_ids", flat=True).first()
+    return list(row) if row else None
+
+
 def recommend_product_ids(
     *,
     seed_products,
@@ -300,8 +315,13 @@ def recommend_product_ids(
     limit: int,
     exclude_ids=(),
     diversify: bool = True,
+    apply_context: bool = True,
 ) -> list[int]:
-    """Ranked product ids: manual relations -> co-purchase -> feature fallback."""
+    """Ranked product ids: manual relations -> co-purchase -> feature fallback.
+
+    `apply_context=False` naudojamas snapshot build'e — žalieji ranking'ai
+    be sezoninių boost'ų, kurie taikomi request-time re-rank'e.
+    """
     seeds = list(seed_products or [])
     seed_ids = {int(p.id) for p in seeds}
     exclude = set(int(i) for i in exclude_ids) | seed_ids
@@ -354,10 +374,24 @@ def recommend_product_ids(
     take(_in_stock_ids_ordered(manual_ids, shop_id=shop_id, channel=channel),
          apply_cap=False)
 
+    # Tier 2/3: snapshot tail'as (PDP kelias) arba live waterfall'as
+    snap_ids = _snapshot_for_request(seeds=seeds, kinds=kinds) \
+        if len(picked) < limit else None
+
+    if snap_ids is not None:
+        if apply_context:
+            mult = context_multipliers(snap_ids)
+            if mult:
+                snap_ids = sorted(
+                    snap_ids, key=lambda pid: -mult.get(pid, 1.0))
+        take(_in_stock_ids_ordered(
+            snap_ids, shop_id=shop_id, channel=channel))
+        return picked
+
     # Tier 2: purchase co-occurrence × sezoninis kontekstas
     if len(picked) < limit:
         scores = _cooccur_scores(seed_ids=seed_ids)
-        if scores:
+        if apply_context and scores:
             mult = context_multipliers(list(scores))
             if mult:
                 for pid in list(scores):
@@ -372,12 +406,13 @@ def recommend_product_ids(
             exclude=picked_set, shop_id=shop_id,
             channel=channel, limit=limit,
         )
-        mult = context_multipliers(fallback)
-        if mult:
-            # Stabilus sort'as: boost'intos prekės kyla fallback eilėje,
-            # lygūs multiplikatoriai išsaugo originalų ranking'ą.
-            fallback = sorted(
-                fallback, key=lambda pid: -mult.get(pid, 1.0))
+        if apply_context:
+            mult = context_multipliers(fallback)
+            if mult:
+                # Stabilus sort'as: boost'intos prekės kyla fallback eilėje,
+                # lygūs multiplikatoriai išsaugo originalų ranking'ą.
+                fallback = sorted(
+                    fallback, key=lambda pid: -mult.get(pid, 1.0))
         take(fallback)
         # Relax the cap if still short
         if len(picked) < limit:
@@ -645,3 +680,60 @@ def rebuild_momentum(*, recent_days: int | None = None,
         "boosted": sum(1 for o in objs if o.momentum > 1.0),
         "demoted": sum(1 for o in objs if o.momentum < 1.0),
     }
+
+
+def build_snapshots(*, kinds=None, limit=None, flush_size=2000) -> dict:
+    """Naktinis snapshot'ų rebuild visoms aktyvioms prekėms × kind.
+
+    Saugo tik Tier 2/3 tail'ą (manual reliacijos nuimamos — request metu
+    jos vis tiek skaitomos live, o ištrinta reliacija neliktų snapshot'e
+    iki kito rebuild'o). Globalus pool'as (shop_id=None): shop-scope ir
+    in-stock filtrai taikomi request-time.
+
+    chunked iterator + update_conflicts upsert — senos eilutės išlaikomos
+    kol perrenkamos, PDP netampa tuščias rebuild'o metu.
+    """
+    kinds = kinds or [k.value for k in ProductRelation.Kind]
+    limit = int(getattr(settings, "REC_SNAPSHOT_SIZE", 100))
+
+    products = (
+        Product.objects.filter(is_active=True)
+        .only("id", "category", "brand", "group")
+        .iterator(chunk_size=500)
+    )
+
+    buffer: list[RecommendationSnapshot] = []
+    stats = {"products": 0, "snapshots": 0, "empty": 0}
+
+    def _flush():
+        if not buffer:
+            return
+        RecommendationSnapshot.objects.bulk_create(
+            buffer,
+            update_conflicts=True,
+            update_fields=["ranked_ids"],
+            unique_fields=["seed_product", "kind"],
+        )
+        buffer.clear()
+
+    for p in products:
+        stats["products"] += 1
+        manual = set(_manual_relation_ids(
+            seed_ids={int(p.id)}, kinds=tuple(kinds)))
+        for kind in kinds:
+            ids = recommend_product_ids(
+                seed_products=[p], kinds=(kind,),
+                shop_id=None, channel="normal",
+                limit=limit, diversify=False,
+                apply_context=False,
+            )
+            tail = [i for i in ids if i not in manual]
+            if not tail:
+                stats["empty"] += 1
+            buffer.append(RecommendationSnapshot(
+                seed_product_id=int(p.id), kind=kind, ranked_ids=tail))
+            stats["snapshots"] += 1
+        if len(buffer) >= flush_size:
+            _flush()
+    _flush()
+    return stats
