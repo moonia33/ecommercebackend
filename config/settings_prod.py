@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from .sentry import init_sentry
 from .settings_base import *  # noqa: F403
+
+init_sentry()
 
 DEBUG = env.bool("DEBUG", default=False)  # type: ignore[name-defined]  # noqa: F405
 
