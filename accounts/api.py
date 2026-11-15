@@ -7,6 +7,8 @@ from django.db import transaction
 from django.db import IntegrityError
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.utils import timezone
 from django.http import JsonResponse
 from ninja import Router
@@ -182,6 +184,10 @@ def otp_request(request, payload: OTPRequestIn):
     email = payload.email.strip().lower()
     if not email:
         raise HttpError(400, "Email is required")
+    try:
+        validate_email(email)
+    except ValidationError:
+        raise HttpError(400, "Invalid email")
 
     ttl = int(getattr(settings, "EMAIL_OTP_TTL_MINUTES", 10))
     length = int(getattr(settings, "EMAIL_OTP_CODE_LENGTH", 6))
