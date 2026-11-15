@@ -1,7 +1,7 @@
 """Sentry klaidų stebėjimas (web, Celery worker'iai, beat).
 
 Įjungiama tik kai nustatytas SENTRY_DSN. Asmens duomenys (IP, cookies,
-headeriai, request body) nesiunčiami.
+headeriai, request body) ir stack frame kintamieji nesiunčiami.
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ def init_sentry() -> None:
         release=os.environ.get("SENTRY_RELEASE") or os.environ.get("SOURCE_COMMIT") or None,
         send_default_pii=False,
         max_request_body_size="never",
+        include_local_variables=False,
         traces_sampler=_traces_sampler,
         integrations=[DjangoIntegration(), CeleryIntegration()],
     )
