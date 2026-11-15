@@ -177,24 +177,39 @@ def track_event(
         raw_key = raw_key + f":w:{w}"
     elif name == AnalyticsEvent.Name.PURCHASE and object_type == "order" and object_id is not None:
         raw_key = f"purchase:u:{getattr(user, 'id', 0)}:order:{int(object_id)}"
+    elif name in (
+        AnalyticsEvent.Name.RECOMMENDATION_IMPRESSION,
+        AnalyticsEvent.Name.RECOMMENDATION_CLICK,
+    ):
+        # Rec events yra statistiniai, ne deduop'inami kaip views —
+        # kiekvienas POST yra realus rodymas/paspaudimas. Kliento nonce
+        # apsaugo nuo FE double-fire (React StrictMode ir pan.).
+        import uuid as _uuid
+
+        nonce = str(payload.get("nonce") or "")[:64]
+        raw_key = f"{raw_key}:{nonce or _uuid.uuid4().hex}"
 
     idempotency_key = _sha256(raw_key)
 
     try:
-        ev = AnalyticsEvent.objects.create(
-            name=name,
-            occurred_at=now,
-            user=user,
-            visitor_id=visitor_id,
-            object_type=(object_type or ""),
-            object_id=object_id,
-            country_code=(country_code or ""),
-            channel=(channel or ""),
-            language_code=(language_code or ""),
-            shop_id=shop_id,
-            payload=payload,
-            idempotency_key=idempotency_key,
-        )
+        # Savepoint: dedupe hit'as (IntegrityError) nenuodija išorinės
+        # tranzakcijos — kitaip vėlesnės užklausos tame pačiame request'e
+        # gautų TransactionManagementError.
+        with transaction.atomic():
+            ev = AnalyticsEvent.objects.create(
+                name=name,
+                occurred_at=now,
+                user=user,
+                visitor_id=visitor_id,
+                object_type=(object_type or ""),
+                object_id=object_id,
+                country_code=(country_code or ""),
+                channel=(channel or ""),
+                language_code=(language_code or ""),
+                shop_id=shop_id,
+                payload=payload,
+                idempotency_key=idempotency_key,
+            )
     except IntegrityError:
         ev = None
 

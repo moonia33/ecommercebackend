@@ -14,6 +14,8 @@ class AnalyticsEvent(models.Model):
         VIEW_CART = "view_cart", "View cart"
         BEGIN_CHECKOUT = "begin_checkout", "Begin checkout"
         PURCHASE = "purchase", "Purchase"
+        RECOMMENDATION_IMPRESSION = "recommendation_impression", "Recommendation impression"
+        RECOMMENDATION_CLICK = "recommendation_click", "Recommendation click"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
