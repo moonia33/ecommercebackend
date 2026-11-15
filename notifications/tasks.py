@@ -27,6 +27,12 @@ def _resolve_attachment(ref: str):
     return storages["default"], ref
 
 
+def _permanently_refused(exc: smtplib.SMTPRecipientsRefused) -> bool:
+    """Visi gavėjai atmesti 5xx kodu (4xx – laikina, kartojama)."""
+    codes = [code for code, _msg in (exc.recipients or {}).values()]
+    return bool(codes) and all(int(code) >= 500 for code in codes)
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def send_email_task(self, outbound_email_id: int):
     from .models import OutboundEmail
@@ -54,7 +60,12 @@ def send_email_task(self, outbound_email_id: int):
                 msg.attach(name, f.read())
         msg.send(fail_silently=False)
     except smtplib.SMTPRecipientsRefused as exc:
-        # Neteisingas gavėjas – kartojimas nepadės (ir nekelia Sentry klaidos kas kartą).
+        if not _permanently_refused(exc):
+            outbound.status = OutboundEmail.Status.FAILED
+            outbound.error_message = str(exc)
+            outbound.save(update_fields=["status", "error_message"])
+            raise self.retry(exc=exc)
+        # Neteisingas gavėjas (5xx) – kartojimas nepadės (ir nekelia Sentry klaidos kas kartą).
         from .services import RECIPIENT_REFUSED_PREFIX
 
         logger.warning("Email %s recipient refused: %s", outbound.pk, exc)

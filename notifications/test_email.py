@@ -41,6 +41,15 @@ class InvalidRecipientTests(TestCase):
             retry_failed_emails_task()
         delay.assert_not_called()
 
+    def test_temporary_recipient_refusal_is_retried(self):
+        outbound = OutboundEmail.objects.create(to_email="a@example.com", subject="s", body_text="b")
+        refused = smtplib.SMTPRecipientsRefused({"a@example.com": (450, b"mailbox busy")})
+        with patch("django.core.mail.EmailMultiAlternatives.send", side_effect=refused):
+            send_email_task.apply(args=[outbound.id])
+        outbound.refresh_from_db()
+        self.assertEqual(outbound.status, OutboundEmail.Status.FAILED)
+        self.assertFalse(outbound.error_message.startswith("Recipient refused"))
+
     def test_transient_failure_is_still_retried(self):
         outbound = OutboundEmail.objects.create(
             to_email="a@example.com",
