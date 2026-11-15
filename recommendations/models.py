@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
@@ -218,6 +220,12 @@ class SeasonalBoost(models.Model):
                 v = getattr(self, f) or ""
                 if not re.fullmatch(r"(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])", v):
                     raise ValidationError({f: "Reikalingas 'MM-DD' formatas."})
+                try:
+                    datetime.date(2000, int(v[:2]), int(v[3:]))
+                except ValueError:
+                    raise ValidationError({f: "Tokios datos nėra."}) from None
+        if self.boost is not None and self.boost <= 0:
+            raise ValidationError({"boost": "Boost turi būti > 0 (<1 demote'ina)."})
 
     def is_currently_active(self, *, now=None) -> bool:
         if not self.is_active:
@@ -229,7 +237,7 @@ class SeasonalBoost(models.Model):
             return True
         if not self.start_mmdd or not self.end_mmdd:
             return False
-        today = now.strftime("%m-%d")
+        today = timezone.localtime(now).strftime("%m-%d")
         if self.start_mmdd <= self.end_mmdd:
             return self.start_mmdd <= today <= self.end_mmdd
         return today >= self.start_mmdd or today <= self.end_mmdd

@@ -347,12 +347,13 @@ class ScoringTests(RecommendationBase):
 
         rebuild_cooccurrence()
         ab = ProductCooccur.objects.get(product_a=a, product_b=b)
-        # orders: a=2, b=2, c=1 (visi ~w=1, švieži) → score=2/sqrt(2*2)=1.0
+        # orders: a=2, b=2, c=1 (visi ~w=1, švieži) → cosine 2/sqrt(2*2)=1.0,
+        # support shrink n/(n+1): ab ×2/3, ac (n=1) ×1/2
         self.assertEqual(ab.order_count, 2)
         self.assertAlmostEqual(ab.weight, 2.0, places=2)
-        self.assertAlmostEqual(ab.score, 1.0, places=2)
+        self.assertAlmostEqual(ab.score, 2 / 3, places=2)
         ac = ProductCooccur.objects.get(product_a=a, product_b=c)
-        self.assertAlmostEqual(ac.score, 1 / (2 ** 0.5), places=2)
+        self.assertAlmostEqual(ac.score, 0.5 / (2 ** 0.5), places=2)
 
     def test_score_normalization_demotes_bestseller(self):
         # HOT bendrai perkama su viskuo → žemas score nepaisant aukšto count.

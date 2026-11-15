@@ -132,7 +132,8 @@ def _active_boosts() -> list[SeasonalBoost]:
             if b.is_currently_active()
         ]
         cache.set(_BOOST_CACHE_KEY, rows, _BOOST_CACHE_SECONDS)
-    return list(rows)
+    # Cache'e gali likti per tą laiką pasibaigusi (expires_at) taisyklė.
+    return [b for b in rows if b.is_currently_active()]
 
 
 def invalidate_boost_cache(**kwargs) -> None:
@@ -489,6 +490,9 @@ def popular_product_ids(*, shop_id, channel, limit, exclude_ids=()) -> list[int]
     return out[:limit]
 
 
+REC_SUPPORT_PRIOR = 1.0
+
+
 def rebuild_cooccurrence(*, lookback_days: int | None = None) -> dict:
     """Rebuild the co-purchase matrix from paid orders (order-level pairs).
 
@@ -538,11 +542,13 @@ def rebuild_cooccurrence(*, lookback_days: int | None = None) -> dict:
 
     pair_counts: Counter = Counter()
     pair_weight: Counter = Counter()
+    # Vardiklis — nedecay'inti užsakymų skaičiai: su decay'intu vardikliu
+    # decay susiprastintų ir sena pora gautų tokį pat score kaip šviežia.
     product_orders: Counter = Counter()
     for oid, products in products_per_order.items():
         w = order_weight[oid]
         for pid in products:
-            product_orders[pid] += w
+            product_orders[pid] += 1
         if len(products) < 2:
             continue
         for a, b in combinations(sorted(products), 2):
@@ -552,7 +558,9 @@ def rebuild_cooccurrence(*, lookback_days: int | None = None) -> dict:
     pair_score: dict[tuple[int, int], float] = {}
     for (a, b), w in pair_weight.items():
         denom = (product_orders[a] * product_orders[b]) ** 0.5
-        pair_score[(a, b)] = w / denom if denom else 0.0
+        # Support shrinkage: vienkartinė niša nepralenkia patikrintų porų.
+        n = pair_counts[(a, b)]
+        pair_score[(a, b)] = (w / denom) * (n / (n + REC_SUPPORT_PRIOR)) if denom else 0.0
 
     neighbours: dict[int, Counter] = {}
     for (a, b), sc in pair_score.items():

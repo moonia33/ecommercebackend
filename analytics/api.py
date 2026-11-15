@@ -4,7 +4,10 @@ import ipaddress
 from uuid import UUID
 
 from django.core.cache import cache
-from ninja import Router, Schema
+import json
+from urllib.parse import unquote
+
+from ninja import Field, Router, Schema
 from ninja.errors import HttpError
 
 from api.client_ip import client_ip
@@ -73,11 +76,25 @@ class RecEventIn(Schema):
     product_id: int | None = None
     position: int = 0
     nonce: str = ""
-    items: list[RecEventItemIn] = []
+    items: list[RecEventItemIn] = Field(default_factory=list, max_length=REC_EVENTS_MAX_ITEMS)
 
 
 class RecEventsIn(Schema):
-    events: list[RecEventIn]
+    events: list[RecEventIn] = Field(max_length=REC_EVENTS_MAX_PER_POST)
+
+
+CONSENT_COOKIE = "bz_consent"
+
+
+def _has_analytics_consent(request) -> bool:
+    raw = request.COOKIES.get(CONSENT_COOKIE) or ""
+    if not raw:
+        return False
+    try:
+        data = json.loads(unquote(raw) if raw.startswith("%") else raw)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(data, dict) and data.get("analytics") is True
 
 
 class RecEventsOut(Schema):
@@ -97,6 +114,8 @@ def rec_events(request, payload: RecEventsIn):
 
     if _rec_events_rate_limited(request):
         raise HttpError(429, "Too many requests")
+    if not _has_analytics_consent(request):
+        return {"ok": True, "accepted": 0}
 
     allowed = {
         AnalyticsEvent.Name.RECOMMENDATION_IMPRESSION,

@@ -76,6 +76,26 @@ class CookieConsentTests(TestCase):
 
 @override_settings(ALLOWED_HOSTS=["*"])
 class RecEventsTests(TestCase):
+    def setUp(self):
+        self.client.cookies["bz_consent"] = json.dumps(
+            {"v": 1, "id": "x", "functional": True, "analytics": True, "marketing": False})
+
+    def test_without_analytics_consent_nothing_recorded(self):
+        self.client.cookies["bz_consent"] = json.dumps(
+            {"v": 1, "id": "x", "functional": True, "analytics": False, "marketing": False})
+        body = json.dumps({"events": [{"name": "recommendation_click", "product_id": 5, "nonce": "a"}]})
+        res = self.client.post("/api/v1/analytics/rec-events", data=body, content_type="application/json")
+        self.assertEqual(res.json()["accepted"], 0)
+        del self.client.cookies["bz_consent"]
+        res = self.client.post("/api/v1/analytics/rec-events", data=body, content_type="application/json")
+        self.assertEqual(res.json()["accepted"], 0)
+        self.assertEqual(AnalyticsEvent.objects.count(), 0)
+
+    def test_oversized_batch_rejected(self):
+        body = json.dumps({"events": [{"name": "recommendation_click", "product_id": 5}] * 11})
+        res = self.client.post("/api/v1/analytics/rec-events", data=body, content_type="application/json")
+        self.assertEqual(res.status_code, 422)
+
     def test_impression_and_click_recorded(self):
         res = self.client.post(
             "/api/v1/analytics/rec-events",
