@@ -4,11 +4,24 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.template import Context, Engine
 
 from api.i18n import get_default_language_code, normalize_language_code, translation_fallback_chain
 
 from .models import EmailTemplate, OutboundEmail
+
+
+# Nuolatinės klaidos: retry_failed_emails_task jų nebando siųsti iš naujo.
+INVALID_RECIPIENT_PREFIX = "Invalid recipient"
+RECIPIENT_REFUSED_PREFIX = "Recipient refused"
+PERMANENT_ERROR_PREFIXES = (
+    "Template not found",
+    "Render failed",
+    INVALID_RECIPIENT_PREFIX,
+    RECIPIENT_REFUSED_PREFIX,
+)
 
 
 @dataclass(frozen=True)
@@ -37,6 +50,18 @@ def send_templated_email(
 
     Returns success flag + OutboundEmail log id.
     """
+
+    try:
+        validate_email(to_email)
+    except ValidationError:
+        outbound = OutboundEmail.objects.create(
+            to_email=str(to_email or "")[:254],
+            template_key=template_key,
+            subject="",
+            status=OutboundEmail.Status.FAILED,
+            error_message=f"{INVALID_RECIPIENT_PREFIX}: {to_email!r}"[:500],
+        )
+        return SendEmailResult(ok=False, outbound_id=outbound.id, error=outbound.error_message)
 
     resolved_language_code = normalize_language_code(language_code) or get_default_language_code()
     langs = translation_fallback_chain(resolved_language_code)

@@ -1,9 +1,13 @@
+import logging
+import smtplib
 from datetime import timedelta
 
 from celery import shared_task
 from django.core.files.storage import storages
 from django.core.mail import EmailMultiAlternatives
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_attachment(ref: str):
@@ -21,6 +25,12 @@ def _resolve_attachment(ref: str):
                 pass
         ref = path
     return storages["default"], ref
+
+
+def _permanently_refused(exc: smtplib.SMTPRecipientsRefused) -> bool:
+    """Visi gavėjai atmesti 5xx kodu (4xx – laikina, kartojama)."""
+    codes = [code for code, _msg in (exc.recipients or {}).values()]
+    return bool(codes) and all(int(code) >= 500 for code in codes)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -49,6 +59,20 @@ def send_email_task(self, outbound_email_id: int):
             with storage.open(path, "rb") as f:
                 msg.attach(name, f.read())
         msg.send(fail_silently=False)
+    except smtplib.SMTPRecipientsRefused as exc:
+        if not _permanently_refused(exc):
+            outbound.status = OutboundEmail.Status.FAILED
+            outbound.error_message = str(exc)
+            outbound.save(update_fields=["status", "error_message"])
+            raise self.retry(exc=exc)
+        # Neteisingas gavėjas (5xx) – kartojimas nepadės (ir nekelia Sentry klaidos kas kartą).
+        from .services import RECIPIENT_REFUSED_PREFIX
+
+        logger.warning("Email %s recipient refused: %s", outbound.pk, exc)
+        outbound.status = OutboundEmail.Status.FAILED
+        outbound.error_message = f"{RECIPIENT_REFUSED_PREFIX}: {exc}"[:2000]
+        outbound.save(update_fields=["status", "error_message"])
+        return
     except Exception as exc:
         outbound.status = OutboundEmail.Status.FAILED
         outbound.error_message = str(exc)
@@ -63,14 +87,12 @@ def send_email_task(self, outbound_email_id: int):
 @shared_task
 def retry_failed_emails_task():
     from .models import OutboundEmail
+    from .services import PERMANENT_ERROR_PREFIXES
 
-    failed = OutboundEmail.objects.filter(
-        status=OutboundEmail.Status.FAILED,
-    ).exclude(
-        error_message__startswith="Template not found"
-    ).exclude(
-        error_message__startswith="Render failed"
-    )[:50]
+    failed = OutboundEmail.objects.filter(status=OutboundEmail.Status.FAILED)
+    for prefix in PERMANENT_ERROR_PREFIXES:
+        failed = failed.exclude(error_message__startswith=prefix)
+    failed = failed[:50]
 
     for outbound in failed:
         outbound.status = OutboundEmail.Status.PENDING
