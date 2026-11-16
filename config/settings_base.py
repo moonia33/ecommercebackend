@@ -478,6 +478,10 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
+# Child procesas pakeičiamas po task'o, kai RSS viršija ribą (KiB) —
+# Python neatiduoda atminties OS, išpūstas child'as kaupiasi iki OOM kill.
+CELERY_WORKER_MAX_MEMORY_PER_CHILD = env.int(
+    "CELERY_WORKER_MAX_MEMORY_PER_CHILD", default=600_000)
 # Importai (normalyzer kainos/likuciai/katalogas) - atskira eile, kad nuotrauku
 # apdorojimo uzduotys ju neuzblokuotu (docker-compose.prod.yml: worker_imports).
 CELERY_TASK_ROUTES = {
