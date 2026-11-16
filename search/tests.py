@@ -304,6 +304,21 @@ class SearchTests(TestCase):
         self.assertEqual(out["indexed"], 2)
         self.assertEqual(len(client.documents.imported_docs), 2)
 
+    def test_full_reindex_imports_in_batches(self):
+        self._product("R1", "Rod one", category=self.cat)
+        self._product("R2", "Rod two", category=self.cat)
+        client = FakeClient()
+        from search import services
+
+        with mock.patch(
+            "search.services.get_client", return_value=client
+        ), mock.patch("search.services.FULL_REINDEX_BATCH", 1), mock.patch(
+            "search.services.index_products", wraps=services.index_products
+        ) as idx:
+            out = full_reindex()
+        self.assertEqual(out["indexed"], 2)
+        self.assertEqual(idx.call_count, 2)
+
     def test_full_reindex_purges_stale_docs(self):
         a = self._product("R1", "Rod one", category=self.cat)
         b = self._product("R2", "Rod two", category=self.cat)

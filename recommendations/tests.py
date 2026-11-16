@@ -568,6 +568,43 @@ class SnapshotTests(RecommendationBase):
         self.assertEqual(
             RecommendationSnapshot.objects.filter(kind="upsell").count(), 0)
 
+    def test_build_snapshots_ignores_stale_snapshot(self):
+        # Rebuild'as skaičiuoja live — senas snapshot'as nėra šaltinis.
+        src = self._product("A", category=self.cat_carp)
+        stale = self._product("OLD", category=self.cat_spin)
+        same_cat = self._product("S", category=self.cat_carp)
+        RecommendationSnapshot.objects.create(
+            seed_product=src, kind="cross_sell", ranked_ids=[stale.id])
+
+        build_snapshots(kinds=["cross_sell"], limit=10)
+
+        snap = RecommendationSnapshot.objects.get(
+            seed_product=src, kind="cross_sell")
+        self.assertEqual(snap.ranked_ids[0], same_cat.id)
+
+    @override_settings(CACHES={"default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
+    def test_snapshot_task_skips_when_already_running(self):
+        from django.core.cache import cache
+
+        from recommendations.tasks import (
+            SNAPSHOT_LOCK_KEY,
+            build_recommendation_snapshots_task,
+        )
+
+        self._product("A", category=self.cat_carp)
+        cache.add(SNAPSHOT_LOCK_KEY, 1, 60)
+        try:
+            res = build_recommendation_snapshots_task()
+        finally:
+            cache.delete(SNAPSHOT_LOCK_KEY)
+        self.assertEqual(res, {"skipped": "already running"})
+        self.assertFalse(RecommendationSnapshot.objects.exists())
+
+        res = build_recommendation_snapshots_task()
+        self.assertGreaterEqual(res["snapshots"], 1)
+        self.assertIsNone(cache.get(SNAPSHOT_LOCK_KEY))
+
     def test_snapshot_context_multiplier_resorts(self):
         # Snapshot žalieji id'ai, bet boost'as request metu juos perrikiuoja.
         src = self._product("A", category=self.cat_carp)

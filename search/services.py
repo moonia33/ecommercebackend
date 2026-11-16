@@ -660,6 +660,9 @@ def delete_product_document(product_id: int) -> None:
             note_search_failure(exc)
 
 
+FULL_REINDEX_BATCH = 500
+
+
 def full_reindex() -> dict:
     from catalog.models import Product
 
@@ -670,7 +673,11 @@ def full_reindex() -> dict:
     ids = list(
         Product.objects.filter(is_active=True).values_list("id", flat=True)
     )
-    indexed = index_products(ids)
+    # Dalimis: visas katalogas su prefetch'ais vienu kartu viršija
+    # worker'io atminties limitą (OOM kill).
+    indexed = 0
+    for i in range(0, len(ids), FULL_REINDEX_BATCH):
+        indexed += index_products(ids[i : i + FULL_REINDEX_BATCH])
     purged = _purge_stale_documents(client, {int(i) for i in ids})
     return {"indexed": indexed, "total_active": len(ids), "purged": purged}
 

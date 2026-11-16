@@ -58,16 +58,20 @@ def _base_product_qs(*, shop_id):
     return apply_shop_product_scope(qs=qs, shop_id=shop_id)
 
 
+def _id_product_qs(*, shop_id):
+    """Be select/prefetch — keliams, kuriems reikia tik id."""
+    return apply_shop_product_scope(
+        qs=Product.objects.filter(is_active=True), shop_id=shop_id)
+
+
 def _in_stock_ids(ids, *, shop_id, channel) -> set[int]:
     ids = [int(i) for i in ids if i]
     if not ids:
         return set()
-    qs = _base_product_qs(shop_id=shop_id).filter(id__in=ids)
-    qs = _annotate_listing(qs, channel=channel)
-    return {
-        p.id for p in qs
-        if getattr(p, "_min_offer_price", None) is not None
-    }
+    qs = _id_product_qs(shop_id=shop_id).filter(id__in=ids)
+    qs = _annotate_listing(qs, channel=channel).filter(
+        _min_offer_price__isnull=False)
+    return set(qs.values_list("id", flat=True))
 
 
 def ordered_product_qs(*, ids, shop_id, channel):
@@ -230,7 +234,7 @@ def _fallback_scored_ids(*, seeds, seed_ids, exclude, shop_id, channel, limit) -
     seed_brands = {p.brand_id for p in seeds if p.brand_id}
     seed_groups = {p.group_id for p in seeds if p.group_id}
 
-    base = _base_product_qs(shop_id=shop_id).exclude(id__in=set(exclude))
+    base = _id_product_qs(shop_id=shop_id).exclude(id__in=set(exclude))
 
     # Pool susiaurinamas prieš brangias anotacijas — prekės, kurios
     # nesutampa nė vienu seed attribut'u, ir taip gautų 0 score'ų.
@@ -280,7 +284,7 @@ def _fallback_scored_ids(*, seeds, seed_ids, exclude, shop_id, channel, limit) -
             "-_feature_match", "-_same_group",
             "-_same_category", "-_same_brand", "name", "id",
         )
-        return [p.id for p in qs[: limit * 3]]
+        return list(qs.values_list("id", flat=True)[: limit * 3])
 
     if pool_q:
         narrowed = base.filter(pool_q).distinct()
@@ -317,11 +321,13 @@ def recommend_product_ids(
     exclude_ids=(),
     diversify: bool = True,
     apply_context: bool = True,
+    use_snapshot: bool = True,
 ) -> list[int]:
     """Ranked product ids: manual relations -> co-purchase -> feature fallback.
 
-    `apply_context=False` naudojamas snapshot build'e — žalieji ranking'ai
-    be sezoninių boost'ų, kurie taikomi request-time re-rank'e.
+    `apply_context=False` ir `use_snapshot=False` naudojami snapshot
+    build'e — žalieji live ranking'ai be sezoninių boost'ų ir be seno
+    snapshot'o (kitaip rebuild'as perrašytų tą patį sąrašą).
     """
     seeds = list(seed_products or [])
     seed_ids = {int(p.id) for p in seeds}
@@ -377,7 +383,7 @@ def recommend_product_ids(
 
     # Tier 2/3: snapshot tail'as (PDP kelias) arba live waterfall'as
     snap_ids = _snapshot_for_request(seeds=seeds, kinds=kinds) \
-        if len(picked) < limit else None
+        if use_snapshot and len(picked) < limit else None
 
     if snap_ids is not None:
         if apply_context:
@@ -726,20 +732,21 @@ def build_snapshots(*, kinds=None, limit=None, flush_size=2000) -> dict:
 
     for p in products:
         stats["products"] += 1
-        manual = set(_manual_relation_ids(
-            seed_ids={int(p.id)}, kinds=tuple(kinds)))
+        manual = _manual_relation_ids(
+            seed_ids={int(p.id)}, kinds=tuple(kinds))
+        # Tier 2/3 nepriklauso nuo kind'o — skaičiuojama vieną kartą
+        # prekei; manual prekės atmetamos per exclude.
+        tail = recommend_product_ids(
+            seed_products=[p], kinds=tuple(kinds),
+            shop_id=None, channel="normal",
+            limit=limit, exclude_ids=manual, diversify=False,
+            apply_context=False, use_snapshot=False,
+        )
         for kind in kinds:
-            ids = recommend_product_ids(
-                seed_products=[p], kinds=(kind,),
-                shop_id=None, channel="normal",
-                limit=limit, diversify=False,
-                apply_context=False,
-            )
-            tail = [i for i in ids if i not in manual]
             if not tail:
                 stats["empty"] += 1
             buffer.append(RecommendationSnapshot(
-                seed_product_id=int(p.id), kind=kind, ranked_ids=tail))
+                seed_product_id=int(p.id), kind=kind, ranked_ids=list(tail)))
             stats["snapshots"] += 1
         if len(buffer) >= flush_size:
             _flush()
