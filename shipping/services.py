@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import time as time_module
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Case, IntegerField, Q, Value, When
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
 from django.utils import timezone
 
 from .models import DeliveryRule, Holiday
@@ -25,10 +30,45 @@ def _is_weekend(d: date) -> bool:
     return d.weekday() >= 5
 
 
+HOLIDAYS_CACHE_TTL = 3600
+_HOLIDAYS_VERSION_KEY = "shipping:holidays:version"
+
+
+def _holidays_by_country() -> dict[str, frozenset[date]]:
+    # Versioned key: a change bumps the version after commit, so a reader that
+    # queried before the change can only fill the old, no longer used key.
+    version = cache.get_or_set(_HOLIDAYS_VERSION_KEY, time_module.time_ns, None)
+    key = f"shipping:holidays:v{version}"
+    data = cache.get(key)
+    if data is None:
+        grouped: dict[str, set[date]] = {}
+        for cc, d in Holiday.objects.filter(is_active=True).values_list("country_code", "date"):
+            grouped.setdefault((cc or "").upper(), set()).add(d)
+        data = {cc: frozenset(ds) for cc, ds in grouped.items()}
+        cache.set(key, data, HOLIDAYS_CACHE_TTL)
+    return data
+
+
+def _holiday_dates(country_code: str) -> frozenset[date]:
+    return _holidays_by_country().get((country_code or "").upper(), frozenset())
+
+
+def _bump_holidays_version() -> None:
+    try:
+        cache.incr(_HOLIDAYS_VERSION_KEY)
+    except ValueError:
+        cache.set(_HOLIDAYS_VERSION_KEY, time_module.time_ns(), None)
+
+
+@receiver([post_save, post_delete], sender=Holiday)
+def _invalidate_holidays_cache(sender, instance: Holiday, **kwargs) -> None:
+    transaction.on_commit(_bump_holidays_version)
+
+
 def is_business_day(*, d: date, country_code: str) -> bool:
     if _is_weekend(d):
         return False
-    return not Holiday.objects.filter(country_code=country_code, date=d, is_active=True).exists()
+    return d not in _holiday_dates(country_code)
 
 
 def normalize_to_business_day(*, d: date, country_code: str) -> date:
