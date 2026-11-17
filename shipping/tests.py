@@ -26,18 +26,47 @@ class HolidayCacheTests(TestCase):
     def test_cache_invalidated_on_save_and_delete(self):
         d = date(2026, 12, 23)
         self.assertTrue(is_business_day(d=d, country_code="LT"))
+        with self.captureOnCommitCallbacks(execute=True):
+            h = Holiday.objects.create(country_code="LT", date=d)
+        self.assertFalse(is_business_day(d=d, country_code="LT"))
+        with self.captureOnCommitCallbacks(execute=True):
+            h.is_active = False
+            h.save()
+        self.assertTrue(is_business_day(d=d, country_code="LT"))
+        with self.captureOnCommitCallbacks(execute=True):
+            h.is_active = True
+            h.save()
+        self.assertFalse(is_business_day(d=d, country_code="LT"))
+        with self.captureOnCommitCallbacks(execute=True):
+            h.delete()
+        self.assertTrue(is_business_day(d=d, country_code="LT"))
+
+    def test_invalidation_waits_for_commit(self):
+        d = date(2026, 12, 23)
+        self.assertTrue(is_business_day(d=d, country_code="LT"))
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            Holiday.objects.create(country_code="LT", date=d)
+        self.assertTrue(is_business_day(d=d, country_code="LT"))
+        for cb in callbacks:
+            cb()
+        self.assertFalse(is_business_day(d=d, country_code="LT"))
+
+    def test_moving_holiday_to_other_country_updates_both(self):
+        d = date(2026, 12, 23)
         h = Holiday.objects.create(country_code="LT", date=d)
         self.assertFalse(is_business_day(d=d, country_code="LT"))
-        h.is_active = False
-        h.save()
+        self.assertTrue(is_business_day(d=d, country_code="DE"))
+        with self.captureOnCommitCallbacks(execute=True):
+            h.country_code = "DE"
+            h.save()
         self.assertTrue(is_business_day(d=d, country_code="LT"))
-        h.delete()
-        self.assertTrue(is_business_day(d=d, country_code="LT"))
+        self.assertFalse(is_business_day(d=d, country_code="DE"))
 
     def test_countries_are_separate(self):
         Holiday.objects.create(country_code="DE", date=date(2026, 10, 3))
         self.assertTrue(is_business_day(d=date(2026, 10, 5), country_code="LT"))
         self.assertTrue(is_business_day(d=date(2026, 10, 2), country_code="DE"))
-        Holiday.objects.create(country_code="DE", date=date(2026, 10, 2))
+        with self.captureOnCommitCallbacks(execute=True):
+            Holiday.objects.create(country_code="DE", date=date(2026, 10, 2))
         self.assertFalse(is_business_day(d=date(2026, 10, 2), country_code="DE"))
         self.assertTrue(is_business_day(d=date(2026, 10, 2), country_code="LT"))
