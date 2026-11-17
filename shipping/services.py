@@ -5,7 +5,10 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from django.core.cache import cache
 from django.db.models import Case, IntegerField, Q, Value, When
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
 from django.utils import timezone
 
 from .models import DeliveryRule, Holiday
@@ -25,10 +28,33 @@ def _is_weekend(d: date) -> bool:
     return d.weekday() >= 5
 
 
+HOLIDAYS_CACHE_TTL = 3600
+
+
+def _holidays_cache_key(country_code: str) -> str:
+    return f"shipping:holidays:{country_code.upper()}"
+
+
+def _holiday_dates(country_code: str) -> frozenset[date]:
+    key = _holidays_cache_key(country_code)
+    dates = cache.get(key)
+    if dates is None:
+        dates = frozenset(
+            Holiday.objects.filter(country_code=country_code, is_active=True).values_list("date", flat=True)
+        )
+        cache.set(key, dates, HOLIDAYS_CACHE_TTL)
+    return dates
+
+
+@receiver([post_save, post_delete], sender=Holiday)
+def _invalidate_holidays_cache(sender, instance: Holiday, **kwargs) -> None:
+    cache.delete(_holidays_cache_key(instance.country_code or ""))
+
+
 def is_business_day(*, d: date, country_code: str) -> bool:
     if _is_weekend(d):
         return False
-    return not Holiday.objects.filter(country_code=country_code, date=d, is_active=True).exists()
+    return d not in _holiday_dates(country_code)
 
 
 def normalize_to_business_day(*, d: date, country_code: str) -> date:
