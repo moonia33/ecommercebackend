@@ -208,5 +208,11 @@ def resolve_product_by_slug(*, slug: str, language_code: str | None, is_active: 
     else:
         product = translation.product
     if is_active and not bool(product.is_active):
-        return None
+        from .services.slugs import resolve_redirect
+
+        # Išjungta (pvz. pergrupuota) prekė su nukreipimu -> aktyvi prekė (301).
+        target = resolve_redirect(slug, language_code)
+        if target is None or not target.is_active:
+            return None
+        return target
     return product
