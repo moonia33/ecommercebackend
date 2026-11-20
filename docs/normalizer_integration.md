@@ -206,6 +206,8 @@ Atskiri, dažni atnaujinimai — tik `qty_on_hand`, niekada neliečia `qty_reser
 - Neprivalomas `"offer": {price_net, cost_net, discount_percent}` – tos pačios sąlygos kaip 3.3;
   nėra/`null` = sandėlio kainų nekeisti. `POST /ops/imports/variant-state` grąžina ir esamą `offer`
   būseną, kad normalizeris siųstų tik deltas.
+- `variant-state` grąžina ir `sold_as_pack`: jei tiekėjo vienetas (dėžė ↔ vienetas) skiriasi,
+  normalizeris naują kainą siunčia katalogo etapu, o kainų apsauga (`price_change_guard_pct`) jos nesulaiko.
 - Nežinomas SKU arba warehouse → item ERROR.
 
 ## 5. Klaidų ir konfliktų modelis
