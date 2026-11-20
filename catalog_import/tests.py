@@ -389,6 +389,25 @@ class CatalogImportTestCase(TestCase):
         self.assertEqual(
             resolve_product_by_slug(slug=fam_b.slug, language_code="lt"), fam_a)
 
+    def test_regroup_chain_redirects_to_current_holder(self):
+        from catalog.localization import resolve_product_by_slug
+
+        def fam(code, variants):
+            return {
+                "code": code, "product_group_code": code,
+                "category": "cat-a", "tax_class": "standard", "price_net": "1.00",
+                "translations": {"lt": {"name": f"Šeima {code}"}},
+                "variants": [{"code": v, "ean": v} for v in variants],
+            }
+
+        self._run([fam("ch-a", ["ch-v1"]), fam("ch-b", ["ch-v2"]), fam("ch-c", ["ch-v3"])])
+        # A -> B, B -> C: B lieka su A variantu, A nukreipiama į B
+        self._run([fam("ch-b", ["ch-v1"]), fam("ch-c", ["ch-v3", "ch-v2"])])
+        a, b = Product.objects.get(sku="ch-a"), Product.objects.get(sku="ch-b")
+        self.assertFalse(a.is_active)
+        self.assertTrue(b.is_active)
+        self.assertEqual(resolve_product_by_slug(slug=a.slug, language_code="lt"), b)
+
     def test_same_file_returns_existing_run(self):
         payload = _catalog_doc([])
         r1 = create_run(kind=ImportRun.Kind.CATALOG, payload_bytes=payload)

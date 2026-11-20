@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections import Counter
 import json
 import logging
 import re
@@ -905,13 +906,20 @@ _regrouped = threading.local()
 
 
 def _redirect_regrouped(emptied_ids: set[int], moves: dict[int, int]) -> None:
-    """Pergrupuoto (tuščio) produkto slug'ai -> produktas, į kurį perkelti jo variantai (301)."""
-    for old_id in emptied_ids:
-        target_id, hops = moves.get(old_id), 0
-        while target_id in moves and target_id not in emptied_ids and hops < 10:
-            target_id, hops = moves[target_id], hops + 1
-        if not target_id or target_id in emptied_ids:
+    """Pergrupuoto (tuščio) produkto slug'ai -> produktas, kuriame DB dabar yra jo variantai (301)."""
+    moved_from: dict[int, list[int]] = {}
+    for variant_id, old_id in moves.items():
+        if old_id in emptied_ids:
+            moved_from.setdefault(old_id, []).append(variant_id)
+    for old_id, variant_ids in moved_from.items():
+        holders = Counter(
+            Variant.objects.filter(id__in=variant_ids, product__is_active=True)
+            .exclude(product_id__in=emptied_ids)
+            .values_list("product_id", flat=True)
+        )
+        if not holders:
             continue
+        target_id = holders.most_common(1)[0][0]
         old = Product.objects.filter(pk=old_id).values_list("slug", flat=True).first()
         slugs = {(PRIMARY_LANGUAGE, old)} if old else set()
         slugs |= set(
@@ -936,8 +944,8 @@ def _match_variant(product: Product, spec: ImportVariantIn, source: str) -> Vari
         # Leidžiame perkėlimą: varianto id išlieka, order history ir
         # inventoriaus eilutės nesidaro.
         moves = getattr(_regrouped, "moves", None)
-        if moves is not None:
-            moves[variant.product_id] = product.id
+        if moves is not None and variant.pk:
+            moves.setdefault(variant.pk, variant.product_id)
         variant.product = product
     if variant:
         return variant
