@@ -384,6 +384,10 @@ class CatalogImportTestCase(TestCase):
         )
         fam_b = Product.objects.get(sku="fam-b")
         self.assertFalse(fam_b.is_active)
+        from catalog.localization import resolve_product_by_slug
+
+        self.assertEqual(
+            resolve_product_by_slug(slug=fam_b.slug, language_code="lt"), fam_a)
 
     def test_same_file_returns_existing_run(self):
         payload = _catalog_doc([])

@@ -23,6 +23,7 @@ from catalog.models import (
     InventoryItem,
     Product,
     ProductFeatureValue,
+    ProductSlugRedirect,
     ProductImage,
     ProductOptionType,
     ProductTranslation,
@@ -37,6 +38,7 @@ from catalog.models import (
 )
 
 from catalog.services.slugs import (
+    PRIMARY_LANGUAGE,
     assign_product_slug,
     assign_translation_slug,
     slug_base,
@@ -244,6 +246,15 @@ def _process_catalog(run: ImportRun, data: dict, *, dry_run: bool) -> set[int]:
     run.save(update_fields=["source", "mode"])
 
     seen_product_ids: set[int] = set()
+    _regrouped.moves = {}
+    try:
+        _apply_catalog_items(run, env, seen_product_ids, dry_run)
+    finally:
+        moves, _regrouped.moves = _regrouped.moves, None
+    return _finish_catalog(run, seen_product_ids, moves, dry_run)
+
+
+def _apply_catalog_items(run, env, seen_product_ids: set[int], dry_run: bool) -> None:
     for row_no, raw in enumerate(env.items, start=1):
         row = ImportItem.objects.create(run=run, row_no=row_no, payload=raw)
         try:
@@ -255,6 +266,8 @@ def _process_catalog(run: ImportRun, data: dict, *, dry_run: bool) -> set[int]:
             continue
         _apply_one(run, row, lambda: _apply_product(run, item, seen_product_ids, row), dry_run)
 
+
+def _finish_catalog(run, seen_product_ids: set[int], moves: dict[int, int], dry_run: bool) -> set[int]:
     if not dry_run and run.source:
         # Regrouped šeimos: perkelti variantai palieka tuščius produktus
         # (import'o valdomi "husk'ai" – PDP be perkamų variantų). Jie
@@ -266,6 +279,7 @@ def _process_catalog(run: ImportRun, data: dict, *, dry_run: bool) -> set[int]:
         if emptied_ids:
             emptied.update(is_active=False)
             seen_product_ids |= emptied_ids
+            _redirect_regrouped(emptied_ids, moves)
 
     if run.mode == ImportRun.Mode.FULL_SYNC and not dry_run:
         # Deactivated products also need reindexing (doc removal).
@@ -887,6 +901,31 @@ def _sync_variant_images(product: Product, variant: Variant, spec: ImportVariant
     return keep_ids
 
 
+_regrouped = threading.local()
+
+
+def _redirect_regrouped(emptied_ids: set[int], moves: dict[int, int]) -> None:
+    """Pergrupuoto (tuščio) produkto slug'ai -> produktas, į kurį perkelti jo variantai (301)."""
+    for old_id in emptied_ids:
+        target_id, hops = moves.get(old_id), 0
+        while target_id in moves and target_id not in emptied_ids and hops < 10:
+            target_id, hops = moves[target_id], hops + 1
+        if not target_id or target_id in emptied_ids:
+            continue
+        old = Product.objects.filter(pk=old_id).values_list("slug", flat=True).first()
+        slugs = {(PRIMARY_LANGUAGE, old)} if old else set()
+        slugs |= set(
+            ProductTranslation.objects.filter(product_id=old_id)
+            .exclude(slug="")
+            .values_list("language_code", "slug")
+        )
+        ProductSlugRedirect.objects.filter(product_id=old_id).update(product_id=target_id)
+        for lang, slug in slugs:
+            ProductSlugRedirect.objects.update_or_create(
+                language_code=lang, slug=slug, defaults={"product_id": target_id}
+            )
+
+
 def _match_variant(product: Product, spec: ImportVariantIn, source: str) -> Variant | None:
     variant = Variant.objects.filter(
         import_source=source, import_code=spec.code
@@ -896,6 +935,9 @@ def _match_variant(product: Product, spec: ImportVariantIn, source: str) -> Vari
         # pergrupavo variantus (pvz. Korda kabliukų dydžių sujungimas).
         # Leidžiame perkėlimą: varianto id išlieka, order history ir
         # inventoriaus eilutės nesidaro.
+        moves = getattr(_regrouped, "moves", None)
+        if moves is not None:
+            moves[variant.product_id] = product.id
         variant.product = product
     if variant:
         return variant
