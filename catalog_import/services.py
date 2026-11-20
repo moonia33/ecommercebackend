@@ -1099,7 +1099,7 @@ def variant_state(codes: list[str], warehouse_code: str = "") -> list[dict]:
     """Esama variantų būsena (kaina, savikaina, likutis sandėlyje) delta sinchronizacijai."""
     variants = list(
         Variant.objects.filter(sku__in=set(codes)).only(
-            "id", "sku", "is_active", "price_eur", "cost_eur"
+            "id", "sku", "is_active", "price_eur", "cost_eur", "sold_as_pack"
         )
     )
     inv_by_variant: dict[int, InventoryItem] = {}
@@ -1123,6 +1123,7 @@ def variant_state(codes: list[str], warehouse_code: str = "") -> list[dict]:
             "is_active": v.is_active,
             "price_net": v.price_eur,
             "cost_net": v.cost_eur,
+            "sold_as_pack": v.sold_as_pack,
             "qty": None,
         }
         if warehouse_code:

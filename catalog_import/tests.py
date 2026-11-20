@@ -1004,7 +1004,11 @@ class PriceImportTestCase(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["qty"], 3)
         self.assertEqual(str(rows[0]["price_net"]), "10.00")
+        self.assertFalse(rows[0]["sold_as_pack"])
         self.assertIsNone(variant_state(["pp1-v"])[0]["qty"])
+        self.variant.sold_as_pack = True
+        self.variant.save(update_fields=["sold_as_pack"])
+        self.assertTrue(variant_state(["pp1-v"])[0]["sold_as_pack"])
 
 
 class CategoryRefinementTestCase(TestCase):

@@ -210,6 +210,7 @@ class VariantStateOut(Schema):
     is_active: bool
     price_net: Decimal
     cost_net: Decimal | None = None
+    sold_as_pack: bool = False
     qty: int | None = None
     # Tik su warehouse_code; None = sandėlyje dar nėra InventoryItem.
     offer: WarehouseOfferStateOut | None = None
