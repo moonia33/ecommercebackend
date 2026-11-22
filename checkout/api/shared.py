@@ -541,7 +541,9 @@ def _cart_item_money(
     shop_id: int | None = None,
     promo_rules: list | None = None,
     reverse_charge: bool = False,
+    omnibus: bool = True,
 ) -> tuple[MoneyOut, MoneyOut, MoneyOut | None, int | None, Decimal]:
+    """`omnibus=False` – compare_at nuo list kainos (realus nuolaidos požymis kuponų logikai)."""
     v = item.variant
     product = v.product
     if not product or not product.tax_class_id:
@@ -605,9 +607,15 @@ def _cart_item_money(
 
     compare_at = None
     prior_net = None
-    if not customer_group_id:
+    if omnibus and not customer_group_id:
         prior_net = (variant_price_rows([v.id], shop_id=shop_id, channel=channel).get(v.id) or (None, None))[1]
-    compare_net, disc_pct = omnibus_compare(list_net=list_unit_net, sale_net=unit_net, prior_net=prior_net)
+    if omnibus:
+        compare_net, disc_pct = omnibus_compare(
+            list_net=list_unit_net, sale_net=unit_net, prior_net=prior_net, pct_fn=_discount_percent
+        )
+    else:
+        disc_pct = _discount_percent(list_unit_net=list_unit_net, sale_unit_net=unit_net)
+        compare_net = list_unit_net if disc_pct is not None else None
     if compare_net is not None:
         base = money_from_net(currency="EUR", unit_net=compare_net, vat_rate=vat_rate, qty=1)
         compare_at = MoneyOut(currency=base.currency, net=base.net, vat_rate=base.vat_rate, vat=base.vat, gross=base.gross)
