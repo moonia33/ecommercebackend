@@ -14,6 +14,7 @@ from api.admin_i18n import apply_language_code_choices
 from .widgets import TableEditorWidget, ToastUIMarkdownWidget
 
 from .models import (
+    VariantPriceHistory,
     Activity,
     ActivityRule,
     ActivityTranslation,
@@ -1435,3 +1436,19 @@ class ActivityRuleAdmin(admin.ModelAdmin):
         ids = list(obj.assignments.values_list("product_id", flat=True))
         super().delete_model(request, obj)
         reindex_products(ids)
+
+
+
+@admin.register(VariantPriceHistory)
+class VariantPriceHistoryAdmin(admin.ModelAdmin):
+    list_display = ("variant", "shop", "channel", "unit_net", "prior_unit_net", "valid_from", "valid_to")
+    list_filter = ("shop", "channel")
+    search_fields = ("variant__sku",)
+    raw_id_fields = ("variant",)
+    date_hierarchy = "valid_from"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

@@ -12,7 +12,6 @@ from .shared import (
     ProductListOut,
     RecentlyViewedProduct,
     User,
-    _discount_percent,
     _money_out,
     _shop_or_404_when_strict,
     _validate_country_and_channel,
@@ -131,6 +130,11 @@ def recently_viewed(
         vat_cache[key] = Decimal(rate)
         return vat_cache[key]
 
+    from catalog.services.price_history import omnibus_compare, product_prior_nets
+
+    priors = product_prior_nets(
+        [p.id for p in ordered], shop_id=(int(shop.id) if shop else None), channel=channel
+    )
     out: list[ProductListOut] = []
     for p in ordered:
         product_loc = localize_product(p, language_code=language_code)
@@ -162,11 +166,11 @@ def recently_viewed(
         )
 
         compare_at_price = None
-        discount_percent = _discount_percent(
-            list_unit_net=list_net, sale_unit_net=sale_net)
-        if discount_percent is not None:
+        compare_net, discount_percent = omnibus_compare(
+            list_net=list_net, sale_net=Decimal(sale_net), prior_net=priors.get(p.id))
+        if compare_net is not None:
             compare_at_price = _money_out(
-                currency="EUR", unit_net=list_net, vat_rate=rate)
+                currency="EUR", unit_net=compare_net, vat_rate=rate)
 
         price_to = None
         max_variant_net = getattr(p, "_max_variant_price", None)

@@ -601,10 +601,15 @@ def _cart_item_money(
     total = money_from_net(
         currency="EUR", unit_net=unit_net, vat_rate=vat_rate, qty=int(item.qty))
 
+    from catalog.services.price_history import omnibus_compare, variant_price_rows
+
     compare_at = None
-    disc_pct = _discount_percent(list_unit_net=list_unit_net, sale_unit_net=unit_net)
-    if disc_pct is not None:
-        base = money_from_net(currency="EUR", unit_net=list_unit_net, vat_rate=vat_rate, qty=1)
+    prior_net = None
+    if not customer_group_id:
+        prior_net = (variant_price_rows([v.id], shop_id=shop_id, channel=channel).get(v.id) or (None, None))[1]
+    compare_net, disc_pct = omnibus_compare(list_net=list_unit_net, sale_net=unit_net, prior_net=prior_net)
+    if compare_net is not None:
+        base = money_from_net(currency="EUR", unit_net=compare_net, vat_rate=vat_rate, qty=1)
         compare_at = MoneyOut(currency=base.currency, net=base.net, vat_rate=base.vat_rate, vat=base.vat, gross=base.gross)
 
     return (

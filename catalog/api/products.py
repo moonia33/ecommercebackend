@@ -6,7 +6,6 @@ from django.db.models import Case, Count, F, IntegerField, Min, Q, Value, When
 from ninja.errors import HttpError
 
 from .shared import (
-    _discount_percent,
     _money_out,
     _shop_or_404_when_strict,
     _validate_country_and_channel,
@@ -471,6 +470,9 @@ def product_suggest(
                 vat_cache[key] = Decimal("0")
         return vat_cache[key]
 
+    from catalog.services.price_history import omnibus_compare, product_prior_nets
+
+    priors = product_prior_nets([p.id for p in ordered], shop_id=shop_id, channel=channel)
     out: list[SuggestItemOut] = []
     for p in ordered:
         product_loc = localize_product(p, language_code=language_code)
@@ -501,9 +503,11 @@ def product_suggest(
             )
             rate = _rate(p)
             price = _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate)
-            discount_percent = _discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
-            if discount_percent is not None:
-                compare_at_price = _money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
+            compare_net, discount_percent = omnibus_compare(
+                list_net=list_net, sale_net=Decimal(sale_net), prior_net=priors.get(p.id)
+            )
+            if compare_net is not None:
+                compare_at_price = _money_out(currency="EUR", unit_net=compare_net, vat_rate=rate)
         out.append(SuggestItemOut(
             id=p.id,
             slug=product_loc["slug"],

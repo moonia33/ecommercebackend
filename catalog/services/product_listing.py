@@ -12,7 +12,8 @@ from catalog.localization import localize_brand, localize_category, localize_pro
 from catalog.api_schemas import ProductListOut
 from catalog.models import Product, ProductFeatureValue, ProductVideo
 from catalog.services.image_out import image_out
-from catalog.services.money import discount_percent, money_out
+from catalog.services.money import money_out
+from catalog.services.price_history import omnibus_compare, product_prior_nets
 from pricing.services import get_vat_rate
 from promotions.services import _MISSING, apply_promo_to_unit_net, load_active_promo_rules
 
@@ -139,6 +140,8 @@ def serialize_products_listing(
                 fv_map.setdefault(int(pid), set()).add(int(fvid))
             promo_ctx["feature_value_ids"] = fv_map
 
+    priors = product_prior_nets([p.id for p in products], shop_id=shop_id, channel=channel)
+
     out: list[ProductListOut] = []
     for p in products:
         product_loc = localize_product(p, language_code=language_code)
@@ -170,10 +173,11 @@ def serialize_products_listing(
             cat_tree=promo_ctx["cat_tree"],
         )
 
-        compare_at_price = None
-        disc_pct = discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
-        if disc_pct is not None:
-            compare_at_price = money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
+        prior_net = priors.get(p.id)
+        compare_net, disc_pct = omnibus_compare(list_net=list_net, sale_net=sale_net, prior_net=prior_net)
+        compare_at_price = (
+            money_out(currency="EUR", unit_net=compare_net, vat_rate=rate) if compare_net is not None else None
+        )
 
         price_to = None
         max_variant_net = getattr(p, "_max_variant_price", None)
@@ -208,6 +212,9 @@ def serialize_products_listing(
                 "price": money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
                 "price_to": price_to,
                 "compare_at_price": compare_at_price,
+                "prior_price": (
+                    money_out(currency="EUR", unit_net=prior_net, vat_rate=rate) if prior_net is not None else None
+                ),
                 "discount_percent": disc_pct,
                 "has_video": p.id in video_product_ids,
                 "labels": labels_for(p),
