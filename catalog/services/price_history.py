@@ -39,8 +39,12 @@ def compute_sale_nets(*, shop_id: int, channel: str) -> dict[int, Decimal]:
     )
     cat_tree: dict = {}
     out: dict[int, Decimal] = {}
+    from catalog.models import Product
+    from catalog.shop_scope import apply_shop_product_scope
+
+    visible = apply_shop_product_scope(qs=Product.objects.filter(is_active=True), shop_id=shop_id)
     base_qs = (
-        Variant.objects.filter(is_active=True, product__is_active=True)
+        Variant.objects.filter(is_active=True, product__in=visible.values("id"))
         .select_related("product")
         .prefetch_related("inventory_items")
         .order_by("id")
