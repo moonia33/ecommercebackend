@@ -176,19 +176,27 @@ def variant_price_rows(variant_ids, *, shop_id: int | None, channel: str) -> dic
 
 def product_prior_nets(product_ids, *, shop_id: int | None, channel: str) -> dict[int, Decimal]:
     """Prekės sąrašo ankstesnė kaina: min per aktyvius variantus, kur variantas be
-    istorijos atstovaujamas dabartine kaina (nuolaidos nuo jo nerodome)."""
+    ankstesnės kainos atstovaujamas dabartine; jei kuris aktyvus variantas dar visai
+    neįrašytas – prekei ankstesnės kainos nėra (nuolaidos nerodome)."""
     if not shop_id or not product_ids:
         return {}
     out: dict[int, Decimal] = {}
-    for pid, net, prior in VariantPriceHistory.objects.filter(
+    seen: set[int] = set()
+    for pid, vid, net, prior in VariantPriceHistory.objects.filter(
         shop_id=shop_id,
         channel=channel,
         valid_to__isnull=True,
         variant__product_id__in=list(product_ids),
         variant__is_active=True,
-    ).values_list("variant__product_id", "unit_net", "prior_unit_net"):
+    ).values_list("variant__product_id", "variant_id", "unit_net", "prior_unit_net"):
+        seen.add(vid)
         floor = prior if prior is not None else net
         out[pid] = min(out.get(pid, floor), floor)
+    for pid, vid in Variant.objects.filter(
+        product_id__in=list(product_ids), is_active=True
+    ).values_list("product_id", "id"):
+        if vid not in seen:
+            out.pop(pid, None)
     return out
 
 
