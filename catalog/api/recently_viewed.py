@@ -217,6 +217,11 @@ def recently_viewed(
                 "price": _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate),
                 "price_to": price_to,
                 "compare_at_price": compare_at_price,
+                "prior_price": (
+                    _money_out(currency="EUR", unit_net=priors[p.id], vat_rate=rate)
+                    if p.id in priors
+                    else None
+                ),
                 "discount_percent": discount_percent,
             }
         )

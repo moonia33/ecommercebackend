@@ -524,6 +524,11 @@ def product_suggest(
             image_url=(img or {}).get("url"),
             price=price,
             compare_at_price=compare_at_price,
+            prior_price=(
+                _money_out(currency="EUR", unit_net=priors[p.id], vat_rate=_rate(p))
+                if p.id in priors and p._min_variant_price is not None
+                else None
+            ),
             discount_percent=discount_percent,
         ))
     return out
