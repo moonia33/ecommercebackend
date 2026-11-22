@@ -471,6 +471,9 @@ def product_suggest(
                 vat_cache[key] = Decimal("0")
         return vat_cache[key]
 
+    from catalog.services.price_history import omnibus_compare, product_prior_nets
+
+    priors = product_prior_nets([p.id for p in ordered], shop_id=shop_id, channel=channel)
     out: list[SuggestItemOut] = []
     for p in ordered:
         product_loc = localize_product(p, language_code=language_code)
@@ -501,9 +504,12 @@ def product_suggest(
             )
             rate = _rate(p)
             price = _money_out(currency="EUR", unit_net=Decimal(sale_net), vat_rate=rate)
-            discount_percent = _discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
-            if discount_percent is not None:
-                compare_at_price = _money_out(currency="EUR", unit_net=list_net, vat_rate=rate)
+            compare_net, discount_percent = omnibus_compare(
+                list_net=list_net, sale_net=Decimal(sale_net), prior_net=priors.get(p.id),
+                pct_fn=_discount_percent,
+            )
+            if compare_net is not None:
+                compare_at_price = _money_out(currency="EUR", unit_net=compare_net, vat_rate=rate)
         out.append(SuggestItemOut(
             id=p.id,
             slug=product_loc["slug"],
@@ -518,6 +524,11 @@ def product_suggest(
             image_url=(img or {}).get("url"),
             price=price,
             compare_at_price=compare_at_price,
+            prior_price=(
+                _money_out(currency="EUR", unit_net=priors[p.id], vat_rate=_rate(p))
+                if p.id in priors and p._min_variant_price is not None
+                else None
+            ),
             discount_percent=discount_percent,
         ))
     return out

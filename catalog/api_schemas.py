@@ -125,6 +125,8 @@ class VariantOut(Schema):
     stock_available: int
     price: MoneyOut
     compare_at_price: MoneyOut | None = None
+    # Omnibus: mažiausia kaina per 30 d. iki dabartinės kainos (null – istorijos nėra).
+    prior_price: MoneyOut | None = None
     offer_id: int | None = None
     offer_label: str = ""
     condition_grade: str = ""
@@ -177,6 +179,8 @@ class ProductListOut(Schema):
     price_to: MoneyOut | None = None
 
     compare_at_price: MoneyOut | None = None
+    # Omnibus: mažiausia kaina per 30 d. iki dabartinės kainos (null – istorijos nėra).
+    prior_price: MoneyOut | None = None
     discount_percent: int | None = None
 
     has_video: bool = False
@@ -328,6 +332,8 @@ class SuggestItemOut(Schema):
     image_url: str | None = None
     price: MoneyOut | None = None
     compare_at_price: MoneyOut | None = None
+    # Omnibus: mažiausia kaina per 30 d. iki dabartinės kainos (null – istorijos nėra).
+    prior_price: MoneyOut | None = None
     discount_percent: int | None = None
 
 

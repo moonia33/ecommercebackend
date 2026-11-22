@@ -19,7 +19,8 @@ from catalog.localization import (
 from catalog.models import InventoryItem, Warehouse
 from catalog.shop_pricing import resolve_shop_variant_price
 from catalog.services.image_out import image_out
-from catalog.services.money import discount_percent, effective_offer_unit_net, money_out
+from catalog.services.money import effective_offer_unit_net, money_out
+from catalog.services.price_history import omnibus_compare, variant_price_rows
 from pricing.services import get_vat_rate
 from promotions.services import apply_promo_to_unit_net, load_active_promo_rules
 from shipping.services import estimate_delivery_window
@@ -79,6 +80,7 @@ def build_product_detail_payload(
     delivery_window_out = None
     best_delivery_min = None
     promo_rules = load_active_promo_rules(channel=channel, shop_id=shop_id)
+    price_rows = variant_price_rows([v.id for v in variants_qs], shop_id=shop_id, channel=channel)
     store_code_list = tuple(getattr(settings, "STORE_WAREHOUSE_CODES", ("default", "local"))) or ("default",)
     store_codes = set(store_code_list)
     # Visi naudojami vietiniai sandėliai rodomi kiekviename variante (ir su 0).
@@ -212,7 +214,10 @@ def build_product_detail_payload(
             rules=promo_rules,
         )
 
-        disc_pct = discount_percent(list_unit_net=list_unit_net, sale_unit_net=sale_unit_net)
+        prior_net = (price_rows.get(v.id) or (None, None))[1]
+        compare_net, disc_pct = omnibus_compare(
+            list_net=list_unit_net, sale_net=sale_unit_net, prior_net=prior_net
+        )
         options = list(v.option_values.select_related("option_type", "option_value").all())
         options.sort(key=lambda r: (r.option_type.sort_order, r.option_type.code))
 
@@ -252,7 +257,8 @@ def build_product_detail_payload(
                 "is_active": bool(v.is_active),
                 "stock_available": int(stock),
                 "price": money_out(currency="EUR", unit_net=sale_unit_net, vat_rate=Decimal(vat_rate)),
-                "compare_at_price": (money_out(currency="EUR", unit_net=list_unit_net, vat_rate=Decimal(vat_rate)) if disc_pct is not None else None),
+                "compare_at_price": (money_out(currency="EUR", unit_net=compare_net, vat_rate=Decimal(vat_rate)) if compare_net is not None else None),
+                "prior_price": (money_out(currency="EUR", unit_net=prior_net, vat_rate=Decimal(vat_rate)) if prior_net is not None else None),
                 "offer_id": (int(best_offer.id) if best_offer else None),
                 "offer_label": (best_offer.offer_label if best_offer else ""),
                 "condition_grade": (best_offer.condition_grade if best_offer else ""),

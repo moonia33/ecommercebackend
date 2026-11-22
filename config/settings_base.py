@@ -457,6 +457,8 @@ DATA_UPLOAD_MAX_NUMBER_FIELDS = env.int(
 # --- Promotions/Coupons policy ---
 COUPON_ALLOWED_CHANNELS = [c.strip().lower() for c in env.list("COUPON_ALLOWED_CHANNELS", default=["normal"]) if c.strip()]
 SHOP_CONTEXT_ENABLED = env.bool("SHOP_CONTEXT_ENABLED", default=True)
+# Omnibus: perbraukta kaina ir nuolaidos % – nuo mažiausios kainos per 30 d. (VariantPriceHistory).
+OMNIBUS_ENFORCE = env.bool("OMNIBUS_ENFORCE", default=False)
 SHOP_CONTEXT_STRICT = env.bool("SHOP_CONTEXT_STRICT", default=False)
 
 # --- Redis / Celery ---

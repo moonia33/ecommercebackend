@@ -291,6 +291,7 @@ def checkout_preview(request, payload: CheckoutPreviewIn):
 
         for it in items:
             _unit, line_total, _compare_at, _disc_pct, _vat_rate = _cart_item_money(
+                omnibus=False,
                 item=it,
                 country_code=country_code,
                 channel=channel,

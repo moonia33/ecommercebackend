@@ -18,6 +18,7 @@ from .features import (
     VariantFeatureValue,
 )
 from .inventory import InventoryAdjustment, InventoryItem, Warehouse
+from .price_history import VariantPriceHistory
 from .pricing_rules import ShopAssortmentRule, ShopPriceList, ShopPriceRule
 from .product import (
     Product,
@@ -76,6 +77,7 @@ __all__ = [
     "ProductFeatureValue",
     "ProductSlugRedirect",
     "VariantFeatureValue",
+    "VariantPriceHistory",
     "ProductGroup",
     "ProductImage",
     "ProductOptionType",

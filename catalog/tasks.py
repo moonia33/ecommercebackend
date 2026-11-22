@@ -374,3 +374,21 @@ def apply_activity_rules_task():
 
     result = apply_activity_rules()
     return {"added": result.added, "removed": result.removed}
+
+
+PRICE_HISTORY_LOCK_KEY = "catalog:record_variant_prices:lock"
+
+
+@shared_task
+def record_variant_prices_task():
+    """Omnibus: galutinių kainų pokyčiai -> VariantPriceHistory (kas 30 min.)."""
+    from django.core.cache import cache
+
+    from .services.price_history import record_all_prices
+
+    if not cache.add(PRICE_HISTORY_LOCK_KEY, 1, 3600):
+        return {"skipped": "locked"}
+    try:
+        return record_all_prices()
+    finally:
+        cache.delete(PRICE_HISTORY_LOCK_KEY)
