@@ -12,6 +12,7 @@ from .shared import (
     ProductListOut,
     RecentlyViewedProduct,
     User,
+    _discount_percent,
     _money_out,
     _shop_or_404_when_strict,
     _validate_country_and_channel,
@@ -167,7 +168,8 @@ def recently_viewed(
 
         compare_at_price = None
         compare_net, discount_percent = omnibus_compare(
-            list_net=list_net, sale_net=Decimal(sale_net), prior_net=priors.get(p.id))
+            list_net=list_net, sale_net=Decimal(sale_net), prior_net=priors.get(p.id),
+            pct_fn=_discount_percent)
         if compare_net is not None:
             compare_at_price = _money_out(
                 currency="EUR", unit_net=compare_net, vat_rate=rate)

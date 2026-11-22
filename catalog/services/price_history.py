@@ -201,13 +201,13 @@ def product_prior_nets(product_ids, *, shop_id: int | None, channel: str) -> dic
 
 
 def omnibus_compare(
-    *, list_net: Decimal, sale_net: Decimal, prior_net: Decimal | None
+    *, list_net: Decimal, sale_net: Decimal, prior_net: Decimal | None, pct_fn=discount_percent
 ) -> tuple[Decimal | None, int | None]:
     """(perbraukta kaina be PVM, nuolaidos %). OMNIBUS_ENFORCE: nuo 30 d. mažiausios kainos."""
     if not getattr(settings, "OMNIBUS_ENFORCE", False):
-        pct = discount_percent(list_unit_net=list_net, sale_unit_net=sale_net)
+        pct = pct_fn(list_unit_net=list_net, sale_unit_net=sale_net)
         return (Decimal(list_net) if pct is not None else None), pct
     if prior_net is None:
         return None, None
-    pct = discount_percent(list_unit_net=prior_net, sale_unit_net=sale_net)
+    pct = pct_fn(list_unit_net=prior_net, sale_unit_net=sale_net)
     return (Decimal(prior_net) if pct is not None else None), pct
