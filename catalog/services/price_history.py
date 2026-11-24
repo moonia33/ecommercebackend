@@ -11,7 +11,7 @@ from django.db.models import Min
 from django.utils import timezone
 
 from catalog.models import InventoryItem, ProductFeatureValue, ShopPriceList, Variant, VariantPriceHistory
-from catalog.services.money import discount_percent, effective_offer_unit_net
+from catalog.services.money import discount_percent, effective_offer_unit_net, price_offer
 from catalog.shop_pricing import resolve_shop_variant_price
 from promotions.services import _MISSING, apply_promo_to_unit_net, load_active_promo_rules
 
@@ -68,20 +68,10 @@ def compute_sale_nets(*, shop_id: int, channel: str) -> dict[int, Decimal]:
                 if has_lists
                 else Decimal(v.price_eur)
             )
-            offers = [
-                ii for ii in v.inventory_items.all()
-                if ii.offer_visibility == visibility and ii.qty_available > 0
-            ]
-            best = None
-            if offers:
-                offers.sort(
-                    key=lambda ii: (
-                        -int(ii.offer_priority or 0),
-                        effective_offer_unit_net(list_unit_net=Decimal(v.price_eur), offer=ii),
-                        int(ii.id),
-                    )
-                )
-                best = offers[0]
+            best = price_offer(
+                (ii for ii in v.inventory_items.all() if ii.offer_visibility == visibility),
+                list_unit_net=Decimal(v.price_eur),
+            )
             base_net = effective_offer_unit_net(list_unit_net=list_net, offer=best) if best else list_net
             is_discounted_offer = bool(
                 best

@@ -101,3 +101,29 @@ class PriceHistoryTests(TestCase):
         # Be OMNIBUS_ENFORCE – kaip anksčiau (nuo list kainos).
         v = self.client.get("/api/v1/catalog/products/rite-ph", HTTP_HOST="ops.local").json()["variants"][0]
         self.assertEqual(v["discount_percent"], 20)
+
+    def test_out_of_stock_keeps_offer_discount(self):
+        self.offer.offer_discount_percent = 30
+        self.offer.qty_on_hand = 0
+        self.offer.save()
+        self._record(self.t0)
+        self.assertEqual(self._open().unit_net, Decimal("70.00"))
+        v = self.client.get("/api/v1/catalog/products/rite-ph", HTTP_HOST="ops.local").json()["variants"][0]
+        self.assertEqual(Decimal(v["price"]["net"]), Decimal("70.00"))
+        self.assertEqual(v["discount_percent"], 30)
+        listing = self.client.get("/api/v1/catalog/products", HTTP_HOST="ops.local").json()["items"]
+        item = next(i for i in listing if i["slug"] == "rite-ph")
+        self.assertEqual(Decimal(item["price"]["net"]), Decimal("70.00"))
+        self.assertEqual(item["discount_percent"], 30)
+
+    def test_in_stock_offer_wins_over_out_of_stock_discount(self):
+        self.offer.offer_discount_percent = 30
+        self.offer.qty_on_hand = 0
+        self.offer.save()
+        store = Warehouse.objects.create(code="ph_store", name="Store", kind="local", country_code="LT", is_active=True)
+        InventoryItem.objects.create(variant=self.variant, warehouse=store, qty_on_hand=2)
+        self._record(self.t0)
+        self.assertEqual(self._open().unit_net, Decimal("100.00"))
+        listing = self.client.get("/api/v1/catalog/products", HTTP_HOST="ops.local").json()["items"]
+        item = next(i for i in listing if i["slug"] == "rite-ph")
+        self.assertEqual(Decimal(item["price"]["net"]), Decimal("100.00"))

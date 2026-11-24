@@ -12,7 +12,7 @@ from catalog.localization import localize_brand, localize_category, localize_pro
 from catalog.api_schemas import ProductListOut
 from catalog.models import Product, ProductFeatureValue, ProductVideo
 from catalog.services.image_out import image_out
-from catalog.services.money import money_out
+from catalog.services.money import money_out, out_of_stock_offer_nets
 from catalog.services.price_history import omnibus_compare, product_prior_nets
 from pricing.services import get_vat_rate
 from promotions.services import _MISSING, apply_promo_to_unit_net, load_active_promo_rules
@@ -141,6 +141,7 @@ def serialize_products_listing(
             promo_ctx["feature_value_ids"] = fv_map
 
     priors = product_prior_nets([p.id for p in products], shop_id=shop_id, channel=channel)
+    oos_nets = out_of_stock_offer_nets(products, channel=channel)
 
     out: list[ProductListOut] = []
     for p in products:
@@ -149,7 +150,10 @@ def serialize_products_listing(
         category_loc = localize_category(p.category, language_code=language_code) if p.category else None
 
         list_net = Decimal(p._min_variant_price if getattr(p, "_min_variant_price", None) is not None else 0)
-        base_net = Decimal(p._min_offer_price) if getattr(p, "_min_offer_price", None) is not None else Decimal(list_net)
+        if getattr(p, "_min_offer_price", None) is not None:
+            base_net = Decimal(p._min_offer_price)
+        else:
+            base_net = oos_nets.get(int(p.id), Decimal(list_net))
         rate = vat_rate_for(p)
 
         is_discounted_offer = bool(base_net and list_net and base_net < list_net)

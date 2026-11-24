@@ -474,6 +474,9 @@ def product_suggest(
     from catalog.services.price_history import omnibus_compare, product_prior_nets
 
     priors = product_prior_nets([p.id for p in ordered], shop_id=shop_id, channel=channel)
+    from catalog.services.money import out_of_stock_offer_nets
+
+    oos_nets = out_of_stock_offer_nets(ordered, channel=channel)
     out: list[SuggestItemOut] = []
     for p in ordered:
         product_loc = localize_product(p, language_code=language_code)
@@ -486,7 +489,9 @@ def product_suggest(
         if p._min_variant_price is not None:
             list_net = Decimal(p._min_variant_price)
             base_net = (
-                Decimal(p._min_offer_price) if p._min_offer_price is not None else list_net
+                Decimal(p._min_offer_price)
+                if p._min_offer_price is not None
+                else oos_nets.get(int(p.id), list_net)
             )
             discounted_offer = bool(base_net and list_net and base_net < list_net)
             sale_net, _rule = apply_promo_to_unit_net(
