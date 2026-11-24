@@ -4,6 +4,7 @@ import logging
 import re
 import time
 import unicodedata
+from decimal import Decimal
 from typing import Iterable
 
 from django.conf import settings
@@ -16,8 +17,9 @@ SEARCH_TIMEOUT_SECONDS = 2
 MAX_IDS = 500  # two 250-hit Typesense pages; browse lists are smaller than this
 
 SORT_MAP = {
-    "price": "price_normal:asc",
-    "-price": "price_normal:desc",
+    # Išparduotos prekės turi price_* (rikiavimui) – likutis visada pirmas.
+    "price": "stock_normal:desc,price_normal:asc",
+    "-price": "stock_normal:desc,price_normal:desc",
     "-created": "created_ts:desc",
     "-created_at": "created_ts:desc",
     "created": "created_ts:asc",
@@ -370,6 +372,7 @@ def product_document(
     """Build the Typesense document for a product; None if not indexable."""
     from catalog.api.shared import _effective_offer_unit_net
     from catalog.models import InventoryItem
+    from catalog.services.money import product_offer_nets
 
     p = product
     if not p.is_active:
@@ -395,6 +398,22 @@ def product_document(
 
     price_normal = _vis_price(InventoryItem.OfferVisibility.NORMAL)
     price_outlet = _vis_price(InventoryItem.OfferVisibility.OUTLET)
+
+    def _sort_price(visibility: str, live_price):
+        # Išparduota prekė: rikiavimui ta pati kaina kaip sąraše (su pasiūlymo nuolaida).
+        if live_price is not None:
+            return live_price
+        rows = [
+            (Decimal(v.price_eur), [ii for ii in v.inventory_items.all() if ii.offer_visibility == visibility])
+            for v in variants
+            if v.price_eur is not None
+        ]
+        if not any(items for _price, items in rows):
+            return None
+        return product_offer_nets(rows)[0]
+
+    sort_normal = _sort_price(InventoryItem.OfferVisibility.NORMAL, price_normal)
+    sort_outlet = _sort_price(InventoryItem.OfferVisibility.OUTLET, price_outlet)
 
     # Only filterable features produce facet keys; spec-only data
     # (e.g. material/fabric composition) still enters search_text.
@@ -510,8 +529,8 @@ def product_document(
         "group_id": int(p.group_id) if p.group_id else None,
         "feature_facets": sorted(feature_facets),
         "option_facets": sorted(option_facets),
-        "price_normal": float(price_normal) if price_normal is not None else None,
-        "price_outlet": float(price_outlet) if price_outlet is not None else None,
+        "price_normal": float(sort_normal) if sort_normal is not None else None,
+        "price_outlet": float(sort_outlet) if sort_outlet is not None else None,
         "vis_normal": price_normal is not None,
         "vis_outlet": price_outlet is not None,
         "stock_normal": 1 if price_normal is not None else 0,
@@ -917,7 +936,7 @@ def browse_products(
     if qv:
         # Tekstinė paieška: explicit sort tik jei SORT_MAP turi atitikmenį
         # (default — Typesense relevance/_text_match, kaip dabar).
-        sort_by = SORT_MAP.get((sort or "").strip().lower(), "")
+        sort_by = SORT_MAP.get((sort or "").strip().lower(), "").replace("_normal:", f"_{ch}:")
         params = {
             "q": qv,
             "query_by": "name,sku,search_text",

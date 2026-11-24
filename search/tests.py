@@ -225,6 +225,17 @@ class SearchTests(TestCase):
         p.save()
         self.assertIsNone(product_document(p))
 
+    def test_document_sold_out_sort_price_keeps_offer_discount(self):
+        p = self._product("X2", "Sold out", stock=0)
+        InventoryItem.objects.create(
+            variant=p.variants.get(), warehouse=self.wh, qty_on_hand=0,
+            offer_discount_percent=50)
+        doc = product_document(p)
+        self.assertFalse(doc["vis_normal"])
+        self.assertEqual(doc["stock_normal"], 0)
+        self.assertEqual(doc["disc_normal"], 0)
+        self.assertEqual(doc["price_normal"], 5.0)
+
     def test_search_ids_order_and_filters(self):
         client = FakeClient(hits=_hits(9, 3, 5))
         with mock.patch(

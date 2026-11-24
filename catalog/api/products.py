@@ -357,7 +357,7 @@ def products(
         range_filter=range)
 
     if not engine_ordered:
-        qs = apply_products_sorting(qs=qs, sort=sort)
+        qs = apply_products_sorting(qs=qs, sort=sort, visibility=visibility)
 
     qs, _selected_category = apply_catalog_filters(
         qs=qs,
@@ -474,9 +474,9 @@ def product_suggest(
     from catalog.services.price_history import omnibus_compare, product_prior_nets
 
     priors = product_prior_nets([p.id for p in ordered], shop_id=shop_id, channel=channel)
-    from catalog.services.money import out_of_stock_offer_nets
+    from catalog.services.money import listing_price_nets
 
-    oos_nets = out_of_stock_offer_nets(ordered, channel=channel)
+    price_nets = listing_price_nets(ordered, channel=channel)
     out: list[SuggestItemOut] = []
     for p in ordered:
         product_loc = localize_product(p, language_code=language_code)
@@ -488,11 +488,7 @@ def product_suggest(
         price = compare_at_price = discount_percent = None
         if p._min_variant_price is not None:
             list_net = Decimal(p._min_variant_price)
-            base_net = (
-                Decimal(p._min_offer_price)
-                if p._min_offer_price is not None
-                else oos_nets.get(int(p.id), list_net)
-            )
+            base_net = price_nets.get(int(p.id), (list_net, list_net))[0]
             discounted_offer = bool(base_net and list_net and base_net < list_net)
             sale_net, _rule = apply_promo_to_unit_net(
                 base_unit_net=base_net,

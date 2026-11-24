@@ -11,8 +11,18 @@ mažiausia kaina per 30 d. iki nuolaidos; nuolaidos % skaičiuojamas nuo jos (ES
 - eilutė kuriama tik pasikeitus kainai; `valid_to=NULL` – dabartinė kaina;
 - `prior_unit_net` – mažiausia kaina per 30 d. iki `valid_from` (fiksuojama kuriant eilutę),
   `NULL` – istorijos nėra;
-- kaina = PDP logika: `resolve_shop_variant_price` → geriausias offer'is su likučiu →
+- kaina = PDP logika: `resolve_shop_variant_price` → geriausias offer'is su likučiu
+  (jei likučio nėra nė viename sandėlyje – geriausias iš visų, `money.price_offer`) →
   `apply_promo_to_unit_net`. B2B / klientų grupių kainos neįtraukiamos.
+
+## Kaina sąrašuose
+
+`money.listing_price_nets` (sąrašai, peržiūrėtos, suggest) – `product_offer_nets` per variantus:
+varianto kaina = pigiausias offer'is su likučiu → jei nėra, pigiausias iš visų sandėlių →
+be offer'io – list kaina. „Nuo“ – iš variantų su likučiu (jei yra), `price_to` – iš visų
+variantų (su nuolaida). Rikiavimas pagal kainą (ORM ir Typesense `price_<ch>`) naudoja tą
+pačią kainą; `vis_*`/`stock_*`/`disc_*` ir `?collection=sale` lieka tik pagal likutį.
+Sąrašai `ShopPriceList` taisyklių netaiko (PDP taiko); prod'e kainoraščių nėra.
 
 Celery beat `catalog.record_variant_prices` (kas 30 min.) perskaičiuoja visų aktyvių
 variantų kainas (`catalog/services/price_history.py::record_all_prices`) – pagauna ir
