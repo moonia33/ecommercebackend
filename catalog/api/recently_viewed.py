@@ -136,9 +136,9 @@ def recently_viewed(
     priors = product_prior_nets(
         [p.id for p in ordered], shop_id=(int(shop.id) if shop else None), channel=channel
     )
-    from catalog.services.money import out_of_stock_offer_nets
+    from catalog.services.money import listing_price_nets
 
-    oos_nets = out_of_stock_offer_nets(ordered, channel=channel)
+    price_nets = listing_price_nets(ordered, channel=channel)
     out: list[ProductListOut] = []
     for p in ordered:
         product_loc = localize_product(p, language_code=language_code)
@@ -147,10 +147,7 @@ def recently_viewed(
 
         list_net = Decimal(p._min_variant_price if getattr(
             p, "_min_variant_price", None) is not None else 0)
-        if getattr(p, "_min_offer_price", None) is not None:
-            base_net = Decimal(p._min_offer_price)
-        else:
-            base_net = oos_nets.get(int(p.id), Decimal(list_net))
+        base_net, to_net = price_nets.get(int(p.id), (list_net, list_net))
         rate = vat_rate_for(p)
 
         is_discounted_offer = bool(
@@ -177,11 +174,9 @@ def recently_viewed(
             compare_at_price = _money_out(
                 currency="EUR", unit_net=compare_net, vat_rate=rate)
 
-        price_to = None
-        max_variant_net = getattr(p, "_max_variant_price", None)
-        if max_variant_net is not None and Decimal(max_variant_net) > list_net:
-            price_to = _money_out(
-                currency="EUR", unit_net=Decimal(max_variant_net), vat_rate=rate)
+        price_to = (
+            _money_out(currency="EUR", unit_net=to_net, vat_rate=rate) if to_net > base_net else None
+        )
 
         imgs = list(p.images.all())
         imgs.sort(key=lambda i: (i.sort_order, i.id))

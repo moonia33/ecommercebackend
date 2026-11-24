@@ -35,6 +35,9 @@ tada `./manage.py reindex_products`.
   `manage.py reindex_products` (prod ~27k prekių ≈ 8 min, ~1 GB RAM).
 - **`badges`** — `string[]` facet (gyvi badge kodai); `?collection=<kodas>`
   kataloge filtruoja `badges:=[kodas]`. Žr. `docs/badges.md`.
+- **`price_<ch>`** – rikiavimo kaina: pigiausias offer'is su likučiu; išparduotai prekei –
+  kaina su offer'io nuolaida iš visų sandėlių (kaip sąraše). `vis_*`/`stock_*`/`disc_*` – tik
+  pagal likutį. Pakeitus skaičiavimą – `manage.py reindex_products`.
 - **Importo klaidos loguojamos** — `import_` per-document `success`
   tikrinamas; anksčiau reject'ai buvo nurisami tyliai.
 

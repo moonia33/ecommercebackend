@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Case, DecimalField, F, IntegerField, Q, Sum, Value, When
+from django.db.models import (
+    Case, DecimalField, ExpressionWrapper, F, IntegerField, OuterRef, Q, Subquery, Sum, Value, When,
+)
 from django.utils import timezone
 from django.db.models.functions import Coalesce
 from ninja.errors import HttpError
@@ -12,7 +14,7 @@ from catalog.localization import localize_brand, localize_category, localize_pro
 from catalog.api_schemas import ProductListOut
 from catalog.models import Product, ProductFeatureValue, ProductVideo
 from catalog.services.image_out import image_out
-from catalog.services.money import money_out, out_of_stock_offer_nets
+from catalog.services.money import listing_price_nets, money_out
 from catalog.services.price_history import omnibus_compare, product_prior_nets
 from pricing.services import get_vat_rate
 from promotions.services import _MISSING, apply_promo_to_unit_net, load_active_promo_rules
@@ -29,10 +31,39 @@ def _rules_need_feature_ctx(rules: list) -> bool:
     return False
 
 
-def apply_products_sorting(*, qs, sort: str | None):
+def _sold_out_offer_price(visibility: str):
+    """Pigiausia pasiūlymo kaina be likučio filtro – išparduotų prekių rikiavimui pagal kainą."""
+    from catalog.models import InventoryItem
+
+    net = Case(
+        When(never_discount=True, then=F("variant__price_eur")),
+        When(offer_price_override_eur__isnull=False, then=F("offer_price_override_eur")),
+        When(
+            offer_discount_percent__isnull=False,
+            then=ExpressionWrapper(
+                F("variant__price_eur") * (Value(100) - F("offer_discount_percent")) / Value(100),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
+        ),
+        default=F("variant__price_eur"),
+        output_field=DecimalField(max_digits=12, decimal_places=2),
+    )
+    return Subquery(
+        InventoryItem.objects.filter(
+            variant__product_id=OuterRef("pk"), variant__is_active=True, offer_visibility=visibility
+        )
+        .annotate(_net=net)
+        .order_by("_net")
+        .values("_net")[:1]
+    )
+
+
+def apply_products_sorting(*, qs, sort: str | None, visibility: str = "NORMAL"):
     sort_v = (sort or "").strip().lower()
     if sort_v in {"price", "-price"}:
-        qs = qs.annotate(_sort_price=Coalesce("_min_offer_price", "_min_variant_price"))
+        qs = qs.annotate(
+            _sort_price=Coalesce("_min_offer_price", _sold_out_offer_price(visibility), "_min_variant_price")
+        )
         return (
             qs.order_by("-_has_stock", "_sort_price", "name", "id")
             if sort_v == "price"
@@ -141,7 +172,7 @@ def serialize_products_listing(
             promo_ctx["feature_value_ids"] = fv_map
 
     priors = product_prior_nets([p.id for p in products], shop_id=shop_id, channel=channel)
-    oos_nets = out_of_stock_offer_nets(products, channel=channel)
+    price_nets = listing_price_nets(products, channel=channel)
 
     out: list[ProductListOut] = []
     for p in products:
@@ -150,10 +181,7 @@ def serialize_products_listing(
         category_loc = localize_category(p.category, language_code=language_code) if p.category else None
 
         list_net = Decimal(p._min_variant_price if getattr(p, "_min_variant_price", None) is not None else 0)
-        if getattr(p, "_min_offer_price", None) is not None:
-            base_net = Decimal(p._min_offer_price)
-        else:
-            base_net = oos_nets.get(int(p.id), Decimal(list_net))
+        base_net, to_net = price_nets.get(int(p.id), (list_net, list_net))
         rate = vat_rate_for(p)
 
         is_discounted_offer = bool(base_net and list_net and base_net < list_net)
@@ -183,12 +211,7 @@ def serialize_products_listing(
             money_out(currency="EUR", unit_net=compare_net, vat_rate=rate) if compare_net is not None else None
         )
 
-        price_to = None
-        max_variant_net = getattr(p, "_max_variant_price", None)
-        if max_variant_net is not None and Decimal(max_variant_net) > list_net:
-            price_to = money_out(
-                currency="EUR", unit_net=Decimal(max_variant_net), vat_rate=rate
-            )
+        price_to = money_out(currency="EUR", unit_net=to_net, vat_rate=rate) if to_net > base_net else None
 
         imgs = list(p.images.all())
         imgs.sort(key=lambda i: (i.sort_order, i.id))
