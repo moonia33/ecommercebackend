@@ -160,3 +160,16 @@ class PriceHistoryTests(TestCase):
         listing = self.client.get("/api/v1/catalog/products?sort=price", HTTP_HOST="ops.local").json()["items"]
         slugs = [i["slug"] for i in listing if i["slug"] in {"rite-ph", "kita-ph"}]
         self.assertEqual(slugs, ["rite-ph", "kita-ph"])
+
+    def test_price_sort_sold_out_counts_variant_without_offer(self):
+        self.offer.qty_on_hand = 0
+        self.offer.save()
+        Variant.objects.create(product=self.product, sku="V-PH4", name="1", price_eur="20.00", is_active=True)
+        other = Product.objects.create(
+            sku="P-PH3", name="Kita", slug="kita3-ph", tax_class=self.product.tax_class,
+            category=self.product.category, is_active=True)
+        ov = Variant.objects.create(product=other, sku="V-K3", name="1", price_eur="50.00", is_active=True)
+        InventoryItem.objects.create(variant=ov, warehouse=self.offer.warehouse, qty_on_hand=0)
+        listing = self.client.get("/api/v1/catalog/products?sort=price", HTTP_HOST="ops.local").json()["items"]
+        slugs = [i["slug"] for i in listing if i["slug"] in {"rite-ph", "kita3-ph"}]
+        self.assertEqual(slugs, ["rite-ph", "kita3-ph"])

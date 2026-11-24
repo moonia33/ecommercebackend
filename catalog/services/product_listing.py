@@ -7,12 +7,12 @@ from django.db.models import (
     Case, DecimalField, ExpressionWrapper, F, IntegerField, OuterRef, Q, Subquery, Sum, Value, When,
 )
 from django.utils import timezone
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, Least
 from ninja.errors import HttpError
 
 from catalog.localization import localize_brand, localize_category, localize_product
 from catalog.api_schemas import ProductListOut
-from catalog.models import Product, ProductFeatureValue, ProductVideo
+from catalog.models import Product, ProductFeatureValue, ProductVideo, Variant
 from catalog.services.image_out import image_out
 from catalog.services.money import listing_price_nets, money_out
 from catalog.services.price_history import omnibus_compare, product_prior_nets
@@ -48,7 +48,7 @@ def _sold_out_offer_price(visibility: str):
         default=F("variant__price_eur"),
         output_field=DecimalField(max_digits=12, decimal_places=2),
     )
-    return Subquery(
+    offer_net = Subquery(
         InventoryItem.objects.filter(
             variant__product_id=OuterRef("pk"), variant__is_active=True, offer_visibility=visibility
         )
@@ -56,6 +56,14 @@ def _sold_out_offer_price(visibility: str):
         .order_by("_net")
         .values("_net")[:1]
     )
+    # Variantas be kanalo pasiūlymo – kaip sąraše, jo list kaina (Postgres LEAST praleidžia NULL).
+    no_offer_net = Subquery(
+        Variant.objects.filter(product_id=OuterRef("pk"), is_active=True, price_eur__isnull=False)
+        .exclude(inventory_items__offer_visibility=visibility)
+        .order_by("price_eur")
+        .values("price_eur")[:1]
+    )
+    return Least(offer_net, no_offer_net)
 
 
 def apply_products_sorting(*, qs, sort: str | None, visibility: str = "NORMAL"):
