@@ -48,18 +48,16 @@ def price_offer(offers, *, list_unit_net: Decimal):
 def product_offer_nets(variant_rows) -> tuple[Decimal, Decimal] | None:
     """Prekės kaina „nuo–iki“ kaip PDP: `variant_rows` – [(list_net, kanalo pasiūlymai)].
 
-    Varianto kaina – pigiausias pasiūlymas su likučiu, jei likučio nėra – pigiausias iš visų
-    sandėlių, be pasiūlymų – list kaina. „Nuo“ – iš variantų su likučiu (jei tokių yra),
+    Varianto kaina – `price_offer` (prioritetas, tada kaina; su likučiu, jei likučio nėra – iš visų
+    sandėlių), be pasiūlymų – list kaina. „Nuo“ – iš variantų su likučiu (jei tokių yra),
     „iki“ – iš visų variantų."""
     in_stock: list[Decimal] = []
     nets: list[Decimal] = []
     for list_net, items in variant_rows:
         items = list(items)
         live = [ii for ii in items if ii.qty_available > 0]
-        net = min(
-            (effective_offer_unit_net(list_unit_net=list_net, offer=ii) for ii in (live or items)),
-            default=Decimal(list_net),
-        )
+        offer = price_offer(items, list_unit_net=list_net)
+        net = effective_offer_unit_net(list_unit_net=list_net, offer=offer) if offer else Decimal(list_net)
         nets.append(net)
         if live:
             in_stock.append(net)
@@ -85,7 +83,7 @@ def listing_price_nets(products, *, channel: str) -> dict[int, tuple[Decimal, De
         ).values_list("id", "product_id", "price_eur")
     }
     rows = InventoryItem.objects.filter(variant_id__in=variants, offer_visibility=visibility).only(
-        "variant_id", "qty_on_hand", "qty_reserved", "never_discount",
+        "id", "variant_id", "qty_on_hand", "qty_reserved", "never_discount", "offer_priority",
         "offer_price_override_eur", "offer_discount_percent",
     )
     for ii in rows:
