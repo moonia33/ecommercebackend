@@ -48,7 +48,7 @@ def price_offer(offers, *, list_unit_net: Decimal):
 def out_of_stock_offer_nets(products, *, channel: str) -> dict[int, Decimal]:
     """Sąrašams: prekėms be likučio (`_min_offer_price` None) – pigiausia pasiūlymo kaina
     iš visų sandėlių (be likučio), kaip `offer_price_exprs`, tik be likučio filtro."""
-    from catalog.models import InventoryItem
+    from catalog.models import InventoryItem, Variant
 
     ids = [
         int(p.id)
@@ -60,20 +60,26 @@ def out_of_stock_offer_nets(products, *, channel: str) -> dict[int, Decimal]:
     visibility = (
         InventoryItem.OfferVisibility.OUTLET if channel == "outlet" else InventoryItem.OfferVisibility.NORMAL
     )
-    out: dict[int, Decimal] = {}
+    # Variant'as be pasiūlymo šiame kanale – PDP rodo jo list kainą, todėl ir sąraše ji skaičiuojama.
+    variant_nets: dict[int, tuple[int, Decimal]] = {
+        int(vid): (int(pid), Decimal(price))
+        for vid, pid, price in Variant.objects.filter(product_id__in=ids, is_active=True).values_list(
+            "id", "product_id", "price_eur"
+        )
+    }
+    offer_nets: dict[int, Decimal] = {}
     rows = (
-        InventoryItem.objects.filter(
-            variant__product_id__in=ids, variant__is_active=True, offer_visibility=visibility
-        )
-        .select_related("variant")
-        .only(
-            "never_discount", "offer_price_override_eur", "offer_discount_percent",
-            "variant__product_id", "variant__price_eur",
-        )
+        InventoryItem.objects.filter(variant_id__in=variant_nets, offer_visibility=visibility)
+        .only("variant_id", "never_discount", "offer_price_override_eur", "offer_discount_percent")
     )
     for ii in rows:
-        net = effective_offer_unit_net(list_unit_net=Decimal(ii.variant.price_eur), offer=ii)
-        pid = int(ii.variant.product_id)
+        vid = int(ii.variant_id)
+        net = effective_offer_unit_net(list_unit_net=variant_nets[vid][1], offer=ii)
+        if vid not in offer_nets or net < offer_nets[vid]:
+            offer_nets[vid] = net
+    out: dict[int, Decimal] = {}
+    for vid, (pid, price) in variant_nets.items():
+        net = offer_nets.get(vid, price)
         if pid not in out or net < out[pid]:
             out[pid] = net
     return out

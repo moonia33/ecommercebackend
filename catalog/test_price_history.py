@@ -127,3 +127,12 @@ class PriceHistoryTests(TestCase):
         listing = self.client.get("/api/v1/catalog/products", HTTP_HOST="ops.local").json()["items"]
         item = next(i for i in listing if i["slug"] == "rite-ph")
         self.assertEqual(Decimal(item["price"]["net"]), Decimal("100.00"))
+
+    def test_out_of_stock_listing_counts_variant_without_offer(self):
+        self.offer.offer_discount_percent = 10
+        self.offer.qty_on_hand = 0
+        self.offer.save()
+        Variant.objects.create(product=self.product, sku="V-PH2", name="1000", price_eur="60.00", is_active=True)
+        listing = self.client.get("/api/v1/catalog/products", HTTP_HOST="ops.local").json()["items"]
+        item = next(i for i in listing if i["slug"] == "rite-ph")
+        self.assertEqual(Decimal(item["price"]["net"]), Decimal("60.00"))
