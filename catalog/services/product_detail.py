@@ -19,7 +19,7 @@ from catalog.localization import (
 from catalog.models import InventoryItem, Warehouse
 from catalog.shop_pricing import resolve_shop_variant_price
 from catalog.services.image_out import image_out
-from catalog.services.money import effective_offer_unit_net, money_out
+from catalog.services.money import effective_offer_unit_net, money_out, price_offer
 from catalog.services.price_history import omnibus_compare, variant_price_rows
 from pricing.services import get_vat_rate
 from promotions.services import apply_promo_to_unit_net, load_active_promo_rules
@@ -193,12 +193,17 @@ def build_product_detail_payload(
             customer_group_id=None,
         )
         list_unit_net = Decimal(price_res.unit_net)
-        base_unit_net = effective_offer_unit_net(list_unit_net=list_unit_net, offer=best_offer) if best_offer else list_unit_net
+        pricing_offer = best_offer or price_offer(inv, list_unit_net=Decimal(v.price_eur))
+        base_unit_net = (
+            effective_offer_unit_net(list_unit_net=list_unit_net, offer=pricing_offer)
+            if pricing_offer
+            else list_unit_net
+        )
 
         is_discounted_offer = bool(
-            best_offer
-            and (not bool(getattr(best_offer, "never_discount", False)))
-            and (best_offer.offer_price_override_eur is not None or best_offer.offer_discount_percent is not None)
+            pricing_offer
+            and (not bool(getattr(pricing_offer, "never_discount", False)))
+            and (pricing_offer.offer_price_override_eur is not None or pricing_offer.offer_discount_percent is not None)
         )
 
         sale_unit_net, _rule = apply_promo_to_unit_net(
@@ -209,7 +214,7 @@ def build_product_detail_payload(
             product_id=product.id,
             variant_id=v.id,
             customer_group_id=None,
-            allow_additional_promotions=bool(getattr(best_offer, "allow_additional_promotions", False)) if best_offer else False,
+            allow_additional_promotions=bool(getattr(pricing_offer, "allow_additional_promotions", False)) if pricing_offer else False,
             is_discounted_offer=is_discounted_offer,
             rules=promo_rules,
         )

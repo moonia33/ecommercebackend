@@ -136,6 +136,9 @@ def recently_viewed(
     priors = product_prior_nets(
         [p.id for p in ordered], shop_id=(int(shop.id) if shop else None), channel=channel
     )
+    from catalog.services.money import out_of_stock_offer_nets
+
+    oos_nets = out_of_stock_offer_nets(ordered, channel=channel)
     out: list[ProductListOut] = []
     for p in ordered:
         product_loc = localize_product(p, language_code=language_code)
@@ -147,7 +150,7 @@ def recently_viewed(
         if getattr(p, "_min_offer_price", None) is not None:
             base_net = Decimal(p._min_offer_price)
         else:
-            base_net = Decimal(list_net)
+            base_net = oos_nets.get(int(p.id), Decimal(list_net))
         rate = vat_rate_for(p)
 
         is_discounted_offer = bool(
