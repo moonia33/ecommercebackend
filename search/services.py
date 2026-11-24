@@ -17,8 +17,9 @@ SEARCH_TIMEOUT_SECONDS = 2
 MAX_IDS = 500  # two 250-hit Typesense pages; browse lists are smaller than this
 
 SORT_MAP = {
-    "price": "price_normal:asc",
-    "-price": "price_normal:desc",
+    # Išparduotos prekės turi price_* (rikiavimui) – likutis visada pirmas.
+    "price": "stock_normal:desc,price_normal:asc",
+    "-price": "stock_normal:desc,price_normal:desc",
     "-created": "created_ts:desc",
     "-created_at": "created_ts:desc",
     "created": "created_ts:asc",
@@ -935,7 +936,7 @@ def browse_products(
     if qv:
         # Tekstinė paieška: explicit sort tik jei SORT_MAP turi atitikmenį
         # (default — Typesense relevance/_text_match, kaip dabar).
-        sort_by = SORT_MAP.get((sort or "").strip().lower(), "")
+        sort_by = SORT_MAP.get((sort or "").strip().lower(), "").replace("_normal:", f"_{ch}:")
         params = {
             "q": qv,
             "query_by": "name,sku,search_text",
